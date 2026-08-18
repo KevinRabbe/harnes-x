@@ -39,7 +39,7 @@ class ReasoningSwapOutcome(BaseModel):
     action_proposed: bool
     tool_succeeded: bool
     verification_accepted: bool
-    proposal_unverified_model_provenance: bool
+    proposal_provenance_valid: bool
     replay_valid: bool
     private_reasoning_recorded: bool
     trace_events: int = Field(ge=0)
@@ -50,7 +50,7 @@ class ReasoningSwapOutcome(BaseModel):
             self.action_proposed
             and self.tool_succeeded
             and self.verification_accepted
-            and self.proposal_unverified_model_provenance
+            and self.proposal_provenance_valid
             and self.replay_valid
             and not self.private_reasoning_recorded
         )
@@ -139,9 +139,10 @@ def _run_core(
     result = ReasoningService(runtime.recorder, core).invoke(request)
     action = result.actions[0] if len(result.actions) == 1 else None
     proposed = action is not None
+    expected_source = SourceKind.MODEL if core.info.model_inference else SourceKind.SYSTEM
     provenance_ok = bool(
         action is not None
-        and action.provenance.source_kind == SourceKind.MODEL
+        and action.provenance.source_kind == expected_source
         and action.provenance.verification == VerificationState.UNVERIFIED
     )
 
@@ -203,7 +204,7 @@ def _run_core(
         action_proposed=proposed,
         tool_succeeded=tool_succeeded,
         verification_accepted=accepted,
-        proposal_unverified_model_provenance=provenance_ok,
+        proposal_provenance_valid=provenance_ok,
         replay_valid=replay_valid,
         private_reasoning_recorded=private_reasoning_recorded,
         trace_events=len(events),
