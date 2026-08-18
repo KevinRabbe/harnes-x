@@ -17,6 +17,9 @@ class ErrorCode(StrEnum):
     PERMISSION_DENIED = "permission_denied"
     INVALID_TRANSITION = "invalid_transition"
     CHECKPOINT_CORRUPT = "checkpoint_corrupt"
+    MEMORY_NOT_FOUND = "memory_not_found"
+    MEMORY_CAPACITY = "memory_capacity"
+    INVALID_GOAL_TRANSITION = "invalid_goal_transition"
     INVARIANT_VIOLATION = "invariant_violation"
     INTERNAL = "internal"
 
@@ -84,3 +87,19 @@ class BudgetExhaustedError(OrchestratorError):
 
 class CheckpointError(OrchestratorError):
     """A checkpoint cannot be written, loaded, or trusted."""
+
+
+class MemorySubsystemError(HarnessError):
+    """Base error for software-owned memory operations."""
+
+
+class MemoryNotFoundError(MemorySubsystemError):
+    """A requested memory or goal record does not exist."""
+
+
+class MemoryCapacityError(MemorySubsystemError):
+    """Working-state capacity cannot satisfy a requested write safely."""
+
+
+class GoalTransitionError(MemorySubsystemError):
+    """A requested goal lifecycle transition is not legal."""
