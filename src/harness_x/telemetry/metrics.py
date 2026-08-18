@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from harness_x.core.events import EventType, TraceEvent
-from harness_x.memory import ErrorBuffer, SemanticMemory, WorkingState
+from harness_x.memory import ErrorBuffer, ErrorStatus, SemanticMemory, WorkingState
 from harness_x.orchestrator import OperatingMode
 
 
@@ -48,6 +47,7 @@ def derive_runtime_metrics(
     errors: ErrorBuffer,
     semantic: SemanticMemory,
 ) -> RuntimeMetrics:
+    """Derive metrics without emitting new trace events or mutating owners."""
     materialized = list(events)
     retrievals = [
         event
@@ -83,11 +83,13 @@ def derive_runtime_metrics(
     verifier_rejections = sum(
         event.metadata.get("accepted") is False for event in verifier_events
     )
-    unresolved = errors.unresolved()
+    unresolved = tuple(
+        record
+        for record in errors.all()
+        if record.status in {ErrorStatus.OPEN, ErrorStatus.INVESTIGATING}
+    )
     current_step = materialized[-1].step if materialized else 0
-    source_steps = {
-        str(event.event_id): event.step for event in materialized
-    }
+    source_steps = {str(event.event_id): event.step for event in materialized}
     ages = [
         max(0, current_step - source_steps.get(str(record.source_event_id), current_step))
         for record in unresolved
