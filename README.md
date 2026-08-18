@@ -12,9 +12,20 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Planning / architecture stage.**
+**Milestone 0 — contract foundation implemented.**
 
-The repository currently defines the intended architecture and implementation sequence. No production implementation should be assumed from the documentation yet.
+The first implementation establishes the Python package, typed IDs and contracts, provenance, external compute budgets, explicit clock abstraction, configuration loading, CLI, tests, and clean-checkout CI. There is deliberately **no model runtime dependency yet**.
+
+The next planned milestone is the event spine, trace ledger, and replay foundation.
+
+## Getting started
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+harness-x --help
+harness-x validate-config configs/default.yaml
+```
 
 ## Core idea
 
@@ -108,19 +119,7 @@ observe failures
     -> retain rollback path
 ```
 
-Possible early improvement targets include:
-
-- retrieval policies;
-- memory schemas;
-- consolidation routines;
-- gate thresholds;
-- planning and debugging routines;
-- context construction;
-- tool selection;
-- verification strategies;
-- scheduling policies;
-- experiment design;
-- controller models.
+Possible early improvement targets include retrieval policies, memory schemas, consolidation routines, gate thresholds, planning/debugging routines, context construction, tool selection, verification strategies, scheduling policies, experiment design, and controller models.
 
 Changing the main reasoning weights is deliberately **not** required for these loops.
 
