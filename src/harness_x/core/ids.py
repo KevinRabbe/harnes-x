@@ -60,6 +60,10 @@ class CandidateId(Identifier):
     prefix = "candidate"
 
 
+class EventId(Identifier):
+    prefix = "event"
+
+
 class SystemVersion(BaseModel):
     """Version of the complete running Harness X system, not only the model."""
 

@@ -50,3 +50,19 @@ class Result(BaseModel, Generic[T]):
 
 class HarnessError(RuntimeError):
     """Base exception for programmer/invariant failures."""
+
+
+class TraceError(HarnessError):
+    """Invalid trace operation or ordering."""
+
+
+class TraceCorruptionError(TraceError):
+    """Trace ledger contents fail structural or integrity validation."""
+
+
+class ReplayError(HarnessError):
+    """An event sequence cannot be replayed into valid authoritative state."""
+
+
+class ReplayMismatchError(ReplayError):
+    """Replay completed but does not match the recorded expected final state."""
