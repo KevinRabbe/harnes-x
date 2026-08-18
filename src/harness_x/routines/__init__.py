@@ -24,6 +24,12 @@ from .scripted import (
     VerificationRoutineRequest,
     build_scripted_routine_engine,
 )
+from .tool_task import (
+    ToolAwareScriptedReasoningStub,
+    ToolTaskRoutine,
+    ToolTaskRoutineRequest,
+    build_tool_routine_engine,
+)
 
 __all__ = [
     "ConsolidationRoutine",
@@ -42,8 +48,12 @@ __all__ = [
     "ScriptedRoutine",
     "TaskRoutine",
     "TaskRoutineRequest",
+    "ToolAwareScriptedReasoningStub",
+    "ToolTaskRoutine",
+    "ToolTaskRoutineRequest",
     "VerificationRoutine",
     "VerificationRoutineRequest",
     "build_scripted_routine_engine",
+    "build_tool_routine_engine",
     "routine_request_fingerprint",
 ]

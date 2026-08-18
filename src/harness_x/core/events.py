@@ -27,6 +27,8 @@ class EventType(StrEnum):
     ROUTINE_STARTED = "routine_started"
     ROUTINE_FINISHED = "routine_finished"
     ACTION_PROPOSED = "action_proposed"
+    TOOL_PERMISSION_CHECKED = "tool_permission_checked"
+    TOOL_EXECUTION_FINISHED = "tool_execution_finished"
     ACTION_EXECUTED = "action_executed"
     OBSERVATION_RECEIVED = "observation_received"
     VERIFICATION_COMPLETED = "verification_completed"

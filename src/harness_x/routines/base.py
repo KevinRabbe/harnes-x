@@ -16,6 +16,7 @@ from harness_x.core.ids import RoutineId
 from harness_x.gates import ComputeGate, FocusGate, MaintenanceGate, RetrievalGate, WriteGate
 from harness_x.memory import EpisodicMemory, ErrorBuffer, GoalMemory, MemoryClass, WorkingState
 from harness_x.orchestrator import OperatingMode, TaskOrchestrator
+from harness_x.tools import ToolExecutor
 
 if TYPE_CHECKING:
     from .engine import RoutineEngine
@@ -96,6 +97,8 @@ class RoutineBindings:
     compute_gate: ComputeGate
     maintenance_gate: MaintenanceGate
     reasoning_stub: "ScriptedReasoningStub"
+    tool_executor: ToolExecutor | None = None
+    tool_permissions: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         recorders = {
@@ -110,8 +113,15 @@ class RoutineBindings:
             id(self.compute_gate.recorder),
             id(self.maintenance_gate.recorder),
         }
+        if self.tool_executor is not None:
+            recorders.add(id(self.tool_executor.recorder))
         if len(recorders) != 1:
             raise RoutineError("routine bindings must share one TraceRecorder")
+        if (
+            self.tool_executor is not None
+            and self.tool_executor.orchestrator is not self.orchestrator
+        ):
+            raise RoutineError("routine bindings must share one authoritative orchestrator")
 
 
 def routine_request_fingerprint(request: BaseModel) -> str:
@@ -156,6 +166,16 @@ class RoutineExecutionContext:
             raise RoutineError(
                 f"routine {self.spec.name} may not use undeclared tool {tool_name!r}"
             )
+
+    def execute_tool(self, proposal):
+        self.require_tool(proposal.tool_name)
+        if self.bindings.tool_executor is None:
+            raise RoutineError("tool-backed routine requires a ToolExecutor")
+        return self.bindings.tool_executor.execute(
+            proposal,
+            routine_allowed_tools=self.spec.allowed_tools,
+            granted_permissions=self.bindings.tool_permissions,
+        )
 
     def invoke(self, routine_name: str, request: BaseModel) -> RoutineExecution:
         return self.engine.execute(routine_name, request)
