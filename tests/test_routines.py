@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from harness_x.config import load_config
-from harness_x.core import FixedClock, GoalId, MemoryId, SystemVersion, TaskId, TraceId
+from harness_x.core import CandidateId, FixedClock, GoalId, MemoryId, SystemVersion, TaskId, TraceId
 from harness_x.core.contracts import Observation
 from harness_x.core.events import EventType
 from harness_x.core.provenance import Provenance, SourceKind, VerificationState
@@ -286,9 +286,7 @@ def test_routine_preconditions_are_enforced_before_trace_start(tmp_path) -> None
         engine.execute(
             "verification",
             VerificationRoutineRequest(
-                candidate_id=__import__(
-                    "harness_x.core.ids", fromlist=["CandidateId"]
-                ).CandidateId(value="candidate_precondition"),
+                candidate_id=CandidateId(value="candidate_precondition"),
                 actual={"ok": True},
                 expected={"ok": True},
                 provenance=provenance,
