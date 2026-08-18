@@ -3,9 +3,13 @@
 from .clock import Clock, FixedClock, SystemClock
 from .contracts import ActionProposal, ComputeBudget, Observation, Proposal, VerificationResult
 from .errors import (
+    BudgetExhaustedError,
+    CheckpointError,
     ErrorCode,
     HarnessError,
+    InvalidTransitionError,
     OperationError,
+    OrchestratorError,
     ReplayError,
     ReplayMismatchError,
     Result,
@@ -18,7 +22,9 @@ from .provenance import Provenance, SourceKind, VerificationState
 
 __all__ = [
     "ActionProposal",
+    "BudgetExhaustedError",
     "CandidateId",
+    "CheckpointError",
     "Clock",
     "ComputeBudget",
     "EVENT_SCHEMA_VERSION",
@@ -28,9 +34,11 @@ __all__ = [
     "FixedClock",
     "GoalId",
     "HarnessError",
+    "InvalidTransitionError",
     "MemoryId",
     "Observation",
     "OperationError",
+    "OrchestratorError",
     "Proposal",
     "Provenance",
     "ReplayError",

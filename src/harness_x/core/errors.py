@@ -15,6 +15,8 @@ class ErrorCode(StrEnum):
     CONFIGURATION = "configuration"
     BUDGET_EXHAUSTED = "budget_exhausted"
     PERMISSION_DENIED = "permission_denied"
+    INVALID_TRANSITION = "invalid_transition"
+    CHECKPOINT_CORRUPT = "checkpoint_corrupt"
     INVARIANT_VIOLATION = "invariant_violation"
     INTERNAL = "internal"
 
@@ -66,3 +68,19 @@ class ReplayError(HarnessError):
 
 class ReplayMismatchError(ReplayError):
     """Replay completed but does not match the recorded expected final state."""
+
+
+class OrchestratorError(HarnessError):
+    """Base error for authoritative task lifecycle failures."""
+
+
+class InvalidTransitionError(OrchestratorError):
+    """A requested operating-mode transition is not legal."""
+
+
+class BudgetExhaustedError(OrchestratorError):
+    """A requested resource increment would exceed the external budget."""
+
+
+class CheckpointError(OrchestratorError):
+    """A checkpoint cannot be written, loaded, or trusted."""
