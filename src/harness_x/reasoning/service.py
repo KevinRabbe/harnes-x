@@ -122,7 +122,7 @@ class ReasoningService:
         info = self.core.info
         core_identity = f"{info.name}:{info.version}:{info.model}:{info.transport}"
         provenance = Provenance(
-            source_kind=SourceKind.MODEL,
+            source_kind=(SourceKind.MODEL if info.model_inference else SourceKind.SYSTEM),
             source_ref=f"reasoning:{core_identity}",
             created_at=self.recorder.clock.now(),
             system_version=self.recorder.system_version,
