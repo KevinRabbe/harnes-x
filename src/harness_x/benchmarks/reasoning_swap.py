@@ -21,7 +21,8 @@ from harness_x.reasoning import (
     StubReasoningCore,
 )
 from harness_x.routines import VerificationRoutineRequest
-from harness_x.telemetry import SelfSchemaBuilder, TraceReplayer
+from harness_x.telemetry import TraceReplayer
+from harness_x.telemetry.self_schema import SelfSchemaBuilder
 
 from .runtime import BenchmarkRuntime
 
