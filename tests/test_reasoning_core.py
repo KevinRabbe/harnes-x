@@ -94,6 +94,13 @@ def _request() -> ReasoningRequest:
             "system_version": "test-v1",
             "operating_mode": "task_active",
             "state_fingerprint": "a" * 64,
+            "reasoning_core": {
+                "name": "fixture",
+                "version": "fixture-v1",
+                "model": "fixture-model",
+                "transport": "fixture",
+                "model_inference": True,
+            },
             "known_limitations": ["fixture"],
             "large_detail": "s" * 3000,
         },
@@ -125,6 +132,7 @@ def test_context_builder_is_deterministic_bounded_and_preserves_governing_state(
     assert first.payload["sections"]["active_goal"]["authority"] == "authoritative"
     assert first.payload["sections"]["compute_budget"]["authority"] == "externally_enforced"
     assert "Compute the requested value" in first.serialized
+    assert "fixture-model" in first.serialized
 
 
 def test_remote_reasoning_endpoint_is_disabled_by_default() -> None:
@@ -198,7 +206,7 @@ def test_adapter_rejects_model_attempt_to_mint_candidate_identity() -> None:
 
 
 def test_same_architecture_runs_stub_and_http_reasoning_core(tmp_path) -> None:
-    server, _ = _server(
+    server, handler = _server(
         {
             "status": "continue",
             "actions": [
@@ -235,3 +243,7 @@ def test_same_architecture_runs_stub_and_http_reasoning_core(tmp_path) -> None:
     assert report.real.proposal_unverified_model_provenance
     assert not report.stub.private_reasoning_recorded
     assert not report.real.private_reasoning_recorded
+    assert handler.received_requests
+    model_context = handler.received_requests[0]["messages"][1]["content"]
+    assert '"reasoning_core"' in model_context
+    assert "fixture-local-model" in model_context
