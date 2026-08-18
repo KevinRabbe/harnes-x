@@ -12,11 +12,15 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestone 0 — contract foundation implemented.**
+**Milestones 0–2 implemented on the current development stack.**
 
-The first implementation establishes the Python package, typed IDs and contracts, provenance, external compute budgets, explicit clock abstraction, configuration loading, CLI, tests, and clean-checkout CI. There is deliberately **no model runtime dependency yet**.
+The implementation now contains:
 
-The next planned milestone is the event spine, trace ledger, and replay foundation.
+- the typed Python package, IDs/contracts, provenance, external compute budgets, explicit clock abstraction, configuration, CLI, tests, and CI;
+- a structured causal event spine, append-only hash-chained trace ledger, portable fixtures, deterministic replay, and trace/replay CLI validation;
+- an explicit software-owned orchestrator with immutable task sessions, legal operating-mode transitions, budget-triggered suspension, exact-mode resume, hash-verified checkpoints, stale-checkpoint refusal, parent/child task relationships, and scheduler observation hooks.
+
+There is deliberately **no model runtime dependency yet**. The next planned milestone is the minimal authoritative memory system: goal memory and bounded working state first, then episodic/error memory and retrieval/write policies.
 
 ## Getting started
 
@@ -25,6 +29,8 @@ python -m pip install -e ".[dev]"
 pytest
 harness-x --help
 harness-x validate-config configs/default.yaml
+harness-x verify-trace path/to/trace.jsonl
+harness-x replay-fixture path/to/fixture.json
 ```
 
 ## Core idea
