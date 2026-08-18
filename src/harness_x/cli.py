@@ -50,6 +50,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for scenario traces/checkpoints",
     )
 
+    swap = subparsers.add_parser(
+        "benchmark-reasoning-swap",
+        help="Compare the deterministic core with an OpenAI-compatible reasoning endpoint",
+    )
+    swap.add_argument("config", type=Path)
+    swap.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:8080/v1",
+        help="OpenAI-compatible API base URL; loopback-only unless --allow-remote is set",
+    )
+    swap.add_argument("--model", default="local-model")
+    swap.add_argument("--api-key-env", default=None)
+    swap.add_argument("--allow-remote", action="store_true")
+    swap.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/benchmark-reasoning-swap"),
+        help="Directory for stub/real traces and reasoning-swap-report.json",
+    )
+
     return parser
 
 
@@ -81,6 +101,26 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         config = load_config(args.config)
         report = run_scripted_autonomy_benchmark(config, args.output)
+        print(report.model_dump_json(indent=2))
+        return 0 if report.passed else 1
+
+    if args.command == "benchmark-reasoning-swap":
+        from .benchmarks import run_reasoning_swap_probe
+        from .reasoning import OpenAICompatibleReasoningCore, OpenAICompatibleSettings
+
+        config = load_config(args.config)
+        core = OpenAICompatibleReasoningCore(
+            OpenAICompatibleSettings(
+                base_url=args.base_url,
+                model=args.model,
+                api_key_env=args.api_key_env,
+                allow_remote_endpoint=args.allow_remote,
+            )
+        )
+        args.output.mkdir(parents=True, exist_ok=True)
+        report = run_reasoning_swap_probe(args.output, config, real_core=core)
+        report_path = args.output / "reasoning-swap-report.json"
+        report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
         print(report.model_dump_json(indent=2))
         return 0 if report.passed else 1
 
