@@ -41,11 +41,11 @@ class AssistedScenarioResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     family: DecisionFamily
-    baseline_score: float
-    assisted_score: float
+    baseline_score: float = Field(ge=0.0, le=1.0)
+    assisted_score: float = Field(ge=0.0, le=1.0)
     selected_source: RecommendationSource
     promotion_reason: str
-    invariant_violations: tuple[str, ...]
+    model_policy_violations: tuple[str, ...]
     state_authority_preserved: bool
     reasoning_budget_consumed: bool
     replay_valid: bool
@@ -57,11 +57,12 @@ class AssistedScenarioResult(BaseModel):
 
     @property
     def architecture_valid(self) -> bool:
+        # A bad model is allowed to be bad. The architecture fails only if its
+        # containment/fallback/replay guarantees fail.
         return (
             self.state_authority_preserved
             and self.reasoning_budget_consumed
             and self.replay_valid
-            and not self.invariant_violations
         )
 
 
@@ -78,7 +79,7 @@ class ModelAssistedBenchmarkReport(BaseModel):
     model_improved_count: int = Field(ge=0)
     model_selected_count: int = Field(ge=0)
     baseline_retained_count: int = Field(ge=0)
-    authority_violation_count: int = Field(ge=0)
+    model_policy_violation_count: int = Field(ge=0)
 
     @property
     def architecture_valid(self) -> bool:
@@ -89,12 +90,12 @@ class ModelAssistedBenchmarkReport(BaseModel):
         return (
             self.architecture_valid
             and self.model_improved_count > 0
-            and self.authority_violation_count == 0
+            and self.model_policy_violation_count == 0
         )
 
     @property
     def passed(self) -> bool:
-        """The harness policy passes even when a weak model is safely rejected."""
+        """Harness containment passes even when a weak model is safely rejected."""
 
         return self.architecture_valid
 
@@ -281,7 +282,9 @@ def _run_scenario(
         and after["procedural"] == before["procedural"]
         and after["tool_actions"] == before["tool_actions"]
     )
-    reasoning_budget_consumed = after["reasoning_steps"] == before["reasoning_steps"] + 1
+    reasoning_budget_consumed = (
+        after["reasoning_steps"] == before["reasoning_steps"] + 1
+    )
 
     events = runtime.recorder.store.events(trace_id=runtime.recorder.trace_id)
     replay_valid = False
@@ -293,7 +296,7 @@ def _run_scenario(
 
     assisted_eval = data["assisted_evaluation"]
     baseline_eval = data["baseline_evaluation"]
-    invariant_violations = tuple(assisted_eval["invariant_violations"])
+    policy_violations = tuple(assisted_eval["invariant_violations"])
     compared = [
         event
         for event in events
@@ -308,7 +311,7 @@ def _run_scenario(
         assisted_score=float(assisted_eval["score"] or 0.0),
         selected_source=RecommendationSource(data["selected_source"]),
         promotion_reason=str(data["promotion_reason"]),
-        invariant_violations=invariant_violations,
+        model_policy_violations=policy_violations,
         state_authority_preserved=state_authority_preserved,
         reasoning_budget_consumed=reasoning_budget_consumed,
         replay_valid=replay_valid,
@@ -334,7 +337,7 @@ def run_model_assisted_benchmark(
     selected = sum(
         item.selected_source == RecommendationSource.MODEL for item in results
     )
-    violations = sum(len(item.invariant_violations) for item in results)
+    violations = sum(len(item.model_policy_violations) for item in results)
     return ModelAssistedBenchmarkReport(
         core_name=core.info.name,
         core_version=core.info.version,
@@ -345,5 +348,5 @@ def run_model_assisted_benchmark(
         model_improved_count=improved,
         model_selected_count=selected,
         baseline_retained_count=len(results) - selected,
-        authority_violation_count=violations,
+        model_policy_violation_count=violations,
     )
