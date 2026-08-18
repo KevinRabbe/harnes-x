@@ -70,6 +70,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for stub/real traces and reasoning-swap-report.json",
     )
 
+    assisted = subparsers.add_parser(
+        "benchmark-model-assisted",
+        help="Compare seven model-assisted routine decisions against deterministic baselines",
+    )
+    assisted.add_argument("config", type=Path)
+    assisted.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:8080/v1",
+        help="OpenAI-compatible API base URL; loopback-only unless --allow-remote is set",
+    )
+    assisted.add_argument("--model", default="local-model")
+    assisted.add_argument("--api-key-env", default=None)
+    assisted.add_argument("--allow-remote", action="store_true")
+    assisted.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/benchmark-model-assisted"),
+        help="Directory for scenario traces and model-assisted-report.json",
+    )
+
     return parser
 
 
@@ -120,6 +140,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output.mkdir(parents=True, exist_ok=True)
         report = run_reasoning_swap_probe(args.output, config, real_core=core)
         report_path = args.output / "reasoning-swap-report.json"
+        report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        print(report.model_dump_json(indent=2))
+        return 0 if report.passed else 1
+
+    if args.command == "benchmark-model-assisted":
+        from .benchmarks import run_model_assisted_benchmark
+        from .reasoning import OpenAICompatibleReasoningCore, OpenAICompatibleSettings
+
+        config = load_config(args.config)
+        core = OpenAICompatibleReasoningCore(
+            OpenAICompatibleSettings(
+                base_url=args.base_url,
+                model=args.model,
+                api_key_env=args.api_key_env,
+                allow_remote_endpoint=args.allow_remote,
+            )
+        )
+        args.output.mkdir(parents=True, exist_ok=True)
+        report = run_model_assisted_benchmark(args.output, config, core=core)
+        report_path = args.output / "model-assisted-report.json"
         report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
         print(report.model_dump_json(indent=2))
         return 0 if report.passed else 1
