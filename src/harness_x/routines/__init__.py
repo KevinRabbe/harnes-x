@@ -1,5 +1,22 @@
-"""Versioned scripted procedures for model-independent Harness X operation."""
+"""Versioned procedures for deterministic and model-assisted Harness X operation."""
 
+from .assisted import (
+    AssistedDecisionOutcome,
+    AssistedDecisionRequest,
+    DecisionEvaluation,
+    DecisionFamily,
+    ExperimentProposalRoutine,
+    HypothesisProposalRoutine,
+    PlanningProposalRoutine,
+    RecommendationSource,
+    RecoveryProposalRoutine,
+    RetrievalQueryRoutine,
+    RoutineSelectionProposalRoutine,
+    SemanticCandidateProposalRoutine,
+    deterministic_baseline,
+    evaluate_payload,
+    register_model_assisted_routines,
+)
 from .base import (
     RoutineBindings,
     RoutineError,
@@ -32,20 +49,32 @@ from .tool_task import (
 )
 
 __all__ = [
+    "AssistedDecisionOutcome",
+    "AssistedDecisionRequest",
     "ConsolidationRoutine",
     "ConsolidationRoutineRequest",
     "ConsolidationSummary",
+    "DecisionEvaluation",
+    "DecisionFamily",
+    "ExperimentProposalRoutine",
+    "HypothesisProposalRoutine",
+    "PlanningProposalRoutine",
+    "RecommendationSource",
+    "RecoveryProposalRoutine",
     "RecoveryRoutine",
     "RecoveryRoutineRequest",
+    "RetrievalQueryRoutine",
     "RoutineBindings",
     "RoutineEngine",
     "RoutineError",
     "RoutineExecution",
     "RoutineResult",
+    "RoutineSelectionProposalRoutine",
     "RoutineSpec",
     "RoutineStatus",
     "ScriptedReasoningStub",
     "ScriptedRoutine",
+    "SemanticCandidateProposalRoutine",
     "TaskRoutine",
     "TaskRoutineRequest",
     "ToolAwareScriptedReasoningStub",
@@ -55,5 +84,8 @@ __all__ = [
     "VerificationRoutineRequest",
     "build_scripted_routine_engine",
     "build_tool_routine_engine",
+    "deterministic_baseline",
+    "evaluate_payload",
+    "register_model_assisted_routines",
     "routine_request_fingerprint",
 ]
