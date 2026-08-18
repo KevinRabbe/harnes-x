@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–10 implemented on the current development stack.**
+**Milestones 0–11 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -37,9 +37,13 @@ The implementation now contains:
 - append-only metrics samples for dashboard/history use while causal traces remain the source of truth;
 - a stable replaceable `ReasoningCore` boundary, deterministic bounded context construction, structured proposal-only model output, software-assigned candidate identity/provenance, and reasoning request/result trace events that never record private chain-of-thought;
 - a deterministic `StubReasoningCore` baseline plus a local-first OpenAI-compatible HTTP adapter suitable for locally served llama.cpp/vLLM/Ollama-style runtimes, with loopback-only endpoints by default;
-- a fake-to-real reasoning swap probe that runs stub and model-runtime proposals through the same surrounding architecture, tool permission/execution boundary, verifier, and replay checks without changing memory or orchestrator ownership.
+- a fake-to-real reasoning swap probe that runs stub and model-runtime proposals through the same surrounding architecture, tool permission/execution boundary, verifier, and replay checks without changing memory or orchestrator ownership;
+- seven recommendation-only model-assisted routine families for planning, retrieval-query formulation, hypothesis generation, recovery proposals, semantic candidate extraction, routine-selection recommendations, and experiment proposals;
+- a permanent deterministic shadow baseline plus deterministic evaluator for every assisted decision, with the model selected only when it meets the minimum score and **strictly beats** the baseline;
+- shadow-only behavior when no external evaluation reference exists, deterministic fallback on reasoning-runtime failure, and explicit rejection of authority-shaped recommendation payloads;
+- causal `assisted_decision_compared` trace events plus a `model-assisted-routines-v1` benchmark that separates harness containment from model quality and verifies reasoning-budget use without granting model mutation/tool authority.
 
-A **real model-runtime adapter now exists**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI validates the exact HTTP/runtime boundary with a local fixture while the deterministic core remains the comparison baseline. The next planned milestone is **model-assisted routines**: progressively hand planning proposals, retrieval-query formulation, hypotheses, recovery proposals, semantic candidate extraction, routine recommendations, and experiment proposals to the reasoning core while measuring each change against the existing deterministic behavior.
+A **real model-runtime adapter and model-assisted decision layer now exist**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI validates the runtime and assisted-decision boundaries with deterministic fixtures while the deterministic core/rules remain permanent comparison baselines. The next planned milestone is the **self-model curriculum generator**: generate ground-truth structural, operational, diagnostic, and causal training scenarios from known Harness X state and deliberately injected faults, while keeping evaluation scenario families separate from training generation.
 
 ## Getting started
 
@@ -52,6 +56,7 @@ harness-x verify-trace path/to/trace.jsonl
 harness-x replay-fixture path/to/fixture.json
 harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-scripted
 harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
+harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 ```
 
 ## Core idea
@@ -116,9 +121,11 @@ Harness X is planned around the following major subsystems:
 
 ## Architecture-first development
 
-The surrounding system is testable without a real LLM. Deterministic reasoning-core stubs remain permanent baselines so memory, scheduling, gates, telemetry, replay, and state transitions can be validated independently from model quality.
+The surrounding system is testable without a real LLM. Deterministic reasoning-core stubs and deterministic routine policies remain permanent baselines so memory, scheduling, gates, telemetry, replay, and state transitions can be validated independently from model quality.
 
 Milestone 10 adds the first model-runtime adapter behind the same `ReasoningCore` boundary. Swapping the reasoning core does not grant it memory ownership, tool authority, permission authority, or direct state mutation.
+
+Milestone 11 begins using the core for selected reasoning-heavy recommendations. Each assisted behavior remains paired with an old deterministic baseline and a deterministic evaluator. Model output is only selected when measurable evidence says it improves on the baseline; a tie, missing evaluation evidence, runtime failure, or authority-policy violation leaves the deterministic path in control.
 
 The initial neural strategy is intentionally modest:
 
