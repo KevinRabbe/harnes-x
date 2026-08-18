@@ -139,12 +139,11 @@ class ErrorBuffer:
             evidence_refs=evidence_refs,
             confidence=confidence,
         )
-        updated = current.model_copy(
-            update={
-                "status": ErrorStatus.INVESTIGATING,
-                "suspected_causes": current.suspected_causes + (hypothesis,),
-                "revision": current.revision + 1,
-            }
+        updated = self._validated_update(
+            current,
+            status=ErrorStatus.INVESTIGATING,
+            suspected_causes=current.suspected_causes + (hypothesis,),
+            revision=current.revision + 1,
         )
         self._commit_update(current, updated, operation="add_suspected_cause")
         return updated
@@ -167,8 +166,8 @@ class ErrorBuffer:
             if not confirmed_cause:
                 raise ValueError("confirmed cause cannot be blank")
 
-        updated = ErrorRecord(
-            **current.model_dump(),
+        updated = self._validated_update(
+            current,
             status=ErrorStatus.RESOLVED,
             confirmed_cause=confirmed_cause,
             resolution_evidence=evidence,
@@ -189,12 +188,11 @@ class ErrorBuffer:
         evidence = tuple(ref.strip() for ref in evidence_refs)
         if not evidence or any(not ref for ref in evidence):
             raise ValueError("dismissal requires evidence")
-        updated = current.model_copy(
-            update={
-                "status": ErrorStatus.DISMISSED,
-                "resolution_evidence": evidence,
-                "revision": current.revision + 1,
-            }
+        updated = self._validated_update(
+            current,
+            status=ErrorStatus.DISMISSED,
+            resolution_evidence=evidence,
+            revision=current.revision + 1,
         )
         self._commit_update(current, updated, operation="dismiss")
         return updated
@@ -227,6 +225,11 @@ class ErrorBuffer:
 
     def all(self) -> tuple[ErrorRecord, ...]:
         return tuple(self._records[key] for key in sorted(self._records))
+
+    def _validated_update(self, current: ErrorRecord, **updates: object) -> ErrorRecord:
+        payload = current.model_dump()
+        payload.update(updates)
+        return ErrorRecord.model_validate(payload)
 
     def _commit_update(
         self,
