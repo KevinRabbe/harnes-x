@@ -20,7 +20,6 @@ from harness_x.memory import (
     WorkingState,
 )
 from harness_x.orchestrator import TaskOrchestrator
-from harness_x.reasoning.base import ReasoningCoreInfo
 from harness_x.routines import RoutineEngine
 from harness_x.tools import ToolRegistry
 
@@ -65,6 +64,18 @@ class ToolSelfDescription(BaseModel):
     idempotent: bool
 
 
+class ReasoningCoreSelfDescription(BaseModel):
+    """Telemetry-owned description of the installed replaceable reasoning backend."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    version: str
+    model: str
+    transport: str
+    model_inference: bool
+
+
 class SystemSelfSchema(BaseModel):
     """Machine-readable description of what the running system actually contains."""
 
@@ -88,7 +99,7 @@ class SystemSelfSchema(BaseModel):
     metrics: RuntimeMetrics
     known_limitations: tuple[str, ...]
     state_fingerprint: str
-    reasoning_core: ReasoningCoreInfo | None = None
+    reasoning_core: ReasoningCoreSelfDescription | None = None
 
 
 class SelfSchemaBuilder:
@@ -119,7 +130,7 @@ class SelfSchemaBuilder:
         registry: ToolRegistry,
         granted_permissions: frozenset[str],
         known_limitations: tuple[str, ...] = (),
-        reasoning_core_info: ReasoningCoreInfo | None = None,
+        reasoning_core_info: Any | None = None,
     ) -> None:
         self.config = config
         self.recorder = recorder
@@ -134,7 +145,15 @@ class SelfSchemaBuilder:
         self.registry = registry
         self.granted_permissions = granted_permissions
         self.known_limitations = known_limitations
-        self.reasoning_core_info = reasoning_core_info
+        if reasoning_core_info is None:
+            self.reasoning_core_info = None
+        else:
+            raw = (
+                reasoning_core_info.model_dump(mode="json")
+                if hasattr(reasoning_core_info, "model_dump")
+                else reasoning_core_info
+            )
+            self.reasoning_core_info = ReasoningCoreSelfDescription.model_validate(raw)
 
     def build(self) -> SystemSelfSchema:
         events = self.recorder.store.events(trace_id=self.recorder.trace_id)
