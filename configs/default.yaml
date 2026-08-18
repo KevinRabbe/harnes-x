@@ -4,3 +4,38 @@ budget:
   max_reasoning_steps: 32
   max_tool_actions: 16
   max_output_tokens: 8192
+gates:
+  retrieval:
+    policy_version: "retrieval-v0"
+    pressure_suppress_threshold: 0.85
+    max_recent_retrievals: 3
+    default_limit: 5
+    always_retrieve_routines:
+      - research
+      - recovery
+      - debugging
+  write:
+    policy_version: "write-v0"
+    default_memory_class: "working"
+    memory_class_by_kind:
+      goal: goal
+      constraint: goal
+      episode: episodic
+      outcome: episodic
+      failure: error
+      error: error
+      anomaly: error
+      observation: working
+      working: working
+  focus:
+    policy_version: "focus-v0"
+    max_focus_items: 5
+    pin_priority_threshold: 0.85
+    max_auto_pins: 3
+  compute:
+    policy_version: "compute-v0"
+  maintenance:
+    policy_version: "maintenance-v0"
+    working_pressure_trigger: 0.85
+    unresolved_error_trigger: 3
+    repeated_failure_trigger: 2
