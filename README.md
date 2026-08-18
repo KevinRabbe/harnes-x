@@ -12,23 +12,26 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–6 implemented on the current development stack.**
+**Milestones 0–7 implemented on the current development stack.**
 
 The implementation now contains:
 
 - the typed Python package, IDs/contracts, provenance, external compute budgets, explicit clock abstraction, configuration, CLI, tests, and CI;
 - a structured causal event spine, append-only hash-chained trace ledger, portable fixtures, deterministic replay, and trace/replay CLI validation;
 - an explicit software-owned orchestrator with immutable task sessions, legal operating-mode transitions, budget-triggered suspension, exact-mode resume, hash-verified checkpoints, stale-checkpoint refusal, parent/child task relationships, and scheduler observation hooks;
-- explicit goal, working, episodic, and error/anomaly memory surfaces with separate lifecycles and invariants;
+- explicit goal, working, episodic, error/anomaly, semantic, and procedural memory surfaces with separate lifecycles and invariants;
 - authoritative goal history, pinned governing constraints, bounded working-state pressure, deterministic eviction, trace-backed episodic records, baseline non-embedding retrieval, and evidence-gated error resolution;
 - versioned deterministic retrieval, write, focus, compute, and maintenance gates whose decisions are traced with canonical input-state fingerprints;
 - config-owned gate thresholds and the hard boundary that gates propose flow decisions while memory/orchestrator owners remain solely responsible for mutation;
 - a versioned routine engine with explicit preconditions, required state views, authority envelopes, step policies, verification requirements, request fingerprints, and nested routine tracing;
 - deterministic task, verification, recovery, and consolidation routines that exercise the real orchestrator/memory/gate/trace architecture while the reasoning core remains an in-process stub with zero model inference;
 - a declared tool registry and permission boundary with versioned input/output schemas, routine authority checks, explicit permissions, side-effect classes, tool-action budget enforcement, normalized failures/timeouts, and schema-valid tool-origin observations;
-- a Milestone 6 tool-backed task routine that enforces `ActionProposal != ActionExecution` and routes proposals through registry, permission, validation, budget, execution, observation, verification, and memory.
+- a tool-backed task routine that enforces `ActionProposal != ActionExecution` and routes proposals through registry, permission, validation, budget, execution, observation, verification, and memory;
+- evidence-gated semantic memory with candidate claims, confidence, preserved source provenance, explicit evaluation/promotion, symmetric contradiction links, invalidation, and revision history;
+- versioned procedural memory with repeated-success candidate formation, explicit evaluation/promotion, independent coexisting versions, usage/success/failure/cost statistics, known failure modes, invalidation, and history;
+- explicit consolidation pipelines in which episodes create candidates but never directly create semantic truth or active procedures.
 
-There is deliberately **no real model runtime yet**. The next planned milestone is **semantic and procedural memory**: candidate claims, contradictions, confidence/provenance, verification/invalidation, versioned routine knowledge, and explicit consolidation pipelines that do not turn one generated statement into durable truth.
+There is deliberately **no real model runtime yet**. The next planned milestone is the **long-horizon scripted autonomy benchmark**: multi-step dependencies, interruption/resume, memory pressure, failure/recovery, and contradiction scenarios executed for hundreds of state transitions before a real reasoning model is introduced.
 
 ## Getting started
 
