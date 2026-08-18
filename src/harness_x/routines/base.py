@@ -97,7 +97,7 @@ class RoutineBindings:
     compute_gate: ComputeGate
     maintenance_gate: MaintenanceGate
     reasoning_stub: "ScriptedReasoningStub"
-    tool_executor: ToolExecutor
+    tool_executor: ToolExecutor | None = None
     tool_permissions: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
@@ -112,11 +112,15 @@ class RoutineBindings:
             id(self.focus_gate.recorder),
             id(self.compute_gate.recorder),
             id(self.maintenance_gate.recorder),
-            id(self.tool_executor.recorder),
         }
+        if self.tool_executor is not None:
+            recorders.add(id(self.tool_executor.recorder))
         if len(recorders) != 1:
             raise RoutineError("routine bindings must share one TraceRecorder")
-        if self.tool_executor.orchestrator is not self.orchestrator:
+        if (
+            self.tool_executor is not None
+            and self.tool_executor.orchestrator is not self.orchestrator
+        ):
             raise RoutineError("routine bindings must share one authoritative orchestrator")
 
 
@@ -165,6 +169,8 @@ class RoutineExecutionContext:
 
     def execute_tool(self, proposal):
         self.require_tool(proposal.tool_name)
+        if self.bindings.tool_executor is None:
+            raise RoutineError("tool-backed routine requires a ToolExecutor")
         return self.bindings.tool_executor.execute(
             proposal,
             routine_allowed_tools=self.spec.allowed_tools,
