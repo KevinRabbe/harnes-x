@@ -82,10 +82,22 @@ class EpisodicMemory:
         trace_id: TraceId | None = None,
         memory_id: MemoryId | None = None,
     ) -> Episode:
+        selected_trace = trace_id or self.recorder.trace_id
+        source_events = self.recorder.store.events(trace_id=selected_trace)
+        if not source_events:
+            raise MemoryNotFoundError(
+                f"cannot create episode for unknown trace {selected_trace}"
+            )
+        if end_step > source_events[-1].step:
+            raise MemorySubsystemError(
+                f"episode end_step {end_step} exceeds recorded trace step "
+                f"{source_events[-1].step}"
+            )
+
         candidate = Episode(
             memory_id=memory_id or MemoryId.new(),
             task_id=self.recorder.task_id,
-            trace_id=trace_id or self.recorder.trace_id,
+            trace_id=selected_trace,
             start_step=start_step,
             end_step=end_step,
             summary=summary,
