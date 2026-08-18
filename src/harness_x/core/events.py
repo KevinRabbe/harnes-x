@@ -15,9 +15,11 @@ EVENT_SCHEMA_VERSION = "1"
 
 class EventType(StrEnum):
     TASK_CREATED = "task_created"
+    TASK_CHILD_ADDED = "task_child_added"
     GOAL_CREATED = "goal_created"
     GOAL_UPDATED = "goal_updated"
     MODE_CHANGED = "mode_changed"
+    CHECKPOINT_CREATED = "checkpoint_created"
     MEMORY_WRITTEN = "memory_written"
     MEMORY_EVICTED = "memory_evicted"
     MEMORY_RETRIEVED = "memory_retrieved"
