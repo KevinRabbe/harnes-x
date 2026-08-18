@@ -26,6 +26,8 @@ class EventType(StrEnum):
     GATE_DECISION = "gate_decision"
     ROUTINE_STARTED = "routine_started"
     ROUTINE_FINISHED = "routine_finished"
+    REASONING_REQUESTED = "reasoning_requested"
+    REASONING_COMPLETED = "reasoning_completed"
     ACTION_PROPOSED = "action_proposed"
     TOOL_PERMISSION_CHECKED = "tool_permission_checked"
     TOOL_EXECUTION_FINISHED = "tool_execution_finished"
