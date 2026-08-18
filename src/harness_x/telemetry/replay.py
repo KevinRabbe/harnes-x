@@ -52,9 +52,7 @@ class TraceReplayer:
             if event.trace_id != trace_id:
                 raise ReplayError("event sequence contains multiple trace IDs")
             if event.step != previous_step + 1:
-                raise ReplayError(
-                    f"expected step {previous_step + 1}, got {event.step}"
-                )
+                raise ReplayError(f"expected step {previous_step + 1}, got {event.step}")
             if previous_timestamp is not None and event.timestamp < previous_timestamp:
                 raise ReplayError(f"timestamp moved backwards at step {event.step}")
 
@@ -76,11 +74,7 @@ class TraceReplayer:
                     goals[ref] = str(event.metadata.get("status", "active"))
 
             elif event.event_type == EventType.GOAL_UPDATED:
-                refs = self._refs(
-                    event.input_refs or event.output_refs,
-                    "goal_",
-                    "goal_updated",
-                )
+                refs = self._refs(event.input_refs or event.output_refs, "goal_", "goal_updated")
                 for ref in refs:
                     if ref not in goals:
                         raise ReplayError(f"goal {ref} updated before creation")
@@ -110,7 +104,7 @@ class TraceReplayer:
                 budgets[task] = budget
 
             elif event.event_type == EventType.CANDIDATE_CREATED:
-                for ref in self._refs(event.output_refs, "candidate_", "candidate_created"):
+                for ref in self._candidate_refs(event.output_refs, "candidate_created"):
                     if ref in candidates:
                         raise ReplayError(f"candidate {ref} was created twice")
                     candidates[ref] = "created"
@@ -121,9 +115,8 @@ class TraceReplayer:
                 EventType.CANDIDATE_REJECTED,
                 EventType.CANDIDATE_INVALIDATED,
             }:
-                refs = self._refs(
+                refs = self._candidate_refs(
                     event.input_refs or event.output_refs,
-                    "candidate_",
                     event.event_type.value,
                 )
                 status = {
@@ -175,3 +168,10 @@ class TraceReplayer:
                 f"{event_name} contains a reference without {prefix!r} prefix"
             )
         return refs
+
+    @staticmethod
+    def _candidate_refs(refs: list[str], event_name: str) -> list[str]:
+        candidates = [ref for ref in refs if ref.startswith("candidate_")]
+        if not candidates:
+            raise ReplayError(f"{event_name} requires a candidate reference")
+        return candidates
