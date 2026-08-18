@@ -1,21 +1,17 @@
-"""Trace storage, replay, and grounded system telemetry."""
+"""Trace storage and replay primitives.
 
-from .metrics import JsonlMetricsStore, MetricsSample, RuntimeMetrics, derive_runtime_metrics
+Grounded self-schema and rolling metric helpers live in dedicated submodules so
+memory owners can continue importing TraceRecorder without creating import cycles.
+"""
+
 from .replay import ReplayState, TraceReplayer
-from .self_schema import SelfSchemaBuilder, SystemSelfSchema
 from .trace_store import TraceFixture, TraceRecord, TraceRecorder, TraceStore
 
 __all__ = [
-    "JsonlMetricsStore",
-    "MetricsSample",
     "ReplayState",
-    "RuntimeMetrics",
-    "SelfSchemaBuilder",
-    "SystemSelfSchema",
     "TraceFixture",
     "TraceRecord",
     "TraceRecorder",
     "TraceReplayer",
     "TraceStore",
-    "derive_runtime_metrics",
 ]
