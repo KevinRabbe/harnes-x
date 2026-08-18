@@ -175,9 +175,7 @@ def evaluate_payload(
             invariant_violations=tuple(sorted(set(extra_violations))),
         )
 
-    violations = tuple(
-        sorted(set((*_violations(payload), *extra_violations)))
-    )
+    violations = tuple(sorted(set((*_violations(payload), *extra_violations))))
     if reference is None:
         return DecisionEvaluation(
             score=None,
@@ -321,9 +319,7 @@ class _AssistedRecommendationRoutine(ScriptedRoutine):
             routine_id=self.spec.routine_id,
             instruction=instruction,
             active_goal=goal.model_dump(mode="json"),
-            working_state=[
-                item.model_dump(mode="json") for item in b.working.items()
-            ],
+            working_state=[item.model_dump(mode="json") for item in b.working.items()],
             retrieved_memories=list(request.retrieved_memories),
             self_schema=request.self_schema,
             available_actions=list(request.available_actions),
@@ -345,7 +341,6 @@ class _AssistedRecommendationRoutine(ScriptedRoutine):
                 assisted_candidate_id = str(result.proposals[0].candidate_id)
         except ReasoningCoreError as exc:
             model_error = str(exc)
-            extra_violations.append("reasoning_core_error")
 
         assisted_eval = evaluate_payload(
             assisted_payload,
@@ -356,7 +351,9 @@ class _AssistedRecommendationRoutine(ScriptedRoutine):
         selected_source = RecommendationSource.BASELINE
         selected_payload = baseline
         promotion_reason = "baseline_retained"
-        if request.evaluation_reference is None:
+        if model_error is not None:
+            promotion_reason = "reasoning_core_failed_baseline_retained"
+        elif request.evaluation_reference is None:
             promotion_reason = "shadow_only_without_reference"
         elif assisted_eval.invariant_violations:
             promotion_reason = "assisted_invariant_violation"
