@@ -38,6 +38,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay_fixture.add_argument("path", type=Path)
 
+    benchmark = subparsers.add_parser(
+        "benchmark-scripted",
+        help="Run the Milestone 8 long-horizon scripted autonomy suite",
+    )
+    benchmark.add_argument("config", type=Path)
+    benchmark.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/benchmark-scripted"),
+        help="Directory for scenario traces/checkpoints",
+    )
+
     return parser
 
 
@@ -63,6 +75,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         state = TraceReplayer().assert_fixture(fixture)
         print(f"valid: trace={state.trace_id} steps={state.last_step}")
         return 0
+
+    if args.command == "benchmark-scripted":
+        from .benchmarks import run_scripted_autonomy_benchmark
+
+        config = load_config(args.config)
+        report = run_scripted_autonomy_benchmark(config, args.output)
+        print(report.model_dump_json(indent=2))
+        return 0 if report.passed else 1
 
     parser.print_help()
     return 0
