@@ -1,4 +1,4 @@
-"""First model-independent contracts for the Harness X architecture."""
+"""Model-independent contracts for the Harness X architecture."""
 
 from __future__ import annotations
 
@@ -62,18 +62,33 @@ class VerificationResult(BaseModel):
 
 
 class ReasoningRequest(BaseModel):
-    """Reserved model socket input; no model implementation is introduced in Milestone 0."""
+    """Bounded state view supplied to a replaceable reasoning core.
+
+    Memory stores, orchestrator owners, tools, and mutation APIs are intentionally not
+    exposed. The context builder converts only these selected views into model input.
+    `active_state` and `context` remain as compatibility fields for earlier fixtures.
+    """
 
     task_id: TaskId
     goal_id: GoalId
     routine_id: RoutineId
+    instruction: str = ""
+    active_goal: JsonObject = Field(default_factory=dict)
+    working_state: list[JsonObject] = Field(default_factory=list)
+    retrieved_memories: list[JsonObject] = Field(default_factory=list)
+    self_schema: JsonObject = Field(default_factory=dict)
+    available_actions: list[JsonObject] = Field(default_factory=list)
     active_state: JsonObject = Field(default_factory=dict)
     context: JsonObject = Field(default_factory=dict)
     budget: ComputeBudget = Field(default_factory=ComputeBudget)
 
 
 class ReasoningResult(BaseModel):
-    """Reserved model socket output composed only of proposals."""
+    """Structured proposals returned through the reasoning boundary.
+
+    Candidate identity and provenance are assigned by Harness X software, not parsed
+    from model output. Nothing in this result is an authoritative mutation.
+    """
 
     task_id: TaskId
     status: Literal["complete", "continue", "blocked"]
@@ -81,3 +96,8 @@ class ReasoningResult(BaseModel):
     actions: list[ActionProposal] = Field(default_factory=list)
     observations: list[str] = Field(default_factory=list)
     requested_additional_steps: int = Field(default=0, ge=0)
+    core_name: str | None = None
+    core_version: str | None = None
+    model_name: str | None = None
+    model_inference: bool | None = None
+    context_fingerprint: str | None = None
