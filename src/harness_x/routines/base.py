@@ -19,6 +19,8 @@ from harness_x.orchestrator import OperatingMode, TaskOrchestrator
 from harness_x.tools import ToolExecutor
 
 if TYPE_CHECKING:
+    from harness_x.reasoning import ReasoningService
+
     from .engine import RoutineEngine
     from .scripted import ScriptedReasoningStub
 
@@ -99,6 +101,7 @@ class RoutineBindings:
     reasoning_stub: "ScriptedReasoningStub"
     tool_executor: ToolExecutor | None = None
     tool_permissions: frozenset[str] = frozenset()
+    reasoning_service: "ReasoningService | None" = None
 
     def __post_init__(self) -> None:
         recorders = {
@@ -115,6 +118,8 @@ class RoutineBindings:
         }
         if self.tool_executor is not None:
             recorders.add(id(self.tool_executor.recorder))
+        if self.reasoning_service is not None:
+            recorders.add(id(self.reasoning_service.recorder))
         if len(recorders) != 1:
             raise RoutineError("routine bindings must share one TraceRecorder")
         if (
@@ -166,6 +171,14 @@ class RoutineExecutionContext:
             raise RoutineError(
                 f"routine {self.spec.name} may not use undeclared tool {tool_name!r}"
             )
+
+    def require_reasoning_service(self) -> "ReasoningService":
+        service = self.bindings.reasoning_service
+        if service is None:
+            raise RoutineError(
+                f"routine {self.spec.name} requires a configured ReasoningService"
+            )
+        return service
 
     def execute_tool(self, proposal):
         self.require_tool(proposal.tool_name)
