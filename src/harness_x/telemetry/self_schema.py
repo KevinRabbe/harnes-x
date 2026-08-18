@@ -20,6 +20,7 @@ from harness_x.memory import (
     WorkingState,
 )
 from harness_x.orchestrator import TaskOrchestrator
+from harness_x.reasoning.base import ReasoningCoreInfo
 from harness_x.routines import RoutineEngine
 from harness_x.tools import ToolRegistry
 
@@ -87,6 +88,7 @@ class SystemSelfSchema(BaseModel):
     metrics: RuntimeMetrics
     known_limitations: tuple[str, ...]
     state_fingerprint: str
+    reasoning_core: ReasoningCoreInfo | None = None
 
 
 class SelfSchemaBuilder:
@@ -117,6 +119,7 @@ class SelfSchemaBuilder:
         registry: ToolRegistry,
         granted_permissions: frozenset[str],
         known_limitations: tuple[str, ...] = (),
+        reasoning_core_info: ReasoningCoreInfo | None = None,
     ) -> None:
         self.config = config
         self.recorder = recorder
@@ -131,6 +134,7 @@ class SelfSchemaBuilder:
         self.registry = registry
         self.granted_permissions = granted_permissions
         self.known_limitations = known_limitations
+        self.reasoning_core_info = reasoning_core_info
 
     def build(self) -> SystemSelfSchema:
         events = self.recorder.store.events(trace_id=self.recorder.trace_id)
@@ -182,6 +186,11 @@ class SelfSchemaBuilder:
             "recent_errors": list(recent_errors),
             "metrics": metrics.model_dump(mode="json"),
             "known_limitations": list(self.known_limitations),
+            "reasoning_core": (
+                self.reasoning_core_info.model_dump(mode="json")
+                if self.reasoning_core_info is not None
+                else None
+            ),
         }
         canonical = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -262,6 +271,14 @@ class SelfSchemaBuilder:
             ComponentSelfDescription(component="orchestrator", kind="controller", version="orchestrator-v1"),
             ComponentSelfDescription(component="trace", kind="telemetry", version="trace-v1"),
         ]
+        if self.reasoning_core_info is not None:
+            result.append(
+                ComponentSelfDescription(
+                    component="reasoning.core",
+                    kind="reasoning_core",
+                    version=self.reasoning_core_info.version,
+                )
+            )
         result.extend(
             ComponentSelfDescription(
                 component=f"memory.{name}", kind="memory", version=version
