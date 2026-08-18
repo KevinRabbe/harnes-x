@@ -12,6 +12,8 @@ class MemoryClass(StrEnum):
     WORKING = "working"
     EPISODIC = "episodic"
     ERROR = "error"
+    SEMANTIC = "semantic"
+    PROCEDURAL = "procedural"
 
 
 class MemoryPressure(BaseModel):
