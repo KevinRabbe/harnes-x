@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–7 implemented on the current development stack.**
+**Milestones 0–8 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -29,9 +29,11 @@ The implementation now contains:
 - a tool-backed task routine that enforces `ActionProposal != ActionExecution` and routes proposals through registry, permission, validation, budget, execution, observation, verification, and memory;
 - evidence-gated semantic memory with candidate claims, confidence, preserved source provenance, explicit evaluation/promotion, symmetric contradiction links, invalidation, and revision history;
 - versioned procedural memory with repeated-success candidate formation, explicit evaluation/promotion, independent coexisting versions, usage/success/failure/cost statistics, known failure modes, invalidation, and history;
-- explicit consolidation pipelines in which episodes create candidates but never directly create semantic truth or active procedures.
+- explicit consolidation pipelines in which episodes create candidates but never directly create semantic truth or active procedures;
+- a long-horizon scripted autonomy benchmark spanning dependency ordering, interruption/checkpoint resume, repeated working-memory pressure, tool/verifier failure recovery, and contradictory verified observations;
+- machine-readable benchmark reports whose pressure, retrieval, recovery, action, verification, lifecycle, and trace-integrity metrics are derived from authoritative state/events wherever practical, with the suite required to survive at least 300 authoritative transitions before passing.
 
-There is deliberately **no real model runtime yet**. The next planned milestone is the **long-horizon scripted autonomy benchmark**: multi-step dependencies, interruption/resume, memory pressure, failure/recovery, and contradiction scenarios executed for hundreds of state transitions before a real reasoning model is introduced.
+There is deliberately **no real model runtime yet**. The next planned milestone is the **external self-schema and telemetry metrics layer**: a machine-readable description of the running architecture generated from actual system state, plus rolling operational metrics for pressure, retrieval usefulness, routines, recovery, verification, errors, contradictions, budgets, tools, and component versions. Only after that observability/self-model substrate is grounded do we move to the real reasoning-core swap.
 
 ## Getting started
 
@@ -42,6 +44,7 @@ harness-x --help
 harness-x validate-config configs/default.yaml
 harness-x verify-trace path/to/trace.jsonl
 harness-x replay-fixture path/to/fixture.json
+harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-scripted
 ```
 
 ## Core idea
