@@ -131,6 +131,22 @@ class CurriculumDataset(BaseModel):
             if item.definition.split == DatasetSplit.EVAL
         )
 
+    @model_validator(mode="after")
+    def verify_manifest_matches_examples(self) -> "CurriculumDataset":
+        train = self.train
+        evaluation = self.eval
+        if len(train) != self.manifest.train_count:
+            raise ValueError("manifest train_count does not match dataset")
+        if len(evaluation) != self.manifest.eval_count:
+            raise ValueError("manifest eval_count does not match dataset")
+        if tuple(item.definition.seed_id for item in train) != self.manifest.train_seed_ids:
+            raise ValueError("manifest training seed order/content does not match dataset")
+        if tuple(item.definition.seed_id for item in evaluation) != self.manifest.eval_seed_ids:
+            raise ValueError("manifest evaluation seed order/content does not match dataset")
+        if dataset_fingerprint(self.examples) != self.manifest.dataset_fingerprint:
+            raise ValueError("dataset fingerprint does not match manifest")
+        return self
+
     def write(self, output_directory: str | Path) -> None:
         output = Path(output_directory)
         output.mkdir(parents=True, exist_ok=True)
@@ -154,6 +170,12 @@ def canonical_json(value: Any) -> str:
         separators=(",", ":"),
         ensure_ascii=False,
     )
+
+
+def dataset_fingerprint(examples: tuple[SelfModelExample, ...]) -> str:
+    return hashlib.sha256(
+        canonical_json([item.scenario_fingerprint for item in examples]).encode("utf-8")
+    ).hexdigest()
 
 
 def example_fingerprint(
