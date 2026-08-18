@@ -1,7 +1,15 @@
 """Stable contracts owned by the Harness X core."""
 
 from .clock import Clock, FixedClock, SystemClock
-from .contracts import ActionProposal, ComputeBudget, Observation, Proposal, VerificationResult
+from .contracts import (
+    ActionProposal,
+    ComputeBudget,
+    Observation,
+    Proposal,
+    ReasoningRequest,
+    ReasoningResult,
+    VerificationResult,
+)
 from .errors import (
     BudgetExhaustedError,
     CheckpointError,
@@ -49,6 +57,8 @@ __all__ = [
     "OrchestratorError",
     "Proposal",
     "Provenance",
+    "ReasoningRequest",
+    "ReasoningResult",
     "ReplayError",
     "ReplayMismatchError",
     "Result",
