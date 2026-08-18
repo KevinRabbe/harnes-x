@@ -10,7 +10,7 @@ Labels may come only from:
 
 Teacher-model answers are not used as labels.
 
-Each record keeps its scenario seed, architecture family, source system/state fingerprint, expected structured decision, accepted alternatives, structured rationale metadata, and label source. Evaluation seeds are separate from training seeds, and selected diagnostic fault families are held out entirely from training.
+Each record keeps its scenario seed, architecture family, source system/state fingerprint, expected structured decision, accepted alternatives, structured rationale metadata, and label source. Evaluation seeds are separate from training seeds. The default split policy also holds out complete diagnostic fault families rather than randomly splitting their rows.
 
 The generated files are:
 
