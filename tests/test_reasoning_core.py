@@ -239,8 +239,8 @@ def test_same_architecture_runs_stub_and_http_reasoning_core(tmp_path) -> None:
     assert report.real.model_inference is True
     assert report.stub.tool_succeeded and report.real.tool_succeeded
     assert report.stub.verification_accepted and report.real.verification_accepted
-    assert report.stub.proposal_unverified_model_provenance
-    assert report.real.proposal_unverified_model_provenance
+    assert report.stub.proposal_provenance_valid
+    assert report.real.proposal_provenance_valid
     assert not report.stub.private_reasoning_recorded
     assert not report.real.private_reasoning_recorded
     assert handler.received_requests
