@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–9 implemented on the current development stack.**
+**Milestones 0–10 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -24,7 +24,7 @@ The implementation now contains:
 - versioned deterministic retrieval, write, focus, compute, and maintenance gates whose decisions are traced with canonical input-state fingerprints;
 - config-owned gate thresholds and the hard boundary that gates propose flow decisions while memory/orchestrator owners remain solely responsible for mutation;
 - a versioned routine engine with explicit preconditions, required state views, authority envelopes, step policies, verification requirements, request fingerprints, and nested routine tracing;
-- deterministic task, verification, recovery, and consolidation routines that exercise the real orchestrator/memory/gate/trace architecture while the reasoning core remains an in-process stub with zero model inference;
+- deterministic task, verification, recovery, and consolidation routines that exercise the real orchestrator/memory/gate/trace architecture while a deterministic reasoning core remains available as the baseline;
 - a declared tool registry and permission boundary with versioned input/output schemas, routine authority checks, explicit permissions, side-effect classes, tool-action budget enforcement, normalized failures/timeouts, and schema-valid tool-origin observations;
 - a tool-backed task routine that enforces `ActionProposal != ActionExecution` and routes proposals through registry, permission, validation, budget, execution, observation, verification, and memory;
 - evidence-gated semantic memory with candidate claims, confidence, preserved source provenance, explicit evaluation/promotion, symmetric contradiction links, invalidation, and revision history;
@@ -32,11 +32,14 @@ The implementation now contains:
 - explicit consolidation pipelines in which episodes create candidates but never directly create semantic truth or active procedures;
 - a long-horizon scripted autonomy benchmark spanning dependency ordering, interruption/checkpoint resume, repeated working-memory pressure, tool/verifier failure recovery, and contradictory verified observations;
 - machine-readable benchmark reports whose pressure, retrieval, recovery, action, verification, lifecycle, and trace-integrity metrics are derived from authoritative state/events wherever practical, with the suite required to survive at least 300 authoritative transitions before passing;
-- a grounded `SystemSelfSchema` generated from authoritative runtime owners, traces, configuration, declared component metadata, tools, permissions, budgets, memory state, errors, and explicit limitations rather than model introspection;
+- a grounded `SystemSelfSchema` generated from authoritative runtime owners, traces, configuration, declared component metadata, tools, permissions, budgets, memory state, errors, installed reasoning-core metadata, and explicit limitations rather than model introspection;
 - a canonical self-state fingerprint plus side-effect-free rolling metrics for working pressure, retrieval usefulness, routine success, recovery success, verifier rejection, unresolved-error age, contradictions, maintenance, and tool actions;
-- append-only metrics samples for dashboard/history use while causal traces remain the source of truth.
+- append-only metrics samples for dashboard/history use while causal traces remain the source of truth;
+- a stable replaceable `ReasoningCore` boundary, deterministic bounded context construction, structured proposal-only model output, software-assigned candidate identity/provenance, and reasoning request/result trace events that never record private chain-of-thought;
+- a deterministic `StubReasoningCore` baseline plus a local-first OpenAI-compatible HTTP adapter suitable for locally served llama.cpp/vLLM/Ollama-style runtimes, with loopback-only endpoints by default;
+- a fake-to-real reasoning swap probe that runs stub and model-runtime proposals through the same surrounding architecture, tool permission/execution boundary, verifier, and replay checks without changing memory or orchestrator ownership.
 
-There is deliberately **no real model runtime yet**. The next planned milestone is the **reasoning-core fake-to-real swap**: keep orchestrator, memory ownership, gates, routines, tools, verification, and self-schema stable while replacing the deterministic reasoning stub behind the existing bounded `ReasoningRequest` / `ReasoningResult` interface.
+A **real model-runtime adapter now exists**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI validates the exact HTTP/runtime boundary with a local fixture while the deterministic core remains the comparison baseline. The next planned milestone is **model-assisted routines**: progressively hand planning proposals, retrieval-query formulation, hypotheses, recovery proposals, semantic candidate extraction, routine recommendations, and experiment proposals to the reasoning core while measuring each change against the existing deterministic behavior.
 
 ## Getting started
 
@@ -48,6 +51,7 @@ harness-x validate-config configs/default.yaml
 harness-x verify-trace path/to/trace.jsonl
 harness-x replay-fixture path/to/fixture.json
 harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-scripted
+harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 ```
 
 ## Core idea
@@ -112,9 +116,9 @@ Harness X is planned around the following major subsystems:
 
 ## Architecture-first development
 
-The surrounding system should be testable before a real LLM is required. Early development therefore uses deterministic or scripted reasoning-core stubs so that memory, scheduling, gates, telemetry, replay, and state transitions can be validated independently from model quality.
+The surrounding system is testable without a real LLM. Deterministic reasoning-core stubs remain permanent baselines so memory, scheduling, gates, telemetry, replay, and state transitions can be validated independently from model quality.
 
-Only after the architecture can operate coherently is a real model plugged into the `ReasoningCore` interface.
+Milestone 10 adds the first model-runtime adapter behind the same `ReasoningCore` boundary. Swapping the reasoning core does not grant it memory ownership, tool authority, permission authority, or direct state mutation.
 
 The initial neural strategy is intentionally modest:
 

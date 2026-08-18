@@ -64,6 +64,18 @@ class ToolSelfDescription(BaseModel):
     idempotent: bool
 
 
+class ReasoningCoreSelfDescription(BaseModel):
+    """Telemetry-owned description of the installed replaceable reasoning backend."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    version: str
+    model: str
+    transport: str
+    model_inference: bool
+
+
 class SystemSelfSchema(BaseModel):
     """Machine-readable description of what the running system actually contains."""
 
@@ -87,6 +99,7 @@ class SystemSelfSchema(BaseModel):
     metrics: RuntimeMetrics
     known_limitations: tuple[str, ...]
     state_fingerprint: str
+    reasoning_core: ReasoningCoreSelfDescription | None = None
 
 
 class SelfSchemaBuilder:
@@ -117,6 +130,7 @@ class SelfSchemaBuilder:
         registry: ToolRegistry,
         granted_permissions: frozenset[str],
         known_limitations: tuple[str, ...] = (),
+        reasoning_core_info: Any | None = None,
     ) -> None:
         self.config = config
         self.recorder = recorder
@@ -131,6 +145,15 @@ class SelfSchemaBuilder:
         self.registry = registry
         self.granted_permissions = granted_permissions
         self.known_limitations = known_limitations
+        if reasoning_core_info is None:
+            self.reasoning_core_info = None
+        else:
+            raw = (
+                reasoning_core_info.model_dump(mode="json")
+                if hasattr(reasoning_core_info, "model_dump")
+                else reasoning_core_info
+            )
+            self.reasoning_core_info = ReasoningCoreSelfDescription.model_validate(raw)
 
     def build(self) -> SystemSelfSchema:
         events = self.recorder.store.events(trace_id=self.recorder.trace_id)
@@ -182,6 +205,11 @@ class SelfSchemaBuilder:
             "recent_errors": list(recent_errors),
             "metrics": metrics.model_dump(mode="json"),
             "known_limitations": list(self.known_limitations),
+            "reasoning_core": (
+                self.reasoning_core_info.model_dump(mode="json")
+                if self.reasoning_core_info is not None
+                else None
+            ),
         }
         canonical = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -262,6 +290,14 @@ class SelfSchemaBuilder:
             ComponentSelfDescription(component="orchestrator", kind="controller", version="orchestrator-v1"),
             ComponentSelfDescription(component="trace", kind="telemetry", version="trace-v1"),
         ]
+        if self.reasoning_core_info is not None:
+            result.append(
+                ComponentSelfDescription(
+                    component="reasoning.core",
+                    kind="reasoning_core",
+                    version=self.reasoning_core_info.version,
+                )
+            )
         result.extend(
             ComponentSelfDescription(
                 component=f"memory.{name}", kind="memory", version=version
