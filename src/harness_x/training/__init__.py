@@ -8,6 +8,7 @@ from .curriculum import (
     CurriculumGenerator,
     architecture_family,
 )
+from .dataset import load_curriculum
 from .fault_injection import FaultFamily, InjectedFaultCase, inject_fault
 from .models import (
     CurriculumDataset,
@@ -36,4 +37,5 @@ __all__ = [
     "SelfModelExample",
     "architecture_family",
     "inject_fault",
+    "load_curriculum",
 ]
