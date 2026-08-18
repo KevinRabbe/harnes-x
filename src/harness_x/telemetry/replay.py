@@ -55,13 +55,8 @@ class TraceReplayer:
                 raise ReplayError(
                     f"expected step {previous_step + 1}, got {event.step}"
                 )
-            if (
-                previous_timestamp is not None
-                and event.timestamp < previous_timestamp
-            ):
-                raise ReplayError(
-                    f"timestamp moved backwards at step {event.step}"
-                )
+            if previous_timestamp is not None and event.timestamp < previous_timestamp:
+                raise ReplayError(f"timestamp moved backwards at step {event.step}")
 
             task = str(event.task_id)
             if event.event_type == EventType.TASK_CREATED:
@@ -70,8 +65,7 @@ class TraceReplayer:
                 tasks.add(task)
             elif task not in tasks:
                 raise ReplayError(
-                    f"event at step {event.step} references task {task} "
-                    "before task_created"
+                    f"event at step {event.step} references task {task} before task_created"
                 )
 
             if event.event_type == EventType.GOAL_CREATED:
@@ -100,19 +94,11 @@ class TraceReplayer:
                 modes[task] = target
 
             elif event.event_type == EventType.MEMORY_WRITTEN:
-                for ref in self._refs(
-                    event.output_refs,
-                    "mem_",
-                    "memory_written",
-                ):
+                for ref in self._refs(event.output_refs, "mem_", "memory_written"):
                     memories.add(ref)
 
             elif event.event_type == EventType.MEMORY_EVICTED:
-                for ref in self._refs(
-                    event.input_refs,
-                    "mem_",
-                    "memory_evicted",
-                ):
+                for ref in self._refs(event.input_refs, "mem_", "memory_evicted"):
                     if ref not in memories:
                         raise ReplayError(f"memory {ref} evicted before write")
                     memories.remove(ref)
@@ -120,17 +106,11 @@ class TraceReplayer:
             elif event.event_type == EventType.BUDGET_CHANGED:
                 budget = event.metadata.get("budget")
                 if not isinstance(budget, dict):
-                    raise ReplayError(
-                        "budget_changed requires metadata.budget object"
-                    )
+                    raise ReplayError("budget_changed requires metadata.budget object")
                 budgets[task] = budget
 
             elif event.event_type == EventType.CANDIDATE_CREATED:
-                for ref in self._refs(
-                    event.output_refs,
-                    "candidate_",
-                    "candidate_created",
-                ):
+                for ref in self._refs(event.output_refs, "candidate_", "candidate_created"):
                     if ref in candidates:
                         raise ReplayError(f"candidate {ref} was created twice")
                     candidates[ref] = "created"
@@ -139,6 +119,7 @@ class TraceReplayer:
                 EventType.CANDIDATE_EVALUATED,
                 EventType.CANDIDATE_PROMOTED,
                 EventType.CANDIDATE_REJECTED,
+                EventType.CANDIDATE_INVALIDATED,
             }:
                 refs = self._refs(
                     event.input_refs or event.output_refs,
@@ -149,19 +130,16 @@ class TraceReplayer:
                     EventType.CANDIDATE_EVALUATED: "evaluated",
                     EventType.CANDIDATE_PROMOTED: "promoted",
                     EventType.CANDIDATE_REJECTED: "rejected",
+                    EventType.CANDIDATE_INVALIDATED: "invalidated",
                 }[event.event_type]
                 for ref in refs:
                     if ref not in candidates:
-                        raise ReplayError(
-                            f"candidate {ref} changed before creation"
-                        )
+                        raise ReplayError(f"candidate {ref} changed before creation")
                     candidates[ref] = status
 
             elif event.event_type == EventType.ERROR_RECORDED:
                 code = event.metadata.get("code")
-                errors.append(
-                    str(code) if code is not None else f"step:{event.step}"
-                )
+                errors.append(str(code) if code is not None else f"step:{event.step}")
 
             previous_step = event.step
             previous_timestamp = event.timestamp
@@ -191,9 +169,7 @@ class TraceReplayer:
     @staticmethod
     def _refs(refs: list[str], prefix: str, event_name: str) -> list[str]:
         if not refs:
-            raise ReplayError(
-                f"{event_name} requires at least one reference"
-            )
+            raise ReplayError(f"{event_name} requires at least one reference")
         if any(not ref.startswith(prefix) for ref in refs):
             raise ReplayError(
                 f"{event_name} contains a reference without {prefix!r} prefix"
