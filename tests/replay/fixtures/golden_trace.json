@@ -1,0 +1,78 @@
+{
+  "fixture_schema_version": "1",
+  "trace_id": {
+    "value": "trace_golden"
+  },
+  "events": [
+    {
+      "schema_version": "1",
+      "event_id": {"value": "event_golden1"},
+      "trace_id": {"value": "trace_golden"},
+      "task_id": {"value": "task_golden"},
+      "step": 1,
+      "timestamp": "2026-08-18T14:00:00Z",
+      "event_type": "task_created",
+      "component": "orchestrator",
+      "system_version": {"value": "0.1.0-alpha.0"},
+      "input_refs": [],
+      "output_refs": [],
+      "metadata": {}
+    },
+    {
+      "schema_version": "1",
+      "event_id": {"value": "event_golden2"},
+      "trace_id": {"value": "trace_golden"},
+      "task_id": {"value": "task_golden"},
+      "step": 2,
+      "timestamp": "2026-08-18T14:00:00Z",
+      "event_type": "goal_created",
+      "component": "goals",
+      "system_version": {"value": "0.1.0-alpha.0"},
+      "input_refs": [],
+      "output_refs": ["goal_primary"],
+      "metadata": {"status": "active"}
+    },
+    {
+      "schema_version": "1",
+      "event_id": {"value": "event_golden3"},
+      "trace_id": {"value": "trace_golden"},
+      "task_id": {"value": "task_golden"},
+      "step": 3,
+      "timestamp": "2026-08-18T14:00:00Z",
+      "event_type": "mode_changed",
+      "component": "orchestrator",
+      "system_version": {"value": "0.1.0-alpha.0"},
+      "input_refs": [],
+      "output_refs": [],
+      "metadata": {"to": "TASK_ACTIVE"}
+    },
+    {
+      "schema_version": "1",
+      "event_id": {"value": "event_golden4"},
+      "trace_id": {"value": "trace_golden"},
+      "task_id": {"value": "task_golden"},
+      "step": 4,
+      "timestamp": "2026-08-18T14:00:00Z",
+      "event_type": "gate_decision",
+      "component": "focus_gate",
+      "system_version": {"value": "0.1.0-alpha.0"},
+      "input_refs": [],
+      "output_refs": [],
+      "metadata": {
+        "decision": "continue",
+        "policy_version": "deterministic-v1"
+      }
+    }
+  ],
+  "expected_state": {
+    "trace_id": {"value": "trace_golden"},
+    "last_step": 4,
+    "tasks": ["task_golden"],
+    "goals": {"goal_primary": "active"},
+    "modes": {"task_golden": "TASK_ACTIVE"},
+    "memories": [],
+    "candidates": {},
+    "errors": [],
+    "budgets": {}
+  }
+}
