@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-x"
+version = "0.1.0a0"
+description = "Architecture-first cognitive harness for model-independent autonomous systems research"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.10,<3",
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+]
+
+[project.scripts]
+harness-x = "harness_x.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harness_x"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

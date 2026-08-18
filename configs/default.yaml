@@ -1,0 +1,6 @@
+system_version: "0.1.0-alpha.0"
+trace_directory: ".harness-x/traces"
+budget:
+  max_reasoning_steps: 32
+  max_tool_actions: 16
+  max_output_tokens: 8192
