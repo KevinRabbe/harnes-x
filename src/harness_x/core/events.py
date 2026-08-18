@@ -38,6 +38,7 @@ class EventType(StrEnum):
     CANDIDATE_EVALUATED = "candidate_evaluated"
     CANDIDATE_PROMOTED = "candidate_promoted"
     CANDIDATE_REJECTED = "candidate_rejected"
+    CANDIDATE_INVALIDATED = "candidate_invalidated"
 
 
 class TraceEvent(BaseModel):
