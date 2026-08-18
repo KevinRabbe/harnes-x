@@ -12,15 +12,17 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–2 implemented on the current development stack.**
+**Milestones 0–3 implemented on the current development stack.**
 
 The implementation now contains:
 
 - the typed Python package, IDs/contracts, provenance, external compute budgets, explicit clock abstraction, configuration, CLI, tests, and CI;
 - a structured causal event spine, append-only hash-chained trace ledger, portable fixtures, deterministic replay, and trace/replay CLI validation;
-- an explicit software-owned orchestrator with immutable task sessions, legal operating-mode transitions, budget-triggered suspension, exact-mode resume, hash-verified checkpoints, stale-checkpoint refusal, parent/child task relationships, and scheduler observation hooks.
+- an explicit software-owned orchestrator with immutable task sessions, legal operating-mode transitions, budget-triggered suspension, exact-mode resume, hash-verified checkpoints, stale-checkpoint refusal, parent/child task relationships, and scheduler observation hooks;
+- explicit goal, working, episodic, and error/anomaly memory surfaces with separate lifecycles and invariants;
+- authoritative goal history, pinned governing constraints, bounded working-state pressure, deterministic eviction, trace-backed episodic records, baseline non-embedding retrieval, and evidence-gated error resolution.
 
-There is deliberately **no model runtime dependency yet**. The next planned milestone is the minimal authoritative memory system: goal memory and bounded working state first, then episodic/error memory and retrieval/write policies.
+There is deliberately **no model runtime dependency yet**. The next planned milestone is **deterministic gates**: explicit retrieval, write, focus, compute, and maintenance decisions over the software-owned state built so far.
 
 ## Getting started
 
