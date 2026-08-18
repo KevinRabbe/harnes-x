@@ -146,6 +146,7 @@ class BoundedContextBuilder:
                     "system_version",
                     "operating_mode",
                     "state_fingerprint",
+                    "reasoning_core",
                     "known_limitations",
                 )
                 if key in request.self_schema
