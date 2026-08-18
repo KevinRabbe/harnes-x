@@ -13,7 +13,10 @@ def load_curriculum(directory: str | Path) -> CurriculumDataset:
         (root / "manifest.json").read_text(encoding="utf-8")
     )
     examples: list[SelfModelExample] = []
-    for name in ("train.jsonl", "eval.jsonl"):
+    # CurriculumGenerator's canonical ordering sorts eval before train because the
+    # split value participates in the stable key. Reconstruct that same order so
+    # the manifest content fingerprint can be verified on load.
+    for name in ("eval.jsonl", "train.jsonl"):
         path = root / name
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
