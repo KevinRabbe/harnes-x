@@ -90,6 +90,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for scenario traces and model-assisted-report.json",
     )
 
+    curriculum = subparsers.add_parser(
+        "generate-self-model-curriculum",
+        help="Generate grounded Milestone 12 train/eval JSONL from a SystemSelfSchema snapshot",
+    )
+    curriculum.add_argument("config", type=Path)
+    curriculum.add_argument(
+        "self_schema",
+        type=Path,
+        help="JSON file containing a grounded SystemSelfSchema snapshot",
+    )
+    curriculum.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/self-model-curriculum"),
+        help="Directory for train.jsonl, eval.jsonl, and manifest.json",
+    )
+
     return parser
 
 
@@ -163,6 +180,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
         print(report.model_dump_json(indent=2))
         return 0 if report.passed else 1
+
+    if args.command == "generate-self-model-curriculum":
+        from .telemetry.self_schema import SystemSelfSchema
+        from .training import CurriculumGenerator
+
+        config = load_config(args.config)
+        schema = SystemSelfSchema.model_validate_json(
+            args.self_schema.read_text(encoding="utf-8")
+        )
+        dataset = CurriculumGenerator(config).generate(schema)
+        dataset.write(args.output)
+        print(dataset.manifest.model_dump_json(indent=2))
+        return 0
 
     parser.print_help()
     return 0

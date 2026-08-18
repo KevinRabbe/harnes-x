@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–11 implemented on the current development stack.**
+**Milestones 0–12 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -41,9 +41,12 @@ The implementation now contains:
 - seven recommendation-only model-assisted routine families for planning, retrieval-query formulation, hypothesis generation, recovery proposals, semantic candidate extraction, routine-selection recommendations, and experiment proposals;
 - a permanent deterministic shadow baseline plus deterministic evaluator for every assisted decision, with the model selected only when it meets the minimum score and **strictly beats** the baseline;
 - shadow-only behavior when no external evaluation reference exists, deterministic fallback on reasoning-runtime failure, and explicit rejection of authority-shaped recommendation payloads;
-- causal `assisted_decision_compared` trace events plus a `model-assisted-routines-v1` benchmark that separates harness containment from model quality and verifies reasoning-budget use without granting model mutation/tool authority.
+- causal `assisted_decision_compared` trace events plus a `model-assisted-routines-v1` benchmark that separates harness containment from model quality and verifies reasoning-budget use without granting model mutation/tool authority;
+- a grounded self-model curriculum generator covering structural, operational, diagnostic, and causal/counterfactual scenarios without using a teacher LLM for labels;
+- deterministic fault injection for memory saturation, semantic conflicts, blocked goals, repeated tool failures, verifier rejection, budget exhaustion, and maintenance pressure, with structured evidence, uncertainty, and safe next experiments;
+- train/eval JSONL datasets with scenario/state/generator fingerprints, explicit label provenance, split-isolation validation, held-out diagnostic fault families, and a manifest-level dataset integrity hash.
 
-A **real model-runtime adapter and model-assisted decision layer now exist**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI validates the runtime and assisted-decision boundaries with deterministic fixtures while the deterministic core/rules remain permanent comparison baselines. The next planned milestone is the **self-model curriculum generator**: generate ground-truth structural, operational, diagnostic, and causal training scenarios from known Harness X state and deliberately injected faults, while keeping evaluation scenario families separate from training generation.
+A **real model-runtime adapter, model-assisted decision layer, and grounded self-model curriculum generator now exist**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI still validates the runtime and assisted-decision boundaries with deterministic fixtures while the deterministic core/rules remain permanent comparison baselines. The next planned milestone is **initial self-model adapter training**: start with a small high-quality generated curriculum, use LoRA/QLoRA-style parameter-efficient tuning, and evaluate on held-out fault families/configurations before expanding the dataset.
 
 ## Getting started
 
@@ -57,6 +60,7 @@ harness-x replay-fixture path/to/fixture.json
 harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-scripted
 harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
+harness-x generate-self-model-curriculum configs/default.yaml path/to/system-self-schema.json --output .harness-x/self-model-curriculum
 ```
 
 ## Core idea
@@ -126,6 +130,8 @@ The surrounding system is testable without a real LLM. Deterministic reasoning-c
 Milestone 10 adds the first model-runtime adapter behind the same `ReasoningCore` boundary. Swapping the reasoning core does not grant it memory ownership, tool authority, permission authority, or direct state mutation.
 
 Milestone 11 begins using the core for selected reasoning-heavy recommendations. Each assisted behavior remains paired with an old deterministic baseline and a deterministic evaluator. Model output is only selected when measurable evidence says it improves on the baseline; a tie, missing evaluation evidence, runtime failure, or authority-policy violation leaves the deterministic path in control.
+
+Milestone 12 generates the first self-model curriculum from known Harness X state, active deterministic policies, deliberately injected faults, and declared interventions. Training labels therefore come from the system/simulator rather than from another model guessing what Harness X contains or why it failed. Evaluation seeds and selected fault families are held out instead of relying on a random row split.
 
 The initial neural strategy is intentionally modest:
 
