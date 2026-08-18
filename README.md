@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–4 implemented on the current development stack.**
+**Milestones 0–5 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -22,9 +22,11 @@ The implementation now contains:
 - explicit goal, working, episodic, and error/anomaly memory surfaces with separate lifecycles and invariants;
 - authoritative goal history, pinned governing constraints, bounded working-state pressure, deterministic eviction, trace-backed episodic records, baseline non-embedding retrieval, and evidence-gated error resolution;
 - versioned deterministic retrieval, write, focus, compute, and maintenance gates whose decisions are traced with canonical input-state fingerprints;
-- config-owned gate thresholds and the hard boundary that gates propose flow decisions while memory/orchestrator owners remain solely responsible for mutation.
+- config-owned gate thresholds and the hard boundary that gates propose flow decisions while memory/orchestrator owners remain solely responsible for mutation;
+- a versioned routine engine with explicit preconditions, required state views, authority envelopes, step policies, verification requirements, request fingerprints, and nested routine tracing;
+- deterministic task, verification, recovery, and consolidation routines that exercise the real orchestrator/memory/gate/trace architecture while the reasoning core remains an in-process stub with zero model inference.
 
-There is deliberately **no model runtime dependency yet**. The next planned milestone is the **routine engine**: explicit planning, execution, verification, recovery, maintenance, and consolidation procedures that consume gate decisions and software-owned state without making the future reasoning model itself the workflow engine.
+There is deliberately **no real model runtime and no external tool execution yet**. The next planned milestone is the **tool registry and permission boundary**: declared tools, permissions, side-effect classes, normalized execution results, timeouts, and explicit separation between action proposal and execution.
 
 ## Getting started
 
