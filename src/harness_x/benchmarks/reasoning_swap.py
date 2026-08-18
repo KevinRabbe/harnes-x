@@ -72,8 +72,9 @@ class ReasoningSwapReport(BaseModel):
 def _architecture_signature(schema) -> str:
     payload = {
         "components": [
-            item.model_dump(mode="json") for item in schema.components
-            if item.kind != "telemetry"
+            item.model_dump(mode="json")
+            for item in schema.components
+            if item.kind not in {"telemetry", "reasoning_core"}
         ],
         "memories": [
             {
@@ -117,6 +118,7 @@ def _run_core(
         known_limitations=(
             "reasoning core proposes only; tool execution and verification remain external",
         ),
+        reasoning_core_info=core.info,
     ).build()
 
     request = ReasoningRequest(
