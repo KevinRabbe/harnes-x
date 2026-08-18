@@ -92,6 +92,7 @@ class ToolResult(BaseModel):
     error: str | None = None
     duration_ms: float = Field(default=0.0, ge=0.0)
     side_effect_level: SideEffectLevel | None = None
+    execution_may_continue: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -262,22 +263,29 @@ class ToolExecutor:
             )
 
         started = time.perf_counter()
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="harness-x-tool")
+        future = pool.submit(definition.handler, parsed_input)
         try:
-            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="harness-x-tool") as pool:
-                future = pool.submit(definition.handler, parsed_input)
-                raw_output = future.result(timeout=definition.spec.timeout_seconds)
+            raw_output = future.result(timeout=definition.spec.timeout_seconds)
         except FutureTimeoutError:
             duration = (time.perf_counter() - started) * 1000.0
+            future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
             return self._finish(
                 proposal,
                 definition,
                 status=ToolStatus.TIMEOUT,
-                error=f"tool exceeded {definition.spec.timeout_seconds}s timeout",
+                error=(
+                    f"tool exceeded {definition.spec.timeout_seconds}s timeout; "
+                    "in-process handler cancellation is not guaranteed"
+                ),
                 duration_ms=duration,
                 executed=True,
+                execution_may_continue=True,
             )
         except Exception as exc:
             duration = (time.perf_counter() - started) * 1000.0
+            pool.shutdown(wait=True, cancel_futures=True)
             return self._finish(
                 proposal,
                 definition,
@@ -286,6 +294,8 @@ class ToolExecutor:
                 duration_ms=duration,
                 executed=True,
             )
+        else:
+            pool.shutdown(wait=True)
 
         duration = (time.perf_counter() - started) * 1000.0
         try:
@@ -336,6 +346,7 @@ class ToolExecutor:
         error: str | None = None,
         duration_ms: float = 0.0,
         executed: bool,
+        execution_may_continue: bool = False,
     ) -> ToolResult:
         result = ToolResult(
             candidate_id=str(proposal.candidate_id),
@@ -346,6 +357,7 @@ class ToolExecutor:
             error=error,
             duration_ms=duration_ms,
             side_effect_level=(definition.spec.side_effect_level if definition else None),
+            execution_may_continue=execution_may_continue,
         )
         self.recorder.emit(
             EventType.TOOL_EXECUTION_FINISHED,
@@ -373,6 +385,7 @@ class ToolExecutor:
                     "external_side_effect": (
                         result.side_effect_level not in {None, SideEffectLevel.NONE}
                     ),
+                    "execution_may_continue": execution_may_continue,
                 },
             )
         return result
