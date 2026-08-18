@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–8 implemented on the current development stack.**
+**Milestones 0–9 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -31,9 +31,12 @@ The implementation now contains:
 - versioned procedural memory with repeated-success candidate formation, explicit evaluation/promotion, independent coexisting versions, usage/success/failure/cost statistics, known failure modes, invalidation, and history;
 - explicit consolidation pipelines in which episodes create candidates but never directly create semantic truth or active procedures;
 - a long-horizon scripted autonomy benchmark spanning dependency ordering, interruption/checkpoint resume, repeated working-memory pressure, tool/verifier failure recovery, and contradictory verified observations;
-- machine-readable benchmark reports whose pressure, retrieval, recovery, action, verification, lifecycle, and trace-integrity metrics are derived from authoritative state/events wherever practical, with the suite required to survive at least 300 authoritative transitions before passing.
+- machine-readable benchmark reports whose pressure, retrieval, recovery, action, verification, lifecycle, and trace-integrity metrics are derived from authoritative state/events wherever practical, with the suite required to survive at least 300 authoritative transitions before passing;
+- a grounded `SystemSelfSchema` generated from authoritative runtime owners, traces, configuration, declared component metadata, tools, permissions, budgets, memory state, errors, and explicit limitations rather than model introspection;
+- a canonical self-state fingerprint plus side-effect-free rolling metrics for working pressure, retrieval usefulness, routine success, recovery success, verifier rejection, unresolved-error age, contradictions, maintenance, and tool actions;
+- append-only metrics samples for dashboard/history use while causal traces remain the source of truth.
 
-There is deliberately **no real model runtime yet**. The next planned milestone is the **external self-schema and telemetry metrics layer**: a machine-readable description of the running architecture generated from actual system state, plus rolling operational metrics for pressure, retrieval usefulness, routines, recovery, verification, errors, contradictions, budgets, tools, and component versions. Only after that observability/self-model substrate is grounded do we move to the real reasoning-core swap.
+There is deliberately **no real model runtime yet**. The next planned milestone is the **reasoning-core fake-to-real swap**: keep orchestrator, memory ownership, gates, routines, tools, verification, and self-schema stable while replacing the deterministic reasoning stub behind the existing bounded `ReasoningRequest` / `ReasoningResult` interface.
 
 ## Getting started
 
