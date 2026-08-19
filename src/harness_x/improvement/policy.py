@@ -16,6 +16,8 @@ from .models import (
 
 
 POLICY_VERSION = "improvement-candidate-policy-v1"
+MANDATORY_CANDIDATE_TESTS = frozenset({"trace_replay", "design_invariants"})
+MANDATORY_ROLLBACK_TESTS = frozenset({"trace_replay"})
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,15 @@ class InitialImprovementPolicy:
             reasons.append("automatic_rollback_required")
         if proposal.risk_level in {CandidateRiskLevel.HIGH, CandidateRiskLevel.CRITICAL}:
             reasons.append("risk_level_exceeds_initial_policy")
+
+        missing_candidate_tests = MANDATORY_CANDIDATE_TESTS - set(proposal.required_tests)
+        if missing_candidate_tests:
+            reasons.append("mandatory_candidate_tests_missing")
+        missing_rollback_tests = MANDATORY_ROLLBACK_TESTS - set(
+            proposal.rollback.verification_tests
+        )
+        if missing_rollback_tests:
+            reasons.append("mandatory_rollback_tests_missing")
 
         budget = proposal.resource_budget
         if budget.benchmark_runs > 20:
