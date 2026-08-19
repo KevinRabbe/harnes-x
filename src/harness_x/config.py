@@ -80,12 +80,20 @@ class ImprovementPromotionConfig(BaseModel):
     require_baseline_untouched: bool = True
     require_teardown_verified: bool = True
 
-    @field_validator("policy_version", "max_risk_level")
+    @field_validator("policy_version")
     @classmethod
-    def normalize_promotion_text(cls, value: str) -> str:
+    def normalize_policy_version(cls, value: str) -> str:
         normalized = value.strip().casefold()
         if not normalized:
-            raise ValueError("promotion policy text fields cannot be blank")
+            raise ValueError("promotion policy version cannot be blank")
+        return normalized
+
+    @field_validator("max_risk_level")
+    @classmethod
+    def validate_max_risk_level(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"low", "medium", "high", "critical"}:
+            raise ValueError("max_risk_level must be low, medium, high, or critical")
         return normalized
 
     @field_validator("allowed_change_types")
