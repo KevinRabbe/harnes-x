@@ -11,9 +11,19 @@ import json
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from harness_x.core.ids import CandidateId, SystemVersion
+
+
+_STRICT_FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 
 class CandidateCreator(StrEnum):
@@ -54,14 +64,14 @@ class ChangeOperation(StrEnum):
 
 
 class ChangePatch(BaseModel):
-    """A declarative change; never executable source code."""
+    """A declarative JSON change; never executable source code."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     path: str = Field(min_length=1)
     operation: ChangeOperation
-    before: Any
-    after: Any
+    before: JsonValue
+    after: JsonValue
 
     @field_validator("path")
     @classmethod
@@ -89,7 +99,7 @@ class ChangePatch(BaseModel):
 
 
 class MetricPrediction(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     metric: str = Field(min_length=1)
     expected_delta: float
@@ -98,7 +108,7 @@ class MetricPrediction(BaseModel):
 
 
 class ImprovementHypothesis(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     statement: str = Field(min_length=1)
     mechanism: str = Field(min_length=1)
@@ -106,7 +116,7 @@ class ImprovementHypothesis(BaseModel):
 
 
 class ImprovementResourceBudget(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     benchmark_runs: int = Field(default=3, ge=1)
     max_wall_time_seconds: int = Field(default=900, ge=1)
@@ -115,7 +125,7 @@ class ImprovementResourceBudget(BaseModel):
 
 
 class RollbackPlan(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     strategy: str = Field(min_length=1)
     restore_baseline_version: SystemVersion
@@ -126,7 +136,7 @@ class RollbackPlan(BaseModel):
 class ImprovementProposal(BaseModel):
     """Immutable proposal definition whose fingerprint never changes with status."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     created_by: CandidateCreator
     creator_id: str = Field(min_length=1)
@@ -162,7 +172,10 @@ class ImprovementProposal(BaseModel):
 
     @model_validator(mode="after")
     def scope_covers_patches(self) -> "ImprovementProposal":
-        if any(not any(patch.path.startswith(scope) for scope in self.scope) for patch in self.patches):
+        if any(
+            not any(patch.path.startswith(scope) for scope in self.scope)
+            for patch in self.patches
+        ):
             raise ValueError("every patch must fall inside declared scope")
         metrics = [item.metric for item in self.predicted_metrics]
         if len(metrics) != len(set(metrics)):
@@ -176,7 +189,7 @@ class ImprovementProposal(BaseModel):
 
 
 class CandidateQualification(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     eligible: bool
     reasons: tuple[str, ...]
@@ -194,7 +207,7 @@ class CandidateQualification(BaseModel):
 class ImprovementCandidate(BaseModel):
     """Immutable revision of one improvement candidate."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _STRICT_FROZEN
 
     schema_version: str = "improvement-candidate-v1"
     candidate_id: CandidateId
