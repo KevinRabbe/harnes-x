@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
+from pathlib import Path
 from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -52,6 +53,22 @@ class TrainingCohort(BaseModel):
     eval: tuple[SelfModelExample, ...]
     manifest: TrainingCohortManifest
 
+    def write(self, output_directory: str | Path) -> Path:
+        output = Path(output_directory)
+        output.mkdir(parents=True, exist_ok=True)
+        for filename, values in (
+            ("train-examples.jsonl", self.train),
+            ("eval-examples.jsonl", self.eval),
+        ):
+            (output / filename).write_text(
+                "".join(item.model_dump_json() + "\n" for item in values),
+                encoding="utf-8",
+            )
+        (output / "cohort-manifest.json").write_text(
+            self.manifest.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        return output
+
 
 def _dedupe(examples: Iterable[SelfModelExample]) -> tuple[SelfModelExample, ...]:
     by_fingerprint: dict[str, SelfModelExample] = {}
@@ -73,6 +90,19 @@ def _dedupe(examples: Iterable[SelfModelExample]) -> tuple[SelfModelExample, ...
     )
 
 
+def _cohort_fingerprint(
+    train: tuple[SelfModelExample, ...],
+    evaluation: tuple[SelfModelExample, ...],
+    holdouts: Iterable[str],
+) -> str:
+    payload = {
+        "train": [item.scenario_fingerprint for item in train],
+        "eval": [item.scenario_fingerprint for item in evaluation],
+        "held_out_architecture_families": sorted(holdouts),
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
 def build_training_cohort(
     datasets: Iterable[CurriculumDataset],
     *,
@@ -90,9 +120,6 @@ def build_training_cohort(
         for item in dataset.examples:
             architecture = item.definition.architecture_family
             if architecture in holdouts:
-                # Entire architecture configurations are unseen during training. Do
-                # not rewrite the source example; its fingerprint signs its original
-                # curriculum definition.
                 eval_candidates.append(item)
             elif item.definition.split == DatasetSplit.TRAIN:
                 train_candidates.append(item)
@@ -121,12 +148,7 @@ def build_training_cohort(
     if set(train_seeds) & set(eval_seeds):
         raise ValueError("architecture-qualified seed leakage between train/eval")
 
-    payload = {
-        "train": [item.scenario_fingerprint for item in train],
-        "eval": [item.scenario_fingerprint for item in evaluation],
-        "held_out_architecture_families": sorted(holdouts),
-    }
-    fingerprint = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    fingerprint = _cohort_fingerprint(train, evaluation, holdouts)
     manifest = TrainingCohortManifest(
         cohort_fingerprint=fingerprint,
         train_count=len(train),
@@ -146,4 +168,28 @@ def build_training_cohort(
     if duplicates:
         raise ValueError(f"duplicate architecture-qualified cohort seeds: {sorted(duplicates)!r}")
 
+    return TrainingCohort(train=train, eval=evaluation, manifest=manifest)
+
+
+def load_training_cohort(directory: str | Path) -> TrainingCohort:
+    root = Path(directory)
+    manifest = TrainingCohortManifest.model_validate_json(
+        (root / "cohort-manifest.json").read_text(encoding="utf-8")
+    )
+
+    def read_jsonl(name: str) -> tuple[SelfModelExample, ...]:
+        values: list[SelfModelExample] = []
+        for line in (root / name).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                values.append(SelfModelExample.model_validate_json(line))
+        return tuple(values)
+
+    train = read_jsonl("train-examples.jsonl")
+    evaluation = read_jsonl("eval-examples.jsonl")
+    if len(train) != manifest.train_count or len(evaluation) != manifest.eval_count:
+        raise ValueError("cohort example counts do not match manifest")
+    if _cohort_fingerprint(
+        train, evaluation, manifest.held_out_architecture_families
+    ) != manifest.cohort_fingerprint:
+        raise ValueError("cohort fingerprint does not match persisted examples")
     return TrainingCohort(train=train, eval=evaluation, manifest=manifest)
