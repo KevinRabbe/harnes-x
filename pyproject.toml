@@ -17,6 +17,15 @@ dependencies = [
 dev = [
   "pytest>=8,<10",
 ]
+training = [
+  "torch>=2.4,<3",
+  "transformers>=4.55,<5",
+  "datasets>=3,<5",
+  "accelerate>=1,<2",
+  "peft>=0.13,<1",
+  "trl>=0.26,<0.27",
+  "bitsandbytes>=0.45,<1",
+]
 
 [project.scripts]
 harness-x = "harness_x.cli:main"
