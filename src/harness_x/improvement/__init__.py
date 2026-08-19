@@ -1,5 +1,14 @@
-"""Controlled system-improvement candidate contracts and policy."""
+"""Controlled system-improvement candidates, experiments, and qualification policy."""
 
+from .experiment import (
+    ArtifactDigest,
+    ExperimentDisposition,
+    ExperimentRunResult,
+    ExperimentVariant,
+    MetricComparison,
+    ResourceComparison,
+    SandboxExperimentReport,
+)
 from .models import (
     CandidateCreator,
     CandidateQualification,
@@ -17,23 +26,46 @@ from .models import (
 )
 from .policy import InitialImprovementPolicy, POLICY_VERSION
 from .registry import ImprovementCandidateError, ImprovementCandidateRegistry
+from .sandbox import (
+    ImprovementExperimentSandbox,
+    SandboxBenchmarkRunner,
+    SandboxExperimentError,
+    SandboxExperimentPlan,
+    SandboxSnapshot,
+    ScriptedAutonomyExperimentRunner,
+    snapshot_from_config,
+)
 
 __all__ = [
     "POLICY_VERSION",
+    "ArtifactDigest",
     "CandidateCreator",
     "CandidateQualification",
     "CandidateRiskLevel",
     "CandidateStatus",
     "ChangeOperation",
     "ChangePatch",
+    "ExperimentDisposition",
+    "ExperimentRunResult",
+    "ExperimentVariant",
     "ImprovementCandidate",
     "ImprovementCandidateError",
     "ImprovementCandidateRegistry",
     "ImprovementChangeType",
+    "ImprovementExperimentSandbox",
     "ImprovementHypothesis",
     "ImprovementProposal",
     "ImprovementResourceBudget",
     "InitialImprovementPolicy",
+    "MetricComparison",
     "MetricPrediction",
+    "ResourceComparison",
     "RollbackPlan",
+    "SandboxBenchmarkRunner",
+    "SandboxExperimentError",
+    "SandboxExperimentPlan",
+    "SandboxExperimentReport",
+    "SandboxSnapshot",
+    "ScriptedAutonomyExperimentRunner",
+    "snapshot_from_config",
 ]
