@@ -1,7 +1,8 @@
 """First-class bounded improvement-candidate contracts.
 
-Milestone 14 represents proposed Harness X modifications. It does not execute or
-promote them; execution belongs to the isolated experiment sandbox in Milestone 15.
+Milestone 14 introduced immutable proposals and static sandbox qualification. Milestone
+16 extends the lifecycle with evidence-backed promotion while keeping live application
+inside a separate promotion authority.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ class CandidateRiskLevel(StrEnum):
 class CandidateStatus(StrEnum):
     PROPOSED = "proposed"
     SANDBOX_ELIGIBLE = "sandbox_eligible"
+    PROMOTED = "promoted"
     REJECTED = "rejected"
     INVALIDATED = "invalidated"
 
@@ -151,6 +153,7 @@ class ImprovementProposal(BaseModel):
     risk_level: CandidateRiskLevel
     rollback: RollbackPlan
     supersedes: CandidateId | None = None
+    evidence_refs: tuple[str, ...] = ()
 
     @field_validator("creator_id")
     @classmethod
@@ -160,18 +163,20 @@ class ImprovementProposal(BaseModel):
             raise ValueError("creator_id cannot be blank")
         return value
 
-    @field_validator("scope", "required_tests")
+    @field_validator("scope", "required_tests", "evidence_refs")
     @classmethod
     def normalize_strings(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(value.strip() for value in values if value.strip())
-        if not normalized:
-            raise ValueError("collection cannot be empty")
+        if not normalized and values:
+            raise ValueError("collection cannot contain only blank values")
         if len(normalized) != len(set(normalized)):
             raise ValueError("collection cannot contain duplicates")
         return normalized
 
     @model_validator(mode="after")
     def scope_covers_patches(self) -> "ImprovementProposal":
+        if not self.scope or not self.required_tests:
+            raise ValueError("scope and required tests cannot be empty")
         if any(
             not any(patch.path.startswith(scope) for scope in self.scope)
             for patch in self.patches
@@ -225,9 +230,13 @@ class ImprovementCandidate(BaseModel):
             raise ValueError("proposal fingerprint does not match proposal content")
         if self.status == CandidateStatus.PROPOSED and self.qualification is not None:
             raise ValueError("proposed candidate cannot already have qualification")
-        if self.status == CandidateStatus.SANDBOX_ELIGIBLE:
+        if self.status in {CandidateStatus.SANDBOX_ELIGIBLE, CandidateStatus.PROMOTED}:
             if self.qualification is None or not self.qualification.eligible:
-                raise ValueError("sandbox-eligible candidate requires positive qualification")
+                raise ValueError(
+                    "sandbox-eligible/promoted candidate requires positive qualification"
+                )
+        if self.status == CandidateStatus.PROMOTED and not self.evidence_refs:
+            raise ValueError("promoted candidate requires empirical promotion evidence")
         if self.status == CandidateStatus.REJECTED:
             if self.qualification is None or self.qualification.eligible:
                 raise ValueError("rejected candidate requires failed qualification")
