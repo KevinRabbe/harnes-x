@@ -106,7 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _release_predictor(predictor: object) -> None:
-    del predictor
+    close = getattr(predictor, "close", None)
+    if callable(close):
+        close()
     gc.collect()
     try:
         import torch
