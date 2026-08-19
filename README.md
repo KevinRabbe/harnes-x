@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–15 implemented on the current development stack.**
+**Milestones 0–16 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -50,16 +50,19 @@ The implementation now contains:
 - an optional LoRA/QLoRA training backend using Transformers, PEFT, TRL, and 4-bit loading while leaving the normal Harness X install free of ML-training dependencies;
 - exact base-vs-adapter held-out evaluation for structured accuracy, diagnosis, safe experiments, uncertainty, authority violations, parsing, calibration, and per-family performance;
 - SHA-256-bound evaluation reports plus a conservative adapter-promotion policy that treats successful training and permission to use an adapter as separate states;
-- immutable first-class system-improvement proposals/candidates with software-owned candidate identity, stable proposal fingerprints, exact baseline version, explicit scope/patches, falsifiable hypotheses, predicted metrics, required tests, finite experiment budgets, risk levels, rollback requirements, and lineage;
+- immutable first-class system-improvement proposals/candidates with software-owned candidate identity, stable proposal fingerprints, exact baseline version, explicit scope/patches, falsifiable hypotheses, predicted metrics, required tests, finite experiment budgets, risk levels, rollback requirements, lineage, and optional causal evidence refs;
 - a conservative Milestone 14 qualification policy that permits only configuration thresholds, retrieval scoring, routine ordering, context-builder policy, verification frequency, and memory retention/compaction changes while rejecting code/tool/adapter mutation under the initial policy;
 - strict JSON-only candidate schemas, mandatory replay/design-invariant tests, exact rollback-baseline checks, evidence-backed invalidation, immutable revision history, causal candidate tracing, and the hard rule that `SANDBOX_ELIGIBLE` is **not** live execution or promotion;
 - immutable Milestone 15 experiment snapshots with distinct source/variant system versions and SHA-256 state fingerprints;
 - matched baseline/candidate trials that use identical deterministic seeds, the same trusted benchmark runner, and the candidate's declared run/resource envelope while applying declarative patches only to a deep-copied candidate snapshot;
 - disposable per-run working directories, durable evidence copies with per-file SHA-256 digests, automatic teardown on success or runner failure, and byte-for-byte baseline-snapshot integrity checks;
 - empirical comparison reports containing metric means/deltas, repeated-run variance, reasoning/tool/wall-time cost deltas, new failure modes, budget violations, regressions, and explicit `PROMOTION_RECOMMENDED`, `REJECTION_RECOMMENDED`, or `INCONCLUSIVE` dispositions;
-- a concrete `ScriptedAutonomyExperimentRunner` backed by the permanent long-horizon suite plus `harness-x run-improvement-sandbox` for operator experiments, while keeping the sandbox itself completely unable to promote or commit a change to the live system.
+- a concrete `ScriptedAutonomyExperimentRunner` backed by the permanent long-horizon suite plus `harness-x run-improvement-sandbox` for operator experiments, while keeping the sandbox itself unable to promote or commit a change to the live system;
+- a configured Milestone 16 `PromotionAuthority` that independently rechecks exact candidate/report/baseline fingerprints, live change class, risk, run count, regressions, failure modes, budgets, baseline integrity, teardown, and explicit operator approval unless low-risk auto-promotion is deliberately enabled;
+- immutable versioned live-config artifacts plus one atomically replaced active pointer, a SHA-256-verified rollback artifact, immediate post-activation verification, automatic exact-baseline rollback on verification failure, and evidence-backed `PROMOTED` candidate lifecycle records;
+- the first complete closed system-improvement demonstration: real maintenance-gate traces reveal excess moderate-pressure maintenance, grounded self-analysis proposes `working_pressure_trigger: 0.85 -> 0.90`, three matched sandbox runs measure maintenance cycles `3 -> 1`, the versioned config is promoted after independent verification, and the next self-analysis loads the promoted whole-system version and does not repropose the resolved issue.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, and isolated empirical experiment sandbox now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Sandbox evidence is still only a recommendation: the next planned milestone is **Milestone 16 — the first closed improvement loop**, where one bounded candidate must pass configured empirical promotion criteria and be promoted as a versioned policy with a retained rollback path.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, and first evidence-gated live improvement loop now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Live promotion remains deliberately narrow: operator approval is required by default, source-code/tool/model-weight candidates remain excluded, and the promoted config can be restored from an immutable rollback artifact. The next planned milestone is **Milestone 17 — collect gate training data** for small learned peripheral controllers that must continue competing against deterministic predecessors.
 
 ## Getting started
 
@@ -144,7 +147,7 @@ Harness X is planned around the following major subsystems:
 - **Reasoning-core adapter** — stable interface behind which different LLMs or recurrent reasoning cores can be swapped.
 - **Tool environment** — external actions with explicit permissions, budgets, and structured results.
 - **Evaluator / verifier layer** — independent checks used to distinguish plausible model output from accepted system state.
-- **Improvement sandbox** — isolated candidate changes, replay, benchmarks, regression tests, and rollback.
+- **Improvement sandbox** — isolated candidate changes, replay, benchmarks, regression tests, rollback evidence, and bounded live promotion through a separate authority.
 
 ## Architecture-first development
 
@@ -158,9 +161,11 @@ Milestone 12 generates the first self-model curriculum from known Harness X stat
 
 Milestone 13 adds the first real parameter-efficient training and qualification path. Multiple architecture configurations can contribute data while one configuration is held out entirely; LoRA/QLoRA remains optional; and the trained adapter must beat the untouched base model on the exact same held-out examples without introducing authority, structural, calibration, parsing, or unacceptable general-capability regressions.
 
-Milestone 14 turns proposed system modifications into immutable, versioned candidate objects. Static qualification is deliberately weaker than empirical promotion: it checks bounded scope, current baseline, allowed change class, required regression tests, finite resources, risk, and rollback, then grants at most `SANDBOX_ELIGIBLE`. No Milestone 14 API can apply or promote a candidate.
+Milestone 14 turns proposed system modifications into immutable, versioned candidate objects. Static qualification is deliberately weaker than empirical promotion: it checks bounded scope, current baseline, allowed change class, required regression tests, finite resources, risk, and rollback, then grants at most `SANDBOX_ELIGIBLE`.
 
-Milestone 15 introduces the empirical boundary. A sandbox-eligible candidate is applied only to a deep-copied snapshot with an experiment-specific variant version, then baseline and candidate are run under matched seeds/runner conditions. Benchmark outputs are copied into evidence directories and hashed before disposable working trees are torn down. Comparison separates candidate quality from experiment validity: a valid run can recommend promotion or rejection, while a broken baseline, unsupported declared metric, or damaged isolation produces `INCONCLUSIVE`. Milestone 15 still has no live promotion API.
+Milestone 15 introduces the empirical boundary. A sandbox-eligible candidate is applied only to a deep-copied snapshot with an experiment-specific variant version, then baseline and candidate are run under matched seeds/runner conditions. Benchmark outputs are copied into evidence directories and hashed before disposable working trees are torn down. Comparison separates candidate quality from experiment validity: a valid run can recommend promotion or rejection, while a broken baseline, unsupported declared metric, or damaged isolation produces `INCONCLUSIVE`.
+
+Milestone 16 closes the first loop. A separate promotion authority revalidates sandbox evidence against the exact currently active config, writes a new immutable whole-system config version, switches the active pointer atomically, and immediately runs required verification. Failure restores the exact baseline artifact automatically. Successful promotion is recorded causally, and the next grounded self-analysis is required to execute on the promoted version without regenerating the same resolved improvement candidate.
 
 The initial neural strategy is intentionally modest:
 
@@ -175,20 +180,22 @@ The initial neural strategy is intentionally modest:
 
 Harness X treats recursive improvement as a property of the **whole system**, not only the neural weights.
 
-A valid early improvement loop can therefore be:
+The first implemented loop is now:
 
 ```text
-observe failures
-    -> diagnose from telemetry and traces
-    -> propose a bounded change
-    -> create isolated candidate
-    -> replay / benchmark / regression-test
-    -> compare against current version
-    -> accept or reject
-    -> retain rollback path
+observe gate behavior
+    -> diagnose from causal traces
+    -> propose an evidence-linked bounded threshold change
+    -> statically qualify candidate
+    -> run matched sandbox experiment
+    -> recheck configured promotion criteria
+    -> atomically activate versioned config
+    -> independently verify active version
+    -> keep rollback artifact
+    -> run next self-analysis on improved system
 ```
 
-Possible early improvement targets include retrieval policies, memory schemas, consolidation routines, gate thresholds, planning/debugging routines, context construction, tool selection, verification strategies, scheduling policies, experiment design, and controller models.
+Possible later improvement targets include retrieval policies, memory schemas, consolidation routines, gate thresholds, planning/debugging routines, context construction, tool selection, verification strategies, scheduling policies, experiment design, and controller models.
 
 Changing the main reasoning weights is deliberately **not** required for these loops.
 
@@ -208,6 +215,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Planned architecture](docs/ARCHITECTURE.md)
 - [Detailed implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Design invariants](docs/DESIGN_INVARIANTS.md)
+- [Milestone 16 closed improvement loop](docs/MILESTONE_16_CLOSED_IMPROVEMENT_LOOP.md)
 - [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question
