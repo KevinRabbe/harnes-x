@@ -39,7 +39,12 @@ class TrainingCohortManifest(BaseModel):
 
 
 class TrainingCohort(BaseModel):
-    """Combined training/evaluation examples with explicit architecture holdouts."""
+    """Combined training/evaluation examples with explicit architecture holdouts.
+
+    The source ``SelfModelExample`` objects remain byte-for-byte semantically intact.
+    A cohort decides whether an example is used for training or evaluation without
+    rewriting the signed Milestone 12 ``definition.split`` field.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -85,16 +90,10 @@ def build_training_cohort(
         for item in dataset.examples:
             architecture = item.definition.architecture_family
             if architecture in holdouts:
-                # Entire architecture configurations are unseen during training.
-                eval_candidates.append(
-                    item.model_copy(
-                        update={
-                            "definition": item.definition.model_copy(
-                                update={"split": DatasetSplit.EVAL}
-                            )
-                        }
-                    )
-                )
+                # Entire architecture configurations are unseen during training. Do
+                # not rewrite the source example; its fingerprint signs its original
+                # curriculum definition.
+                eval_candidates.append(item)
             elif item.definition.split == DatasetSplit.TRAIN:
                 train_candidates.append(item)
             else:
@@ -143,7 +142,6 @@ def build_training_cohort(
         eval_seed_ids=eval_seeds,
     )
 
-    # Defensive check that each architecture-qualified seed appears only once per split.
     duplicates = [seed for seed, count in Counter((*train_seeds, *eval_seeds)).items() if count > 1]
     if duplicates:
         raise ValueError(f"duplicate architecture-qualified cohort seeds: {sorted(duplicates)!r}")
