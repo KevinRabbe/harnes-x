@@ -346,7 +346,7 @@ def test_sandbox_fails_closed_for_namespace_missing_from_snapshot(tmp_path: Path
         creator_id="milestone-15-test",
         baseline_version=config.system_version,
         change_type=ImprovementChangeType.CONTEXT_BUILDER_POLICY,
-        scope=("reasoning.context",),
+        scope=("reasoning.context.",),
         patches=(
             ChangePatch(
                 path="reasoning.context.max_chars",
