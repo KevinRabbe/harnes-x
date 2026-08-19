@@ -39,3 +39,17 @@ gates:
     working_pressure_trigger: 0.85
     unresolved_error_trigger: 3
     repeated_failure_trigger: 2
+improvement:
+  promotion:
+    policy_version: "live-promotion-v1"
+    allow_auto_promotion: false
+    allowed_change_types:
+      - config_threshold
+      - retrieval_scoring_policy
+    max_risk_level: low
+    min_paired_runs: 3
+    require_zero_regressions: true
+    require_zero_new_failure_modes: true
+    require_zero_budget_violations: true
+    require_baseline_untouched: true
+    require_teardown_verified: true

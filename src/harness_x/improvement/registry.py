@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from harness_x.core.events import EventType
-from harness_x.core.ids import CandidateId
+from harness_x.core.ids import CandidateId, SystemVersion
 from harness_x.telemetry import TraceRecorder
 
 from .models import (
@@ -19,10 +19,11 @@ class ImprovementCandidateError(ValueError):
 
 
 class ImprovementCandidateRegistry:
-    """Own candidate identity and lifecycle before sandbox execution exists.
+    """Own improvement-candidate identity and lifecycle.
 
-    The registry may create, statically qualify/reject, or invalidate a candidate.
-    It cannot apply patches and intentionally has no promotion method.
+    The registry never applies a live change itself. Milestone 16 permits it to record
+    an evidence-backed promotion outcome only after the separate promotion authority
+    has atomically activated and verified the new bounded configuration version.
     """
 
     component = "improvement.candidates"
@@ -54,6 +55,7 @@ class ImprovementCandidateRegistry:
         self.recorder.emit(
             EventType.CANDIDATE_CREATED,
             self.component,
+            input_refs=list(proposal.evidence_refs),
             output_refs=(str(candidate_id),),
             metadata={
                 "candidate_kind": "system_improvement",
@@ -61,6 +63,7 @@ class ImprovementCandidateRegistry:
                 "change_type": proposal.change_type.value,
                 "proposal_fingerprint": candidate.proposal_fingerprint,
                 "baseline_version": str(proposal.baseline_version),
+                "evidence_ref_count": len(proposal.evidence_refs),
             },
         )
         return candidate
@@ -86,11 +89,7 @@ class ImprovementCandidateRegistry:
             if result.eligible
             else CandidateStatus.REJECTED
         )
-        reason = (
-            "static_policy_passed"
-            if result.eligible
-            else ";".join(result.reasons)
-        )
+        reason = "static_policy_passed" if result.eligible else ";".join(result.reasons)
         updated = current.model_copy(
             update={
                 "revision": current.revision + 1,
@@ -99,7 +98,6 @@ class ImprovementCandidateRegistry:
                 "status_reason": reason,
             }
         )
-        # Revalidate after model_copy so status/qualification invariants are enforced.
         updated = ImprovementCandidate.model_validate(updated.model_dump(mode="python"))
         self._record(updated)
         self.recorder.emit(
@@ -118,6 +116,53 @@ class ImprovementCandidateRegistry:
         )
         return updated
 
+    def record_promotion(
+        self,
+        candidate_id: CandidateId,
+        *,
+        promoted_version: SystemVersion,
+        evidence_refs: tuple[str, ...],
+        reason: str = "live_promotion_verified",
+    ) -> ImprovementCandidate:
+        """Record a promotion already performed by the separate live authority."""
+
+        current = self.require(candidate_id)
+        if current.status != CandidateStatus.SANDBOX_ELIGIBLE:
+            raise ImprovementCandidateError(
+                f"only sandbox-eligible candidates can be promoted, got {current.status.value}"
+            )
+        evidence_refs = tuple(ref.strip() for ref in evidence_refs if ref.strip())
+        reason = reason.strip()
+        if not evidence_refs:
+            raise ImprovementCandidateError("promotion requires empirical evidence references")
+        if not reason:
+            raise ImprovementCandidateError("promotion reason cannot be blank")
+
+        updated = current.model_copy(
+            update={
+                "revision": current.revision + 1,
+                "status": CandidateStatus.PROMOTED,
+                "status_reason": reason,
+                "evidence_refs": evidence_refs,
+            }
+        )
+        updated = ImprovementCandidate.model_validate(updated.model_dump(mode="python"))
+        self._record(updated)
+        self.recorder.emit(
+            EventType.CANDIDATE_PROMOTED,
+            self.component,
+            input_refs=(str(candidate_id), *evidence_refs),
+            output_refs=(str(candidate_id),),
+            metadata={
+                "candidate_kind": "system_improvement",
+                "status": CandidateStatus.PROMOTED.value,
+                "promoted_version": str(promoted_version),
+                "reason": reason,
+                "revision": updated.revision,
+            },
+        )
+        return updated
+
     def invalidate(
         self,
         candidate_id: CandidateId,
@@ -129,6 +174,7 @@ class ImprovementCandidateRegistry:
         if current.status not in {
             CandidateStatus.PROPOSED,
             CandidateStatus.SANDBOX_ELIGIBLE,
+            CandidateStatus.PROMOTED,
         }:
             raise ImprovementCandidateError(
                 f"candidate in {current.status.value} cannot be invalidated"
@@ -180,10 +226,7 @@ class ImprovementCandidateRegistry:
         return tuple(values)
 
     def all(self) -> tuple[ImprovementCandidate, ...]:
-        return tuple(
-            self._current[key]
-            for key in sorted(self._current)
-        )
+        return tuple(self._current[key] for key in sorted(self._current))
 
     def _record(self, candidate: ImprovementCandidate) -> None:
         key = str(candidate.candidate_id)

@@ -63,11 +63,60 @@ class GateConfig(BaseModel):
     maintenance: MaintenanceGateConfig = Field(default_factory=MaintenanceGateConfig)
 
 
+class ImprovementPromotionConfig(BaseModel):
+    """Software-owned policy for the narrow Milestone 16 live-promotion authority."""
+
+    policy_version: str = "live-promotion-v1"
+    allow_auto_promotion: bool = False
+    allowed_change_types: tuple[str, ...] = (
+        "config_threshold",
+        "retrieval_scoring_policy",
+    )
+    max_risk_level: str = "low"
+    min_paired_runs: int = Field(default=3, ge=1)
+    require_zero_regressions: bool = True
+    require_zero_new_failure_modes: bool = True
+    require_zero_budget_violations: bool = True
+    require_baseline_untouched: bool = True
+    require_teardown_verified: bool = True
+
+    @field_validator("policy_version")
+    @classmethod
+    def normalize_policy_version(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if not normalized:
+            raise ValueError("promotion policy version cannot be blank")
+        return normalized
+
+    @field_validator("max_risk_level")
+    @classmethod
+    def validate_max_risk_level(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"low", "medium", "high", "critical"}:
+            raise ValueError("max_risk_level must be low, medium, high, or critical")
+        return normalized
+
+    @field_validator("allowed_change_types")
+    @classmethod
+    def normalize_allowed_change_types(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(value.strip().casefold() for value in values if value.strip())
+        if not normalized:
+            raise ValueError("at least one live-promotable change type is required")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("live-promotable change types cannot contain duplicates")
+        return normalized
+
+
+class ImprovementConfig(BaseModel):
+    promotion: ImprovementPromotionConfig = Field(default_factory=ImprovementPromotionConfig)
+
+
 class HarnessConfig(BaseModel):
     system_version: SystemVersion
     trace_directory: Path = Path(".harness-x/traces")
     budget: ComputeBudget = Field(default_factory=ComputeBudget)
     gates: GateConfig = Field(default_factory=GateConfig)
+    improvement: ImprovementConfig = Field(default_factory=ImprovementConfig)
 
     @field_validator("system_version", mode="before")
     @classmethod
