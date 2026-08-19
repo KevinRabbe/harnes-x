@@ -102,6 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--general-metric-name", default="general_regression_score")
     evaluate.add_argument("--output", type=Path, default=Path(".harness-x/self-model-evaluation"))
 
+    sandbox = subparsers.add_parser(
+        "run-improvement-sandbox",
+        help="Run a sandbox-eligible Milestone 14 candidate against matched scripted baselines",
+    )
+    sandbox.add_argument("candidate", type=Path, help="Serialized sandbox-eligible ImprovementCandidate JSON")
+    sandbox.add_argument("config", type=Path, help="Exact baseline Harness X configuration")
+    sandbox.add_argument("--base-seed", type=int, default=15000)
+    sandbox.add_argument("--output", type=Path, default=Path(".harness-x/improvement-sandbox"))
+
     return parser
 
 
@@ -286,6 +295,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(comparison.model_dump_json(indent=2))
         return 0 if comparison.promotion_allowed else 1
+
+    if args.command == "run-improvement-sandbox":
+        from .improvement import (
+            ImprovementCandidate,
+            ImprovementExperimentSandbox,
+            ScriptedAutonomyExperimentRunner,
+            snapshot_from_config,
+        )
+
+        candidate = ImprovementCandidate.model_validate_json(
+            args.candidate.read_text(encoding="utf-8")
+        )
+        config = load_config(args.config)
+        report = ImprovementExperimentSandbox(
+            ScriptedAutonomyExperimentRunner(), base_seed=args.base_seed
+        ).run(candidate, snapshot_from_config(config), args.output)
+        print(report.model_dump_json(indent=2))
+        # A valid experiment may legitimately recommend rejection. Exit status reports
+        # experiment integrity, not whether the candidate won.
+        return 0 if report.experiment_valid else 1
 
     parser.print_help()
     return 0

@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–14 implemented on the current development stack.**
+**Milestones 0–15 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -52,9 +52,14 @@ The implementation now contains:
 - SHA-256-bound evaluation reports plus a conservative adapter-promotion policy that treats successful training and permission to use an adapter as separate states;
 - immutable first-class system-improvement proposals/candidates with software-owned candidate identity, stable proposal fingerprints, exact baseline version, explicit scope/patches, falsifiable hypotheses, predicted metrics, required tests, finite experiment budgets, risk levels, rollback requirements, and lineage;
 - a conservative Milestone 14 qualification policy that permits only configuration thresholds, retrieval scoring, routine ordering, context-builder policy, verification frequency, and memory retention/compaction changes while rejecting code/tool/adapter mutation under the initial policy;
-- strict JSON-only candidate schemas, mandatory replay/design-invariant tests, exact rollback-baseline checks, evidence-backed invalidation, immutable revision history, causal candidate tracing, and the hard rule that `SANDBOX_ELIGIBLE` is **not** live execution or promotion.
+- strict JSON-only candidate schemas, mandatory replay/design-invariant tests, exact rollback-baseline checks, evidence-backed invalidation, immutable revision history, causal candidate tracing, and the hard rule that `SANDBOX_ELIGIBLE` is **not** live execution or promotion;
+- immutable Milestone 15 experiment snapshots with distinct source/variant system versions and SHA-256 state fingerprints;
+- matched baseline/candidate trials that use identical deterministic seeds, the same trusted benchmark runner, and the candidate's declared run/resource envelope while applying declarative patches only to a deep-copied candidate snapshot;
+- disposable per-run working directories, durable evidence copies with per-file SHA-256 digests, automatic teardown on success or runner failure, and byte-for-byte baseline-snapshot integrity checks;
+- empirical comparison reports containing metric means/deltas, repeated-run variance, reasoning/tool/wall-time cost deltas, new failure modes, budget violations, regressions, and explicit `PROMOTION_RECOMMENDED`, `REJECTION_RECOMMENDED`, or `INCONCLUSIVE` dispositions;
+- a concrete `ScriptedAutonomyExperimentRunner` backed by the permanent long-horizon suite plus `harness-x run-improvement-sandbox` for operator experiments, while keeping the sandbox itself completely unable to promote or commit a change to the live system.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, and bounded improvement-candidate layer now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Improvement candidates still cannot mutate the live system: the next planned milestone is **the isolated experiment sandbox**, where a sandbox-eligible candidate is applied only to a snapshot/copy, compared against an identical baseline under fixed budgets/seeds, regression-tested, and automatically torn down.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, and isolated empirical experiment sandbox now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Sandbox evidence is still only a recommendation: the next planned milestone is **Milestone 16 — the first closed improvement loop**, where one bounded candidate must pass configured empirical promotion criteria and be promoted as a versioned policy with a retained rollback path.
 
 ## Getting started
 
@@ -69,6 +74,7 @@ harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-
 harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x generate-self-model-curriculum configs/default.yaml path/to/system-self-schema.json --output .harness-x/self-model-curriculum
+harness-x run-improvement-sandbox path/to/sandbox-eligible-candidate.json configs/default.yaml --output .harness-x/improvement-sandbox
 ```
 
 Optional adapter training is installed separately:
@@ -153,6 +159,8 @@ Milestone 12 generates the first self-model curriculum from known Harness X stat
 Milestone 13 adds the first real parameter-efficient training and qualification path. Multiple architecture configurations can contribute data while one configuration is held out entirely; LoRA/QLoRA remains optional; and the trained adapter must beat the untouched base model on the exact same held-out examples without introducing authority, structural, calibration, parsing, or unacceptable general-capability regressions.
 
 Milestone 14 turns proposed system modifications into immutable, versioned candidate objects. Static qualification is deliberately weaker than empirical promotion: it checks bounded scope, current baseline, allowed change class, required regression tests, finite resources, risk, and rollback, then grants at most `SANDBOX_ELIGIBLE`. No Milestone 14 API can apply or promote a candidate.
+
+Milestone 15 introduces the empirical boundary. A sandbox-eligible candidate is applied only to a deep-copied snapshot with an experiment-specific variant version, then baseline and candidate are run under matched seeds/runner conditions. Benchmark outputs are copied into evidence directories and hashed before disposable working trees are torn down. Comparison separates candidate quality from experiment validity: a valid run can recommend promotion or rejection, while a broken baseline, unsupported declared metric, or damaged isolation produces `INCONCLUSIVE`. Milestone 15 still has no live promotion API.
 
 The initial neural strategy is intentionally modest:
 
