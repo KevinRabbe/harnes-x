@@ -6,7 +6,6 @@ Normal Harness X installation and CI remain model-runtime independent.
 
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .cohort import TrainingCohort, TrainingCohortManifest
 from .formatting import FormattedSelfModelRecord, format_self_model_example
-from .models import canonical_json
 
 
 class AdapterMethod(StrEnum):
@@ -138,6 +136,36 @@ def prepare_training_bundle(
     )
 
 
+def load_prepared_training_bundle(directory: str | Path) -> PreparedTrainingBundle:
+    root = Path(directory)
+    metadata = __import__("json").loads(
+        (root / "training-plan.json").read_text(encoding="utf-8")
+    )
+
+    def read_records(name: str) -> tuple[FormattedSelfModelRecord, ...]:
+        values: list[FormattedSelfModelRecord] = []
+        for line in (root / name).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                values.append(FormattedSelfModelRecord.model_validate_json(line))
+        return tuple(values)
+
+    bundle = PreparedTrainingBundle.model_validate(
+        {
+            **metadata,
+            "train_records": read_records("train-sft.jsonl"),
+            "eval_records": read_records("eval-sft.jsonl"),
+        }
+    )
+    expected_train = min(
+        bundle.cohort_manifest.train_count, bundle.config.max_train_examples
+    )
+    if len(bundle.train_records) != expected_train:
+        raise ValueError("prepared train record count does not match training plan")
+    if len(bundle.eval_records) != bundle.cohort_manifest.eval_count:
+        raise ValueError("prepared eval record count does not match cohort manifest")
+    return bundle
+
+
 class HuggingFacePeftTrainer:
     """Optional real LoRA/QLoRA backend using Transformers + PEFT + TRL.
 
@@ -200,8 +228,7 @@ class HuggingFacePeftTrainer:
             target_modules=list(config.target_modules),
         )
 
-        # Prompt-completion format makes TRL train on completion tokens only by
-        # default, keeping the objective focused on the grounded structured answer.
+        # TRL prompt-completion datasets compute loss on completion tokens only.
         rows = []
         for record in bundle.train_records:
             prompt = [item.model_dump(mode="json") for item in record.prompt_messages]
