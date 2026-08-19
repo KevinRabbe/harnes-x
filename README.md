@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–13 implemented on the current development stack.**
+**Milestones 0–14 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -49,9 +49,12 @@ The implementation now contains:
 - deterministic prompt/completion formatting plus balanced architecture/family sampling for the initial roughly-1k-example self-model training stage;
 - an optional LoRA/QLoRA training backend using Transformers, PEFT, TRL, and 4-bit loading while leaving the normal Harness X install free of ML-training dependencies;
 - exact base-vs-adapter held-out evaluation for structured accuracy, diagnosis, safe experiments, uncertainty, authority violations, parsing, calibration, and per-family performance;
-- SHA-256-bound evaluation reports plus a conservative adapter-promotion policy that treats successful training and permission to use an adapter as separate states.
+- SHA-256-bound evaluation reports plus a conservative adapter-promotion policy that treats successful training and permission to use an adapter as separate states;
+- immutable first-class system-improvement proposals/candidates with software-owned candidate identity, stable proposal fingerprints, exact baseline version, explicit scope/patches, falsifiable hypotheses, predicted metrics, required tests, finite experiment budgets, risk levels, rollback requirements, and lineage;
+- a conservative Milestone 14 qualification policy that permits only configuration thresholds, retrieval scoring, routine ordering, context-builder policy, verification frequency, and memory retention/compaction changes while rejecting code/tool/adapter mutation under the initial policy;
+- strict JSON-only candidate schemas, mandatory replay/design-invariant tests, exact rollback-baseline checks, evidence-backed invalidation, immutable revision history, causal candidate tracing, and the hard rule that `SANDBOX_ELIGIBLE` is **not** live execution or promotion.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, and optional PEFT training/evaluation path now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. The next planned milestone is **the improvement candidate model**: represent bounded system changes as versioned, risk-scoped, testable objects before building the isolated experiment sandbox.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, and bounded improvement-candidate layer now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Improvement candidates still cannot mutate the live system: the next planned milestone is **the isolated experiment sandbox**, where a sandbox-eligible candidate is applied only to a snapshot/copy, compared against an identical baseline under fixed budgets/seeds, regression-tested, and automatically torn down.
 
 ## Getting started
 
@@ -148,6 +151,8 @@ Milestone 11 begins using the core for selected reasoning-heavy recommendations.
 Milestone 12 generates the first self-model curriculum from known Harness X state, active deterministic policies, deliberately injected faults, and declared interventions. Training labels therefore come from the system/simulator rather than from another model guessing what Harness X contains or why it failed. Evaluation seeds and selected fault families are held out instead of relying on a random row split.
 
 Milestone 13 adds the first real parameter-efficient training and qualification path. Multiple architecture configurations can contribute data while one configuration is held out entirely; LoRA/QLoRA remains optional; and the trained adapter must beat the untouched base model on the exact same held-out examples without introducing authority, structural, calibration, parsing, or unacceptable general-capability regressions.
+
+Milestone 14 turns proposed system modifications into immutable, versioned candidate objects. Static qualification is deliberately weaker than empirical promotion: it checks bounded scope, current baseline, allowed change class, required regression tests, finite resources, risk, and rollback, then grants at most `SANDBOX_ELIGIBLE`. No Milestone 14 API can apply or promote a candidate.
 
 The initial neural strategy is intentionally modest:
 
