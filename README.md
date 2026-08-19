@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–12 implemented on the current development stack.**
+**Milestones 0–13 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -44,9 +44,14 @@ The implementation now contains:
 - causal `assisted_decision_compared` trace events plus a `model-assisted-routines-v1` benchmark that separates harness containment from model quality and verifies reasoning-budget use without granting model mutation/tool authority;
 - a grounded self-model curriculum generator covering structural, operational, diagnostic, and causal/counterfactual scenarios without using a teacher LLM for labels;
 - deterministic fault injection for memory saturation, semantic conflicts, blocked goals, repeated tool failures, verifier rejection, budget exhaustion, and maintenance pressure, with structured evidence, uncertainty, and safe next experiments;
-- train/eval JSONL datasets with scenario/state/generator fingerprints, explicit label provenance, split-isolation validation, held-out diagnostic fault families, and a manifest-level dataset integrity hash.
+- train/eval JSONL datasets with scenario/state/generator fingerprints, explicit label provenance, split-isolation validation, held-out diagnostic fault families, and a manifest-level dataset integrity hash;
+- architecture-family-aware training cohorts that can hold out an entire Harness X configuration without rewriting the signed source curriculum records;
+- deterministic prompt/completion formatting plus balanced architecture/family sampling for the initial roughly-1k-example self-model training stage;
+- an optional LoRA/QLoRA training backend using Transformers, PEFT, TRL, and 4-bit loading while leaving the normal Harness X install free of ML-training dependencies;
+- exact base-vs-adapter held-out evaluation for structured accuracy, diagnosis, safe experiments, uncertainty, authority violations, parsing, calibration, and per-family performance;
+- SHA-256-bound evaluation reports plus a conservative adapter-promotion policy that treats successful training and permission to use an adapter as separate states.
 
-A **real model-runtime adapter, model-assisted decision layer, and grounded self-model curriculum generator now exist**, but Harness X deliberately does **not** bundle, download, or require any specific model weights. CI still validates the runtime and assisted-decision boundaries with deterministic fixtures while the deterministic core/rules remain permanent comparison baselines. The next planned milestone is **initial self-model adapter training**: start with a small high-quality generated curriculum, use LoRA/QLoRA-style parameter-efficient tuning, and evaluate on held-out fault families/configurations before expanding the dataset.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, and optional PEFT training/evaluation path now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. The next planned milestone is **the improvement candidate model**: represent bounded system changes as versioned, risk-scoped, testable objects before building the isolated experiment sandbox.
 
 ## Getting started
 
@@ -61,6 +66,15 @@ harness-x benchmark-scripted configs/default.yaml --output .harness-x/benchmark-
 harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x generate-self-model-curriculum configs/default.yaml path/to/system-self-schema.json --output .harness-x/self-model-curriculum
+```
+
+Optional adapter training is installed separately:
+
+```bash
+python -m pip install -e ".[training]"
+harness-x prepare-self-model-training path/to/curriculum --base-model <model> --method qlora
+harness-x train-self-model-adapter .harness-x/self-model-training
+harness-x evaluate-self-model-adapter .harness-x/self-model-training/cohort --base-model <model> --adapter .harness-x/self-model-adapter/adapter
 ```
 
 ## Core idea
@@ -133,6 +147,8 @@ Milestone 11 begins using the core for selected reasoning-heavy recommendations.
 
 Milestone 12 generates the first self-model curriculum from known Harness X state, active deterministic policies, deliberately injected faults, and declared interventions. Training labels therefore come from the system/simulator rather than from another model guessing what Harness X contains or why it failed. Evaluation seeds and selected fault families are held out instead of relying on a random row split.
 
+Milestone 13 adds the first real parameter-efficient training and qualification path. Multiple architecture configurations can contribute data while one configuration is held out entirely; LoRA/QLoRA remains optional; and the trained adapter must beat the untouched base model on the exact same held-out examples without introducing authority, structural, calibration, parsing, or unacceptable general-capability regressions.
+
 The initial neural strategy is intentionally modest:
 
 1. start with an existing capable small/medium reasoning model;
@@ -179,6 +195,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Planned architecture](docs/ARCHITECTURE.md)
 - [Detailed implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Design invariants](docs/DESIGN_INVARIANTS.md)
+- [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question
 
