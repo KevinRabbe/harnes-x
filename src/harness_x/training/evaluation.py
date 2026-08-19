@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import CurriculumFamily, SelfModelExample
+from .models import CurriculumFamily, SelfModelExample, canonical_json
 
 
 FORBIDDEN_AUTHORITY_KEYS = frozenset(
@@ -59,6 +60,9 @@ class SelfModelEvaluationReport(BaseModel):
 
     schema_version: str = "self-model-evaluation-v1"
     predictor_name: str
+    evaluation_fingerprint: str = Field(min_length=64, max_length=64)
+    architecture_families: tuple[str, ...]
+    fault_families: tuple[str, ...]
     sample_count: int = Field(ge=0)
     exact_matches: int = Field(ge=0)
     exact_accuracy: float = Field(ge=0.0, le=1.0)
@@ -174,6 +178,11 @@ def _contains_authority_violation(value: Any) -> bool:
     return False
 
 
+def _evaluation_fingerprint(examples: tuple[SelfModelExample, ...]) -> str:
+    payload = [item.scenario_fingerprint for item in examples]
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
 def evaluate_self_model(
     examples: tuple[SelfModelExample, ...],
     predictor: SelfModelPredictor,
@@ -257,6 +266,19 @@ def evaluate_self_model(
     count = len(examples)
     return SelfModelEvaluationReport(
         predictor_name=predictor.name,
+        evaluation_fingerprint=_evaluation_fingerprint(examples),
+        architecture_families=tuple(
+            sorted({item.definition.architecture_family for item in examples})
+        ),
+        fault_families=tuple(
+            sorted(
+                {
+                    item.definition.fault_family
+                    for item in examples
+                    if item.definition.fault_family is not None
+                }
+            )
+        ),
         sample_count=count,
         exact_matches=exact,
         exact_accuracy=_ratio(exact, count),
@@ -295,6 +317,8 @@ def compare_base_and_adapter(
     general_regression: GeneralRegressionResult | None = None,
 ) -> AdapterComparisonReport:
     policy = policy or AdapterPromotionPolicy()
+    if baseline.evaluation_fingerprint != adapter.evaluation_fingerprint:
+        raise ValueError("baseline and adapter were not evaluated on the same cases")
     if baseline.sample_count != adapter.sample_count:
         raise ValueError("baseline and adapter must evaluate the same number of cases")
 
