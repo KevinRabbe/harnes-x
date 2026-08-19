@@ -1,0 +1,126 @@
+"""Prediction backends for held-out self-model evaluation."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from .evaluation import SelfModelPrediction
+from .formatting import format_self_model_example, render_messages_with_tokenizer
+from .models import SelfModelExample
+
+
+_JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def parse_structured_prediction(text: str) -> SelfModelPrediction:
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = _JSON_FENCE.sub("", raw).strip()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return SelfModelPrediction(
+            decision={}, raw_text=text, parse_error=f"invalid_json: {exc.msg}"
+        )
+    if not isinstance(value, dict):
+        return SelfModelPrediction(
+            decision={}, raw_text=text, parse_error="prediction must be a JSON object"
+        )
+
+    # Accept either the direct decision object used by the training target or an
+    # evaluation wrapper that optionally carries a confidence value.
+    if isinstance(value.get("decision"), dict):
+        confidence = value.get("confidence")
+        if confidence is not None and not isinstance(confidence, (int, float)):
+            return SelfModelPrediction(
+                decision={}, raw_text=text, parse_error="confidence must be numeric"
+            )
+        return SelfModelPrediction(
+            decision=dict(value["decision"]),
+            confidence=float(confidence) if confidence is not None else None,
+            raw_text=text,
+        )
+    return SelfModelPrediction(decision=value, raw_text=text)
+
+
+class HuggingFaceSelfModelPredictor:
+    """Optional local deterministic-generation predictor for base or PEFT adapter."""
+
+    def __init__(
+        self,
+        *,
+        base_model: str,
+        adapter_path: str | Path | None = None,
+        load_in_4bit: bool = True,
+        max_new_tokens: int = 512,
+    ) -> None:
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        except ImportError as exc:  # pragma: no cover - environment-specific backend
+            raise RuntimeError(
+                "self-model evaluation dependencies are missing; install harness-x[training]"
+            ) from exc
+
+        self._torch = torch
+        self._name = (
+            f"adapter:{Path(adapter_path).name}" if adapter_path is not None else f"base:{base_model}"
+        )
+        self.max_new_tokens = max_new_tokens
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        model_kwargs: dict[str, Any] = {"device_map": "auto"}
+        if load_in_4bit:
+            dtype = (
+                torch.bfloat16
+                if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+                else torch.float16
+            )
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=dtype,
+            )
+        model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
+        if adapter_path is not None:
+            try:
+                from peft import PeftModel
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError("PEFT is required to evaluate an adapter") from exc
+            model = PeftModel.from_pretrained(model, str(adapter_path))
+        model.eval()
+        self.model = model
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def predict(self, example: SelfModelExample) -> SelfModelPrediction:
+        record = format_self_model_example(example)
+        prompt = render_messages_with_tokenizer(
+            self.tokenizer, record.prompt_messages, add_generation_prompt=True
+        )
+        encoded = self.tokenizer(prompt, return_tensors="pt")
+        try:
+            device = next(self.model.parameters()).device
+            encoded = {key: value.to(device) for key, value in encoded.items()}
+        except (StopIteration, AttributeError):
+            pass
+        with self._torch.no_grad():
+            output = self.model.generate(
+                **encoded,
+                do_sample=False,
+                max_new_tokens=self.max_new_tokens,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        input_length = encoded["input_ids"].shape[-1]
+        generated = output[0][input_length:]
+        text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        return parse_structured_prediction(text)
