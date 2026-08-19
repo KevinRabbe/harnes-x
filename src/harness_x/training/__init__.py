@@ -6,6 +6,7 @@ from .adapter_training import (
     AdapterTrainingConfig,
     HuggingFacePeftTrainer,
     PreparedTrainingBundle,
+    load_prepared_training_bundle,
     prepare_training_bundle,
 )
 from .cohort import (
@@ -88,6 +89,7 @@ __all__ = [
     "format_self_model_example",
     "inject_fault",
     "load_curriculum",
+    "load_prepared_training_bundle",
     "load_training_cohort",
     "parse_structured_prediction",
     "prepare_training_bundle",
