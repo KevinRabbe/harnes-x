@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import re
 from pathlib import Path
@@ -30,8 +31,6 @@ def parse_structured_prediction(text: str) -> SelfModelPrediction:
             decision={}, raw_text=text, parse_error="prediction must be a JSON object"
         )
 
-    # Accept either the direct decision object used by the training target or an
-    # evaluation wrapper that optionally carries a confidence value.
     if isinstance(value.get("decision"), dict):
         confidence = value.get("confidence")
         if confidence is not None and not isinstance(confidence, (int, float)):
@@ -124,3 +123,17 @@ class HuggingFaceSelfModelPredictor:
         generated = output[0][input_length:]
         text = self.tokenizer.decode(generated, skip_special_tokens=True)
         return parse_structured_prediction(text)
+
+    def close(self) -> None:
+        """Release model references so base and adapter can be evaluated sequentially."""
+        model = getattr(self, "model", None)
+        if model is not None:
+            try:
+                model.to("cpu")
+            except (AttributeError, RuntimeError, ValueError):
+                pass
+        self.model = None
+        self.tokenizer = None
+        gc.collect()
+        if self._torch.cuda.is_available():
+            self._torch.cuda.empty_cache()
