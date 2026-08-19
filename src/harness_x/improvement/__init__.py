@@ -1,5 +1,13 @@
-"""Controlled system-improvement candidates, experiments, and qualification policy."""
+"""Controlled system-improvement candidates, experiments, promotion, and closed loops."""
 
+from .closed_loop import (
+    ClosedImprovementLoopReport,
+    MaintenancePressureAnalysis,
+    MaintenancePressureExperimentRunner,
+    MaintenancePressurePromotionVerifier,
+    analyze_maintenance_pressure,
+    run_first_closed_improvement_loop,
+)
 from .experiment import (
     ArtifactDigest,
     ExperimentDisposition,
@@ -25,6 +33,19 @@ from .models import (
     RollbackPlan,
 )
 from .policy import InitialImprovementPolicy, POLICY_VERSION
+from .promotion import (
+    ActiveConfigPointer,
+    ConfigArtifact,
+    InitialPromotionPolicy,
+    PromotionAuthority,
+    PromotionError,
+    PromotionQualification,
+    PromotionRecord,
+    PromotionStatus,
+    PromotionVerificationResult,
+    ScriptedAutonomyPromotionVerifier,
+    VersionedConfigStore,
+)
 from .registry import ImprovementCandidateError, ImprovementCandidateRegistry
 from .sandbox import (
     ImprovementExperimentSandbox,
@@ -38,6 +59,7 @@ from .sandbox import (
 
 __all__ = [
     "POLICY_VERSION",
+    "ActiveConfigPointer",
     "ArtifactDigest",
     "CandidateCreator",
     "CandidateQualification",
@@ -45,6 +67,8 @@ __all__ = [
     "CandidateStatus",
     "ChangeOperation",
     "ChangePatch",
+    "ClosedImprovementLoopReport",
+    "ConfigArtifact",
     "ExperimentDisposition",
     "ExperimentRunResult",
     "ExperimentVariant",
@@ -57,8 +81,18 @@ __all__ = [
     "ImprovementProposal",
     "ImprovementResourceBudget",
     "InitialImprovementPolicy",
+    "InitialPromotionPolicy",
+    "MaintenancePressureAnalysis",
+    "MaintenancePressureExperimentRunner",
+    "MaintenancePressurePromotionVerifier",
     "MetricComparison",
     "MetricPrediction",
+    "PromotionAuthority",
+    "PromotionError",
+    "PromotionQualification",
+    "PromotionRecord",
+    "PromotionStatus",
+    "PromotionVerificationResult",
     "ResourceComparison",
     "RollbackPlan",
     "SandboxBenchmarkRunner",
@@ -67,5 +101,9 @@ __all__ = [
     "SandboxExperimentReport",
     "SandboxSnapshot",
     "ScriptedAutonomyExperimentRunner",
+    "ScriptedAutonomyPromotionVerifier",
+    "VersionedConfigStore",
+    "analyze_maintenance_pressure",
+    "run_first_closed_improvement_loop",
     "snapshot_from_config",
 ]
