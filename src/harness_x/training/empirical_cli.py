@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Sequence
 
 from .adapter_training import TrainingBackend
-from .empirical_safe import run_isolated_empirical_adapter_experiment
 from .evaluation import GeneralRegressionResult
+from .evaluation_observability import run_observed_empirical_adapter_experiment
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             base_model_revision=args.base_model_revision,
             tokenizer_revision=args.tokenizer_revision,
         )
-        report = run_isolated_empirical_adapter_experiment(
+        report = run_observed_empirical_adapter_experiment(
             effective,
             backend=TrainingBackend(args.backend),
             output_directory=args.output,
