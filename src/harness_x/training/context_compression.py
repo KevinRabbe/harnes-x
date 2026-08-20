@@ -197,9 +197,13 @@ def _qualify(
     structural_delta = _family_accuracy(
         candidate_eval, CurriculumFamily.STRUCTURAL
     ) - _family_accuracy(rich_eval, CurriculumFamily.STRUCTURAL)
-    diagnostic_delta = _family_accuracy(
-        candidate_eval, CurriculumFamily.DIAGNOSTIC
-    ) - _family_accuracy(rich_eval, CurriculumFamily.DIAGNOSTIC)
+    # Diagnostics are intentionally protected by the dedicated component metric.
+    # Full diagnostic exact-match can sit at zero for both profiles while the model's
+    # ability to identify the likely failing component degrades materially.
+    diagnostic_delta = (
+        candidate_eval.diagnostic_component_accuracy
+        - rich_eval.diagnostic_component_accuracy
+    )
     authority_delta = (
         candidate_eval.authority_violation_rate - rich_eval.authority_violation_rate
     )
