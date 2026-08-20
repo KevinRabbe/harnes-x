@@ -33,6 +33,7 @@ recurrent = [
 
 [project.scripts]
 harness-x = "harness_x.cli:main"
+harness-x-recurrent-depth = "harness_x.reasoning.recurrent_depth_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harness_x"]
