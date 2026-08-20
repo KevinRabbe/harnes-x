@@ -13,7 +13,10 @@ from harness_x.training.models import (
     build_example,
     canonical_json,
 )
-from harness_x.training.predictors import HuggingFaceSelfModelPredictor
+from harness_x.training.predictors import (
+    REPAIR_ARRAY_ITEM_LIMIT,
+    HuggingFaceSelfModelPredictor,
+)
 from harness_x.training.structured_recovery import (
     BoundedJsonRecoveryPredictor,
     StructuredRecoveryAttempt,
@@ -115,7 +118,7 @@ def test_bounded_recovery_does_not_spend_retry_on_valid_primary() -> None:
     assert predictor.last_recovery is None
 
 
-def test_trace_preserves_primary_failure_and_final_repaired_result(tmp_path) -> None:
+def test_trace_preserves_primary_and_explicit_repair_boundaries(tmp_path) -> None:
     example = _example()
     recorder = JsonlEvaluationTraceRecorder(
         tmp_path / "trace.jsonl", "adapter-standard-primary"
@@ -143,6 +146,8 @@ def test_trace_preserves_primary_failure_and_final_repaired_result(tmp_path) -> 
     assert record.primary_parse_error is not None
     assert record.repair_attempted is True
     assert record.repair_succeeded is True
+    assert record.repair_raw_text == final.raw_text
+    assert record.repair_parse_error is None
     assert record.raw_text == final.raw_text
     assert record.parse_error is None
     assert record.exact_match is True
@@ -166,7 +171,7 @@ class _RecordingTokenizer:
         )
 
 
-def test_repair_prompt_uses_original_grounded_input_without_target_values() -> None:
+def test_repair_prompt_uses_uniform_bounds_without_target_values() -> None:
     example = _example()
     predictor = object.__new__(HuggingFaceSelfModelPredictor)
     predictor.tokenizer = _RecordingTokenizer()
@@ -178,5 +183,8 @@ def test_repair_prompt_uses_original_grounded_input_without_target_values() -> N
     assert "previous generation failed strict json validation" in prompt.lower()
     assert "expected_keys" in prompt
     assert "owner" in prompt
+    assert f"at most {REPAIR_ARRAY_ITEM_LIMIT} items" in prompt.lower()
+    assert "duplicate items are forbidden" in prompt.lower()
+    assert "repeatedly appending the same suffix" in prompt.lower()
     assert canonical_json(example.expected_decision) not in prompt
     assert "orchestrator" not in prompt
