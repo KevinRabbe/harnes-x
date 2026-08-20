@@ -26,6 +26,11 @@ training = [
   "trl>=0.26,<0.27",
   "bitsandbytes>=0.45,<1",
 ]
+# Kept separate from the older pinned HF/PEFT stack above. Unsloth tracks newer
+# Transformers/TRL combinations and should be installed as an operator-selected backend.
+unsloth-training = [
+  "unsloth>=2026.7",
+]
 recurrent = [
   "torch>=2.4,<3",
   "transformers>=4.55,<5",
