@@ -52,6 +52,7 @@ class _FakeRepairablePredictor:
         self.primary_calls = 0
         self.repair_calls = 0
         self.repair_budget = None
+        self.constraint_mode = None
 
     def prompt_measurement(self, example, profile):
         return (100, 25)
@@ -64,9 +65,10 @@ class _FakeRepairablePredictor:
         self.primary_calls += 1
         return self.primary
 
-    def repair_prediction(self, example, profile, *, max_new_tokens):
+    def repair_prediction(self, example, profile, *, max_new_tokens, constraint_mode):
         self.repair_calls += 1
         self.repair_budget = max_new_tokens
+        self.constraint_mode = constraint_mode
         return self.repair
 
 
@@ -85,6 +87,7 @@ def test_bounded_recovery_retries_once_only_after_parse_failure() -> None:
         source,
         max_attempts=1,
         repair_max_new_tokens=192,
+        repair_constraint_mode="schema",
     )
 
     result = predictor.predict(_example())
@@ -93,10 +96,12 @@ def test_bounded_recovery_retries_once_only_after_parse_failure() -> None:
     assert source.primary_calls == 1
     assert source.repair_calls == 1
     assert source.repair_budget == 192
+    assert source.constraint_mode == "schema"
     assert predictor.last_recovery is not None
     assert predictor.last_recovery.primary_raw_text == primary.raw_text
     assert predictor.last_recovery.primary_parse_error == primary.parse_error
     assert predictor.last_recovery.repair_raw_text == repaired.raw_text
+    assert predictor.last_recovery.constraint_mode == "schema"
     assert predictor.last_recovery.succeeded is True
 
 
@@ -132,6 +137,7 @@ def test_trace_preserves_primary_and_explicit_repair_boundaries(tmp_path) -> Non
         primary_parse_error="invalid_json: Expecting value",
         repair_raw_text=final.raw_text,
         repair_parse_error=None,
+        constraint_mode="schema",
     )
 
     record = recorder.append(
@@ -146,6 +152,7 @@ def test_trace_preserves_primary_and_explicit_repair_boundaries(tmp_path) -> Non
     assert record.primary_parse_error is not None
     assert record.repair_attempted is True
     assert record.repair_succeeded is True
+    assert record.repair_constraint_mode == "schema"
     assert record.repair_raw_text == final.raw_text
     assert record.repair_parse_error is None
     assert record.raw_text == final.raw_text
@@ -177,7 +184,9 @@ def test_repair_prompt_uses_uniform_bounds_without_target_values() -> None:
     predictor.tokenizer = _RecordingTokenizer()
 
     prompt = predictor._render_repair_prompt(
-        example, SelfModelContextProfile.STANDARD
+        example,
+        SelfModelContextProfile.STANDARD,
+        constraint_mode="schema",
     )
 
     assert "previous generation failed strict json validation" in prompt.lower()
@@ -186,5 +195,6 @@ def test_repair_prompt_uses_uniform_bounds_without_target_values() -> None:
     assert f"at most {REPAIR_ARRAY_ITEM_LIMIT} items" in prompt.lower()
     assert "duplicate items are forbidden" in prompt.lower()
     assert "repeatedly appending the same suffix" in prompt.lower()
+    assert "target-independent json contract" in prompt.lower()
     assert canonical_json(example.expected_decision) not in prompt
     assert "orchestrator" not in prompt

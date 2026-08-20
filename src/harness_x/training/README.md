@@ -203,3 +203,20 @@ harness-x-empirical-adapter \
 ```
 
 Reference reports are permanently marked non-empirical and cannot become promotion-ready.
+
+### M20.5 schema-constrained repair
+
+After strict parsing fails, an empirical run may enable one target-independent schema-constrained retry:
+
+```bash
+harness-x-empirical-adapter \
+  .harness-x/self-model-training \
+  --backend unsloth \
+  --base-model-revision <40-char-model-commit-sha> \
+  --resume-training <existing-experiment-or-training-dir> \
+  --parse-repair-attempts 1 \
+  --repair-constraint-mode schema \
+  --output .harness-x/empirical-schema-repair
+```
+
+Schema mode uses `lm-format-enforcer==0.11.3` only on the single retry. Harness X deliberately bypasses LM Format Enforcer's optional `integrations.transformers` shim and adapts its stable lower-level `TokenEnforcer` API directly, because Transformers 5.x moved tokenizer base classes used by the shim. The schema is derived only from task family/tags, stable Harness X vocabularies, visible protocol structure, and top-level keys already disclosed by the normal prompt; held-out target values and accepted-alternative values are never used to construct it. Strict `json.loads` remains the final parse authority.

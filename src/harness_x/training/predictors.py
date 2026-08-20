@@ -15,12 +15,15 @@ from .formatting import (
     format_self_model_example,
     render_messages_with_tokenizer,
 )
+from .lmfe_compat import build_lmfe_prefix_allowed_tokens_fn
 from .models import SelfModelExample
+from .repair_schema import GENERIC_ARRAY_ITEM_LIMIT, repair_json_schema
 
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 REPAIR_ARRAY_ITEM_LIMIT = 8
 REPAIR_NO_REPEAT_NGRAM_SIZE = 8
+REPAIR_CONSTRAINT_MODES = frozenset({"bounded", "schema"})
 
 
 def top_level_json_object_end(text: str) -> int | None:
@@ -128,6 +131,7 @@ class HuggingFaceSelfModelPredictor:
         )
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        self._lmfe_tokenizer_data = None
 
         model_kwargs: dict[str, Any] = {
             "device_map": "auto",
@@ -173,11 +177,19 @@ class HuggingFaceSelfModelPredictor:
         self,
         example: SelfModelExample,
         profile: SelfModelContextProfile,
+        *,
+        constraint_mode: str,
     ) -> str:
         """Build a fresh strict-format retry without exposing held-out target values."""
 
         record = format_self_model_example(example, context_profile=profile)
         system = record.prompt_messages[0]
+        schema_note = (
+            " The decoder enforces the task's target-independent JSON contract. Choose "
+            "the semantic values from grounded input; do not fight the schema."
+            if constraint_mode == "schema"
+            else ""
+        )
         repair_instruction = (
             system.content
             + " A previous generation failed strict JSON validation. Retry from the "
@@ -187,6 +199,7 @@ class HuggingFaceSelfModelPredictor:
             "forbidden. Never create identifiers by repeatedly appending the same "
             "suffix. If uncertain, prefer a shorter answer over repetition. Stop "
             "immediately after the top-level closing brace."
+            + schema_note
         )
         messages = (
             TrainingMessage(role="system", content=repair_instruction),
@@ -219,12 +232,36 @@ class HuggingFaceSelfModelPredictor:
 
         return StoppingCriteriaList([_CompleteJsonObject()])
 
+    def _schema_prefix_allowed_tokens_fn(self, schema: dict[str, Any]) -> Any:
+        """Build lazy JSON-schema constrained decoding without LMFE's HF shim."""
+
+        try:
+            from lmformatenforcer import CharacterLevelParserConfig, JsonSchemaParser
+        except ImportError as exc:  # pragma: no cover - optional operator dependency
+            raise RuntimeError(
+                "schema-constrained repair requires lm-format-enforcer; install "
+                "lm-format-enforcer==0.11.3"
+            ) from exc
+
+        config = CharacterLevelParserConfig(
+            max_json_array_length=GENERIC_ARRAY_ITEM_LIMIT,
+        )
+        parser = JsonSchemaParser(schema, config=config)
+        callback, tokenizer_data = build_lmfe_prefix_allowed_tokens_fn(
+            self.tokenizer,
+            parser,
+            tokenizer_data=self._lmfe_tokenizer_data,
+        )
+        self._lmfe_tokenizer_data = tokenizer_data
+        return callback
+
     def _generate_text(
         self,
         prompt: str,
         *,
         max_new_tokens: int,
         no_repeat_ngram_size: int = 0,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         encoded = self.tokenizer(prompt, return_tensors="pt")
         try:
@@ -243,6 +280,10 @@ class HuggingFaceSelfModelPredictor:
         }
         if no_repeat_ngram_size > 0:
             generation_kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+        if json_schema is not None:
+            generation_kwargs["prefix_allowed_tokens_fn"] = (
+                self._schema_prefix_allowed_tokens_fn(json_schema)
+            )
 
         with self._torch.no_grad():
             output = self.model.generate(**generation_kwargs)
@@ -285,23 +326,36 @@ class HuggingFaceSelfModelPredictor:
         profile: SelfModelContextProfile,
         *,
         max_new_tokens: int = 256,
+        constraint_mode: str = "bounded",
     ) -> SelfModelPrediction:
         """Run one fresh strict-format retry after a parse failure.
 
-        The malformed primary output is deliberately not fed back into the model: the
-        retry is grounded only in the original prompt plus stricter formatting rules,
-        so repeated garbage cannot become new input evidence. Repair decoding also
-        blocks repeated 8-token n-grams while strict JSON parsing remains authoritative.
+        The malformed primary output is deliberately not fed back into the model. The
+        optional schema mode constrains syntax/types/domains from the task protocol and
+        stable Harness X vocabularies only; it never reads target values.
         """
 
         if max_new_tokens < 1:
             raise ValueError("repair max_new_tokens must be positive")
+        if constraint_mode not in REPAIR_CONSTRAINT_MODES:
+            raise ValueError(
+                f"unknown repair constraint mode {constraint_mode!r}; expected one of "
+                f"{sorted(REPAIR_CONSTRAINT_MODES)!r}"
+            )
         profile = SelfModelContextProfile(profile)
-        prompt = self._render_repair_prompt(example, profile)
+        prompt = self._render_repair_prompt(
+            example,
+            profile,
+            constraint_mode=constraint_mode,
+        )
+        schema = repair_json_schema(example) if constraint_mode == "schema" else None
         text = self._generate_text(
             prompt,
             max_new_tokens=max_new_tokens,
-            no_repeat_ngram_size=REPAIR_NO_REPEAT_NGRAM_SIZE,
+            no_repeat_ngram_size=(
+                0 if constraint_mode == "schema" else REPAIR_NO_REPEAT_NGRAM_SIZE
+            ),
+            json_schema=schema,
         )
         return parse_structured_prediction(text)
 
@@ -314,6 +368,7 @@ class HuggingFaceSelfModelPredictor:
                 pass
         self.model = None
         self.tokenizer = None
+        self._lmfe_tokenizer_data = None
         gc.collect()
         if self._torch.cuda.is_available():
             self._torch.cuda.empty_cache()

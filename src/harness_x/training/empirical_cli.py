@@ -56,6 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=256,
         help="Maximum generation budget for the one bounded JSON repair attempt",
     )
+    parser.add_argument(
+        "--repair-constraint-mode",
+        choices=("bounded", "schema"),
+        default="bounded",
+        help=(
+            "Repair decoder policy. 'bounded' preserves the M20.4 retry; 'schema' adds "
+            "target-independent JSON-schema token constraints and requires "
+            "lm-format-enforcer."
+        ),
+    )
     parser.add_argument("--general-baseline-score", type=float, default=None)
     parser.add_argument("--general-adapter-score", type=float, default=None)
     parser.add_argument("--general-metric-name", default="general_regression_score")
@@ -144,6 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             resume_training_directory=args.resume_training,
             parse_repair_attempts=args.parse_repair_attempts,
             repair_max_new_tokens=args.repair_max_new_tokens,
+            repair_constraint_mode=args.repair_constraint_mode,
         )
 
     print(report.model_dump_json(indent=2))
