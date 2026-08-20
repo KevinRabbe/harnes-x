@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–18 implemented on the current development stack.**
+**Milestones 0–19A implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -68,9 +68,13 @@ The implementation now contains:
 - a dependency-free learned nearest-centroid compute controller with SHA-256-bound artifacts, conservative conversion from evidence-bearing Milestone 17 compute traces, and a permanent deterministic dynamic-compute baseline;
 - a capability/cost benchmark that scores realized utility, realized cost, net value, exact action accuracy, premature stopping, unnecessary extra compute, strongest-model/retrieval use, and value calibration against the trajectory that actually followed the controller decision;
 - a separate `ComputeAuthorityAdjudicator` that sends learned recommendations back through the existing deterministic `ComputeGate`, so a learned controller cannot grant itself reasoning budget or bypass hard stop/suspend decisions;
-- explicit rejection coverage for always-stop, always-max-compute, always-strongest-model, retrieval-explosion, and overconfident trajectory-prediction policies, plus `harness-x train-dynamic-compute-controller` and `harness-x benchmark-dynamic-compute` operator paths.
+- explicit rejection coverage for always-stop, always-max-compute, always-strongest-model, retrieval-explosion, and overconfident trajectory-prediction policies, plus `harness-x train-dynamic-compute-controller` and `harness-x benchmark-dynamic-compute` operator paths;
+- an externally authorized fixed-depth recurrent `ReasoningCore` wrapper whose recurrence count is software-owned and SHA-256 bound before backend invocation;
+- fixed-depth quality/cost curves across explicit recurrence budgets, including Pareto-frontier and dominated-depth detection before any learned depth selector is allowed to compete;
+- a permanent deterministic external depth selector plus a dependency-free learned selector trained only from the shallowest fixed depth that actually solved each training case, with disjoint held-out evaluation cases;
+- an optional local Huginn Transformers adapter behind the separate `[recurrent]` dependency group and explicit custom-code trust opt-in, while CI uses only a deterministic recurrent-depth reference simulator and downloads no recurrent model weights.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, grounded controller-data pipeline, and first learned peripheral-controller benchmark now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model and deterministic controllers remain permanent comparison controls. The Milestone 18 learned controller is still experimental and recommendation-only: passing the deterministic reference simulator is not production evidence, and all active compute remains software-budget-authorized. The next planned implementation-plan branch is **Milestone 19A — recurrent-depth core experiments** behind the existing `ReasoningCore` interface.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, grounded controller-data pipeline, first learned peripheral-controller benchmark, and recurrent-depth research boundary now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform GPU model training or a real recurrent-model benchmark. The untuned base model and deterministic controllers remain permanent comparison controls. Milestone 19A remains experimental: its reference simulator qualifies recurrence-control mechanics, not production Huginn performance, and learned depth selection remains external/recommendation-only.
 
 ## Getting started
 
@@ -89,6 +93,7 @@ harness-x run-improvement-sandbox path/to/sandbox-eligible-candidate.json config
 harness-x collect-gate-training-data path/to/trace.jsonl --output .harness-x/gate-training-data
 harness-x train-dynamic-compute-controller .harness-x/gate-training-data --output .harness-x/dynamic-compute-controller.json
 harness-x benchmark-dynamic-compute --output .harness-x/benchmark-dynamic-compute
+harness-x-recurrent-depth --backend reference --output .harness-x/recurrent-depth-reference
 ```
 
 Optional adapter training is installed separately:
@@ -98,6 +103,13 @@ python -m pip install -e ".[training]"
 harness-x prepare-self-model-training path/to/curriculum --base-model <model> --method qlora
 harness-x train-self-model-adapter .harness-x/self-model-training
 harness-x evaluate-self-model-adapter .harness-x/self-model-training/cohort --base-model <model> --adapter .harness-x/self-model-adapter/adapter
+```
+
+Optional recurrent-model inference is also isolated from the normal install:
+
+```bash
+python -m pip install -e ".[recurrent]"
+harness-x-recurrent-depth --backend huginn --cases path/to/recurrent-depth-cases.jsonl --allow-remote-code --output .harness-x/recurrent-depth-huginn
 ```
 
 ## Core idea
@@ -182,6 +194,8 @@ Milestone 17 begins learned-control preparation without learning yet. Existing d
 
 Milestone 18 adds the first learned controller while preserving that authority structure. A small learned dynamic-compute model competes against a permanent deterministic baseline across held-out simulator cases and is judged on realized task utility versus compute cost, premature stopping, waste, and calibration. The learned output remains a recommendation: every non-stop allocation is rechecked by the existing deterministic `ComputeGate` before any owning runtime may consume budget. Trace-derived training remains restricted to actions with real evidence; the complete seven-action reference fixture is explicitly simulator data used to qualify the controller/benchmark machinery rather than to claim production gains.
 
+Milestone 19A adds the recurrent-depth research boundary behind the same replaceable reasoning interface. Harness X first measures explicit fixed recurrence depths, treats recurrence as software-authorized test-time compute, derives minimal-depth labels only from measured training curves, and then compares a learned external depth selector against a permanent deterministic selector on disjoint held-out cases. A lazy optional Huginn adapter exists for real experiments, but the default CI path remains a deterministic reference simulator and adaptive/core-level halting is deliberately deferred.
+
 The initial neural strategy is intentionally modest:
 
 1. start with an existing capable small/medium reasoning model;
@@ -233,6 +247,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Milestone 16 closed improvement loop](docs/MILESTONE_16_CLOSED_IMPROVEMENT_LOOP.md)
 - [Milestone 17 grounded gate training data](docs/MILESTONE_17_GATE_TRAINING_DATA.md)
 - [Milestone 18 dynamic compute allocation](docs/MILESTONE_18_DYNAMIC_COMPUTE.md)
+- [Milestone 19A recurrent-depth experiment](docs/MILESTONE_19A_RECURRENT_DEPTH.md)
 - [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question
