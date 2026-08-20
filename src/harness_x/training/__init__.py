@@ -27,7 +27,9 @@ from .context_compression import (
     ContextProfileQualification,
     ProfileAwareSelfModelPredictor,
     ReferenceContextCompressionPredictor,
+    compare_context_profiles,
     evaluate_context_compression,
+    evaluate_context_profile,
 )
 from .curriculum import (
     AUTHORITY_OWNERS,
@@ -113,7 +115,9 @@ __all__ = [
     "architecture_family",
     "build_training_cohort",
     "compare_base_and_adapter",
+    "compare_context_profiles",
     "evaluate_context_compression",
+    "evaluate_context_profile",
     "evaluate_self_model",
     "format_self_model_example",
     "inject_fault",
