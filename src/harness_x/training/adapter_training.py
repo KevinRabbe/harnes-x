@@ -1,19 +1,37 @@
 """Parameter-efficient self-model adapter training harness.
 
-Heavy ML dependencies are imported only when the Hugging Face backend is invoked.
-Normal Harness X installation and CI remain model-runtime independent.
+Heavy ML dependencies are imported only when a selected backend is invoked. Normal
+Harness X installation and CI remain model-runtime independent. Prepared training
+bundles are backend-neutral so Hugging Face/PEFT and Unsloth can train from the exact
+same signed cohort and hyperparameter contract.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from time import perf_counter
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .cohort import TrainingCohort, TrainingCohortManifest
-from .formatting import FormattedSelfModelRecord, format_self_model_example
+from .formatting import (
+    FormattedSelfModelRecord,
+    format_self_model_example,
+    render_messages_with_tokenizer,
+)
+
+
+DEFAULT_LORA_TARGET_MODULES: tuple[str, ...] = (
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+)
 
 
 class AdapterMethod(StrEnum):
@@ -21,17 +39,22 @@ class AdapterMethod(StrEnum):
     QLORA = "qlora"
 
 
+class TrainingBackend(StrEnum):
+    HUGGINGFACE_PEFT = "huggingface_peft"
+    UNSLOTH = "unsloth"
+
+
 class AdapterTrainingConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-adapter-training-config-v1"
+    schema_version: str = "self-model-adapter-training-config-v2"
     base_model: str = Field(min_length=1)
     method: AdapterMethod = AdapterMethod.QLORA
     max_train_examples: int = Field(default=1000, gt=0)
     lora_rank: int = Field(default=16, gt=0)
     lora_alpha: int = Field(default=32, gt=0)
     lora_dropout: float = Field(default=0.05, ge=0.0, lt=1.0)
-    target_modules: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj")
+    target_modules: tuple[str, ...] = DEFAULT_LORA_TARGET_MODULES
     learning_rate: float = Field(default=2e-4, gt=0.0)
     num_train_epochs: float = Field(default=2.0, gt=0.0)
     per_device_train_batch_size: int = Field(default=1, gt=0)
@@ -51,6 +74,16 @@ class AdapterTrainingConfig(BaseModel):
         if not value:
             raise ValueError("base_model cannot be blank")
         return value
+
+    @field_validator("target_modules")
+    @classmethod
+    def validate_target_modules(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(item.strip() for item in value if item.strip())
+        if not normalized:
+            raise ValueError("target_modules cannot be empty")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("target_modules cannot contain duplicates")
+        return normalized
 
 
 class PreparedTrainingBundle(BaseModel):
@@ -81,13 +114,26 @@ class PreparedTrainingBundle(BaseModel):
 class AdapterTrainingArtifact(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-adapter-artifact-v1"
+    schema_version: str = "self-model-adapter-artifact-v2"
     base_model: str
     method: AdapterMethod
+    backend: TrainingBackend = TrainingBackend.HUGGINGFACE_PEFT
     adapter_path: str
     training_examples: int = Field(ge=0)
     cohort_fingerprint: str = Field(min_length=64, max_length=64)
+    wall_seconds: float | None = Field(default=None, ge=0.0)
+    peak_gpu_memory_bytes: int | None = Field(default=None, ge=0)
     train_result: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdapterTrainer(Protocol):
+    backend: TrainingBackend
+
+    def train(
+        self,
+        bundle: PreparedTrainingBundle,
+        output_directory: str | Path,
+    ) -> AdapterTrainingArtifact: ...
 
 
 def _balanced_limit(
@@ -166,12 +212,57 @@ def load_prepared_training_bundle(directory: str | Path) -> PreparedTrainingBund
     return bundle
 
 
-class HuggingFacePeftTrainer:
-    """Optional real LoRA/QLoRA backend using Transformers + PEFT + TRL.
+def _gpu_peak_bytes(torch: Any) -> int | None:
+    if not torch.cuda.is_available():
+        return None
+    return int(torch.cuda.max_memory_allocated())
 
-    Invoke only in an environment with the ``training`` optional dependencies.
-    CI intentionally does not import or execute this backend's heavy dependencies.
-    """
+
+def _reset_gpu_peak(torch: Any) -> None:
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+
+def _artifact(
+    *,
+    bundle: PreparedTrainingBundle,
+    backend: TrainingBackend,
+    adapter_dir: Path,
+    result: Any,
+    wall_seconds: float,
+    peak_gpu_memory_bytes: int | None,
+    extra_metrics: dict[str, Any] | None = None,
+) -> AdapterTrainingArtifact:
+    metrics = dict(getattr(result, "metrics", {}) or {})
+    if extra_metrics:
+        metrics.update(extra_metrics)
+    return AdapterTrainingArtifact(
+        base_model=bundle.config.base_model,
+        method=bundle.config.method,
+        backend=backend,
+        adapter_path=str(adapter_dir),
+        training_examples=len(bundle.train_records),
+        cohort_fingerprint=bundle.cohort_manifest.cohort_fingerprint,
+        wall_seconds=wall_seconds,
+        peak_gpu_memory_bytes=peak_gpu_memory_bytes,
+        train_result={
+            "global_step": int(getattr(result, "global_step", 0)),
+            "training_loss": float(getattr(result, "training_loss", 0.0)),
+            "metrics": metrics,
+        },
+    )
+
+
+def _write_artifact(output: Path, artifact: AdapterTrainingArtifact) -> None:
+    (output / "adapter-artifact.json").write_text(
+        artifact.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+
+class HuggingFacePeftTrainer:
+    """Optional real LoRA/QLoRA backend using Transformers + PEFT + TRL."""
+
+    backend = TrainingBackend.HUGGINGFACE_PEFT
 
     def train(
         self,
@@ -262,23 +353,148 @@ class HuggingFacePeftTrainer:
             processing_class=tokenizer,
             peft_config=peft_config,
         )
+        _reset_gpu_peak(torch)
+        started = perf_counter()
         result = trainer.train()
+        wall_seconds = perf_counter() - started
+        peak = _gpu_peak_bytes(torch)
         trainer.model.save_pretrained(adapter_dir, safe_serialization=True)
         tokenizer.save_pretrained(adapter_dir)
 
-        artifact = AdapterTrainingArtifact(
-            base_model=config.base_model,
-            method=config.method,
-            adapter_path=str(adapter_dir),
-            training_examples=len(bundle.train_records),
-            cohort_fingerprint=bundle.cohort_manifest.cohort_fingerprint,
-            train_result={
-                "global_step": int(getattr(result, "global_step", 0)),
-                "training_loss": float(getattr(result, "training_loss", 0.0)),
-                "metrics": dict(getattr(result, "metrics", {}) or {}),
-            },
+        artifact = _artifact(
+            bundle=bundle,
+            backend=self.backend,
+            adapter_dir=adapter_dir,
+            result=result,
+            wall_seconds=wall_seconds,
+            peak_gpu_memory_bytes=peak,
         )
-        (output / "adapter-artifact.json").write_text(
-            artifact.model_dump_json(indent=2) + "\n", encoding="utf-8"
-        )
+        _write_artifact(output, artifact)
         return artifact
+
+
+class UnslothPeftTrainer:
+    """Optional LoRA/QLoRA backend using the current Unsloth training surface.
+
+    The backend writes an ordinary PEFT adapter rather than a merged model, preserving
+    the same Harness X evaluator and rollback boundary used by the Hugging Face path.
+    Imports are deliberately lazy so Unsloth never becomes a normal runtime dependency.
+    """
+
+    backend = TrainingBackend.UNSLOTH
+
+    def train(
+        self,
+        bundle: PreparedTrainingBundle,
+        output_directory: str | Path,
+    ) -> AdapterTrainingArtifact:
+        try:
+            import torch
+            import unsloth
+            from datasets import Dataset
+            from trl import SFTConfig, SFTTrainer
+            from unsloth import FastLanguageModel
+            from unsloth.chat_templates import train_on_responses_only
+        except ImportError as exc:  # pragma: no cover - environment-specific backend
+            raise RuntimeError(
+                "Unsloth training dependencies are missing; install Unsloth for your "
+                "platform and harness-x[unsloth-training]"
+            ) from exc
+
+        config = bundle.config
+        output = Path(output_directory)
+        adapter_dir = output / "adapter"
+        output.mkdir(parents=True, exist_ok=True)
+
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config.base_model,
+            max_seq_length=config.max_length,
+            dtype=None,
+            load_in_4bit=config.method == AdapterMethod.QLORA,
+        )
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=config.lora_rank,
+            target_modules=list(config.target_modules),
+            lora_alpha=config.lora_alpha,
+            lora_dropout=config.lora_dropout,
+            bias="none",
+            use_gradient_checkpointing=(
+                "unsloth" if config.gradient_checkpointing else False
+            ),
+            random_state=config.seed,
+            use_rslora=False,
+            loftq_config=None,
+        )
+
+        # Unsloth's current SFT path consumes rendered chat text.  Response-only
+        # masking is applied after trainer construction so stable system/user context
+        # does not dominate the loss merely because it contains more tokens.
+        rows = []
+        for record in bundle.train_records:
+            text = render_messages_with_tokenizer(
+                tokenizer, record.messages, add_generation_prompt=False
+            )
+            rows.append({"text": text})
+        train_dataset = Dataset.from_list(rows)
+
+        bf16 = bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+        args = SFTConfig(
+            output_dir=str(output / "trainer"),
+            dataset_text_field="text",
+            learning_rate=config.learning_rate,
+            num_train_epochs=config.num_train_epochs,
+            per_device_train_batch_size=config.per_device_train_batch_size,
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
+            warmup_ratio=config.warmup_ratio,
+            weight_decay=config.weight_decay,
+            gradient_checkpointing=config.gradient_checkpointing,
+            seed=config.seed,
+            save_steps=config.save_steps,
+            logging_steps=config.logging_steps,
+            optim="adamw_8bit",
+            bf16=bf16,
+            fp16=bool(torch.cuda.is_available() and not bf16),
+            report_to="none",
+        )
+        trainer = SFTTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            train_dataset=train_dataset,
+            args=args,
+        )
+        trainer = train_on_responses_only(trainer)
+
+        _reset_gpu_peak(torch)
+        started = perf_counter()
+        result = trainer.train()
+        wall_seconds = perf_counter() - started
+        peak = _gpu_peak_bytes(torch)
+
+        # Save the adapter only. The normal Harness X PEFT evaluator can load it on the
+        # untouched base model, which keeps backend comparison and rollback simple.
+        model.save_pretrained(adapter_dir)
+        tokenizer.save_pretrained(adapter_dir)
+        artifact = _artifact(
+            bundle=bundle,
+            backend=self.backend,
+            adapter_dir=adapter_dir,
+            result=result,
+            wall_seconds=wall_seconds,
+            peak_gpu_memory_bytes=peak,
+            extra_metrics={"unsloth_version": str(getattr(unsloth, "__version__", "unknown"))},
+        )
+        _write_artifact(output, artifact)
+        return artifact
+
+
+def trainer_for_backend(backend: TrainingBackend | str) -> AdapterTrainer:
+    selected = TrainingBackend(backend)
+    if selected == TrainingBackend.HUGGINGFACE_PEFT:
+        return HuggingFacePeftTrainer()
+    if selected == TrainingBackend.UNSLOTH:
+        return UnslothPeftTrainer()
+    raise AssertionError(selected)
