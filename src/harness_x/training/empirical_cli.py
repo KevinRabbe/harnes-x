@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .adapter_training import TrainingBackend
-from .empirical_experiment import run_empirical_adapter_experiment
+from .empirical_safe import run_isolated_empirical_adapter_experiment
 from .evaluation import GeneralRegressionResult
 
 
@@ -43,6 +43,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--general-baseline-score", type=float, default=None)
     parser.add_argument("--general-adapter-score", type=float, default=None)
     parser.add_argument("--general-metric-name", default="general_regression_score")
+    parser.add_argument(
+        "--resume-training",
+        type=Path,
+        default=None,
+        help=(
+            "Reuse an already-completed training artifact after exact model/revision/backend/"
+            "method/cohort validation. Accepts either a training/ directory or an experiment "
+            "directory containing training/."
+        ),
+    )
     parser.add_argument(
         "--reference",
         action="store_true",
@@ -84,6 +94,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if (args.general_baseline_score is None) != (args.general_adapter_score is None):
         parser.error("both general regression scores must be supplied together")
+    if args.reference and args.resume_training is not None:
+        parser.error("--reference cannot be combined with --resume-training")
+
     general = None
     if args.general_baseline_score is not None:
         general = GeneralRegressionResult(
@@ -102,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             base_model_revision=args.base_model_revision,
             tokenizer_revision=args.tokenizer_revision,
         )
-        report = run_empirical_adapter_experiment(
+        report = run_isolated_empirical_adapter_experiment(
             effective,
             backend=TrainingBackend(args.backend),
             output_directory=args.output,
@@ -110,6 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_new_tokens=args.max_new_tokens,
             general_regression=general,
             reference=args.reference,
+            resume_training_directory=args.resume_training,
         )
 
     print(report.model_dump_json(indent=2))
