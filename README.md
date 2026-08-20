@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–16 implemented on the current development stack.**
+**Milestones 0–17 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -60,9 +60,12 @@ The implementation now contains:
 - a concrete `ScriptedAutonomyExperimentRunner` backed by the permanent long-horizon suite plus `harness-x run-improvement-sandbox` for operator experiments, while keeping the sandbox itself unable to promote or commit a change to the live system;
 - a configured Milestone 16 `PromotionAuthority` that independently rechecks exact candidate/report/baseline fingerprints, live change class, risk, run count, regressions, failure modes, budgets, baseline integrity, teardown, and explicit operator approval unless low-risk auto-promotion is deliberately enabled;
 - immutable versioned live-config artifacts plus one atomically replaced active pointer, a SHA-256-verified rollback artifact, immediate post-activation verification, automatic exact-baseline rollback on verification failure, and evidence-backed `PROMOTED` candidate lifecycle records;
-- the first complete closed system-improvement demonstration: real maintenance-gate traces reveal excess moderate-pressure maintenance, grounded self-analysis proposes `working_pressure_trigger: 0.85 -> 0.90`, three matched sandbox runs measure maintenance cycles `3 -> 1`, the versioned config is promoted after independent verification, and the next self-analysis loads the promoted whole-system version and does not repropose the resolved issue.
+- the first complete closed system-improvement demonstration: real maintenance-gate traces reveal excess moderate-pressure maintenance, grounded self-analysis proposes `working_pressure_trigger: 0.85 -> 0.90`, three matched sandbox runs measure maintenance cycles `3 -> 1`, the versioned config is promoted after independent verification, and the next self-analysis loads the promoted whole-system version and does not repropose the resolved issue;
+- a Milestone 17 gate-training dataset contract that binds each deterministic gate input/decision to exact trace identity, policy metadata, optional explicitly keyed model recommendations, bounded downstream outcomes, and evidence-backed later usefulness;
+- conservative `positive` / `negative` / `unknown` usefulness labels that preserve unknown counterfactuals instead of converting missing evidence into reward zero, plus SHA-256 record/source/dataset integrity and fail-closed duplicate/orphan handling;
+- side-effect-free gate-data collection for retrieval, write, focus, compute, and maintenance policies plus `harness-x collect-gate-training-data`, while deterministic gates remain the permanent authoritative baseline.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, and first evidence-gated live improvement loop now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model remains a permanent comparison control. Live promotion remains deliberately narrow: operator approval is required by default, source-code/tool/model-weight candidates remain excluded, and the promoted config can be restored from an immutable rollback artifact. The next planned milestone is **Milestone 17 — collect gate training data** for small learned peripheral controllers that must continue competing against deterministic predecessors.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, and grounded controller-data pipeline now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model and deterministic controllers remain permanent comparison controls. Live promotion remains deliberately narrow: operator approval is required by default, source-code/tool/model-weight candidates remain excluded, and the promoted config can be restored from an immutable rollback artifact. The next planned milestone is **Milestone 18 — dynamic/learned compute allocation experiments**, where learned controllers must beat deterministic predecessors on the capability/cost frontier before earning any promotion path.
 
 ## Getting started
 
@@ -78,6 +81,7 @@ harness-x benchmark-reasoning-swap configs/default.yaml --base-url http://127.0.
 harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.0.1:8080/v1 --model local-model
 harness-x generate-self-model-curriculum configs/default.yaml path/to/system-self-schema.json --output .harness-x/self-model-curriculum
 harness-x run-improvement-sandbox path/to/sandbox-eligible-candidate.json configs/default.yaml --output .harness-x/improvement-sandbox
+harness-x collect-gate-training-data path/to/trace.jsonl --output .harness-x/gate-training-data
 ```
 
 Optional adapter training is installed separately:
@@ -167,6 +171,8 @@ Milestone 15 introduces the empirical boundary. A sandbox-eligible candidate is 
 
 Milestone 16 closes the first loop. A separate promotion authority revalidates sandbox evidence against the exact currently active config, writes a new immutable whole-system config version, switches the active pointer atomically, and immediately runs required verification. Failure restores the exact baseline artifact automatically. Successful promotion is recorded causally, and the next grounded self-analysis is required to execute on the promoted version without regenerating the same resolved improvement candidate.
 
+Milestone 17 begins learned-control preparation without learning yet. Existing deterministic gate traces are converted into immutable controller-training records containing state features, baseline policy output, optional explicitly bound model recommendations, observed downstream outcomes, cost, and conservative later-usefulness labels. Missing counterfactual evidence remains `unknown`; a later learned controller therefore inherits neither fabricated reward nor authority from the collector.
+
 The initial neural strategy is intentionally modest:
 
 1. start with an existing capable small/medium reasoning model;
@@ -216,6 +222,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Detailed implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Design invariants](docs/DESIGN_INVARIANTS.md)
 - [Milestone 16 closed improvement loop](docs/MILESTONE_16_CLOSED_IMPROVEMENT_LOOP.md)
+- [Milestone 17 grounded gate training data](docs/MILESTONE_17_GATE_TRAINING_DATA.md)
 - [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question

@@ -111,6 +111,24 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox.add_argument("--base-seed", type=int, default=15000)
     sandbox.add_argument("--output", type=Path, default=Path(".harness-x/improvement-sandbox"))
 
+    gate_data = subparsers.add_parser(
+        "collect-gate-training-data",
+        help="Collect Milestone 17 gate-controller records from verified trace ledgers",
+    )
+    gate_data.add_argument("traces", type=Path, nargs="+")
+    gate_data.add_argument(
+        "--recommendations",
+        type=Path,
+        default=None,
+        help="Optional JSONL shadow/model recommendations bound to exact gate event IDs",
+    )
+    gate_data.add_argument("--outcome-horizon-steps", type=int, default=32)
+    gate_data.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/gate-training-data"),
+    )
+
     return parser
 
 
@@ -315,6 +333,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         # A valid experiment may legitimately recommend rejection. Exit status reports
         # experiment integrity, not whether the candidate won.
         return 0 if report.experiment_valid else 1
+
+    if args.command == "collect-gate-training-data":
+        from .controllers import (
+            collect_gate_training_dataset,
+            load_model_recommendations,
+        )
+
+        recommendations = (
+            load_model_recommendations(args.recommendations)
+            if args.recommendations is not None
+            else ()
+        )
+        dataset = collect_gate_training_dataset(
+            args.traces,
+            recommendations=recommendations,
+            outcome_horizon_steps=args.outcome_horizon_steps,
+        )
+        dataset.write(args.output)
+        print(dataset.manifest.model_dump_json(indent=2))
+        return 0
 
     parser.print_help()
     return 0
