@@ -129,6 +129,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(".harness-x/gate-training-data"),
     )
 
+    dynamic_train = subparsers.add_parser(
+        "train-dynamic-compute-controller",
+        help="Train the small Milestone 18 controller from a Milestone 17 dataset",
+    )
+    dynamic_train.add_argument("dataset", type=Path)
+    dynamic_train.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/dynamic-compute-controller.json"),
+    )
+
+    dynamic_benchmark = subparsers.add_parser(
+        "benchmark-dynamic-compute",
+        help="Compare a learned compute controller against its deterministic baseline",
+    )
+    dynamic_benchmark.add_argument(
+        "--controller",
+        type=Path,
+        default=None,
+        help="Optional learned-controller artifact; omitted uses the deterministic reference-training fixture",
+    )
+    dynamic_benchmark.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/benchmark-dynamic-compute"),
+    )
+
     return parser
 
 
@@ -353,6 +380,50 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset.write(args.output)
         print(dataset.manifest.model_dump_json(indent=2))
         return 0
+
+    if args.command == "train-dynamic-compute-controller":
+        from .controllers import (
+            LearnedDynamicComputeController,
+            load_gate_training_dataset,
+            prepare_dynamic_compute_examples,
+        )
+
+        dataset = load_gate_training_dataset(args.dataset)
+        examples = prepare_dynamic_compute_examples(dataset)
+        controller = LearnedDynamicComputeController.train(examples)
+        controller.artifact.write(args.output)
+        print(controller.artifact.model_dump_json(indent=2))
+        return 0
+
+    if args.command == "benchmark-dynamic-compute":
+        from .controllers import (
+            DeterministicDynamicComputeController,
+            LearnedDynamicComputeController,
+            build_reference_dynamic_compute_eval_cases,
+            build_reference_dynamic_compute_training_examples,
+            compare_dynamic_compute_controllers,
+            load_learned_compute_controller,
+        )
+
+        if args.controller is None:
+            learned = LearnedDynamicComputeController.train(
+                build_reference_dynamic_compute_training_examples()
+            )
+        else:
+            learned = load_learned_compute_controller(args.controller)
+        report = compare_dynamic_compute_controllers(
+            DeterministicDynamicComputeController(),
+            learned,
+            build_reference_dynamic_compute_eval_cases(),
+        )
+        args.output.mkdir(parents=True, exist_ok=True)
+        (args.output / "dynamic-compute-comparison.json").write_text(
+            report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        if args.controller is None:
+            learned.artifact.write(args.output / "reference-learned-controller.json")
+        print(report.model_dump_json(indent=2))
+        return 0 if report.learned_frontier_improved else 1
 
     parser.print_help()
     return 0
