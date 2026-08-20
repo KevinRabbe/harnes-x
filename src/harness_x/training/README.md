@@ -1,6 +1,6 @@
 # Grounded self-model training
 
-Milestones 12–13 build the first training path for teaching a replaceable reasoning core how Harness X actually works. Milestone 19B adds interchangeable PEFT implementations and a held-out test for whether stable self-model knowledge can reduce repeated context.
+Milestones 12–13 build the first training path for teaching a replaceable reasoning core how Harness X actually works. Milestone 19B adds interchangeable PEFT implementations and a held-out test for whether stable self-model knowledge can reduce repeated context. Milestone 20 packages those components into one signed local empirical experiment.
 
 ## Ground-truth curriculum
 
@@ -68,8 +68,6 @@ A model with different module names can override the tuple through `AdapterTrain
 The prepared bundle is backend-neutral. The same exact cohort and hyperparameter contract can be passed to either implementation.
 
 ### Hugging Face / PEFT
-
-The normal optional backend remains:
 
 ```bash
 python -m pip install -e ".[training]"
@@ -160,4 +158,48 @@ harness-x benchmark-context-compression \
   --output .harness-x/context-compression-reference
 ```
 
-A green reference fixture is not evidence that a real trained adapter has compressed context. That claim requires the empirical model run above.
+A green reference fixture is not evidence that a real trained adapter has compressed context. That claim requires an empirical model run.
+
+## Milestone 20 one-command empirical experiment
+
+Milestone 20 binds training, evaluation, context compression, hardware/software telemetry, and artifact integrity into one local evidence bundle.
+
+For a remote model, use an exact model commit SHA rather than a branch/tag:
+
+```bash
+harness-x-empirical-adapter \
+  .harness-x/self-model-training \
+  --backend unsloth \
+  --base-model-revision <40-char-model-commit-sha> \
+  --output .harness-x/empirical-self-model
+```
+
+The same command can use `--backend huggingface_peft` in a `[training]` environment.
+
+The experiment records:
+
+- exact cohort fingerprint;
+- SHA-256 hashes for every effective prepared input file;
+- exact remote model/tokenizer commit identity, or a file-tree fingerprint for a local model directory;
+- Python/platform/package versions;
+- CUDA/GPU identity and total memory when available;
+- training wall time and peak allocated CUDA memory when available;
+- SHA-256 hashes for every produced adapter file;
+- base-vs-adapter STANDARD held-out evaluation;
+- RICH/STANDARD/MINIMAL context-compression evaluation;
+- one SHA-256-bound final experiment manifest.
+
+A valid experiment may still report that the adapter lost. CLI success means the evidence chain completed correctly, not that the model passed qualification.
+
+`promotion_ready` is intentionally stricter than successful training. It requires real empirical evidence, held-out adapter qualification, context-compression qualification, and an external general-regression result. The experiment report itself still has no authority to deploy the adapter.
+
+Reference mode exercises the complete orchestration in CI without model weights:
+
+```bash
+harness-x-empirical-adapter \
+  .harness-x/self-model-training \
+  --reference \
+  --output .harness-x/empirical-reference
+```
+
+Reference reports are permanently marked non-empirical and cannot become promotion-ready.
