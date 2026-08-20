@@ -15,6 +15,7 @@ from .formatting import (
     format_self_model_example,
     render_messages_with_tokenizer,
 )
+from .lmfe_compat import build_lmfe_prefix_allowed_tokens_fn
 from .models import SelfModelExample
 from .repair_schema import GENERIC_ARRAY_ITEM_LIMIT, repair_json_schema
 
@@ -130,6 +131,7 @@ class HuggingFaceSelfModelPredictor:
         )
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        self._lmfe_tokenizer_data = None
 
         model_kwargs: dict[str, Any] = {
             "device_map": "auto",
@@ -231,13 +233,10 @@ class HuggingFaceSelfModelPredictor:
         return StoppingCriteriaList([_CompleteJsonObject()])
 
     def _schema_prefix_allowed_tokens_fn(self, schema: dict[str, Any]) -> Any:
-        """Build lazy optional JSON-schema constrained decoding for repair only."""
+        """Build lazy JSON-schema constrained decoding without LMFE's HF shim."""
 
         try:
             from lmformatenforcer import CharacterLevelParserConfig, JsonSchemaParser
-            from lmformatenforcer.integrations.transformers import (
-                build_transformers_prefix_allowed_tokens_fn,
-            )
         except ImportError as exc:  # pragma: no cover - optional operator dependency
             raise RuntimeError(
                 "schema-constrained repair requires lm-format-enforcer; install "
@@ -248,7 +247,13 @@ class HuggingFaceSelfModelPredictor:
             max_json_array_length=GENERIC_ARRAY_ITEM_LIMIT,
         )
         parser = JsonSchemaParser(schema, config=config)
-        return build_transformers_prefix_allowed_tokens_fn(self.tokenizer, parser)
+        callback, tokenizer_data = build_lmfe_prefix_allowed_tokens_fn(
+            self.tokenizer,
+            parser,
+            tokenizer_data=self._lmfe_tokenizer_data,
+        )
+        self._lmfe_tokenizer_data = tokenizer_data
+        return callback
 
     def _generate_text(
         self,
@@ -363,6 +368,7 @@ class HuggingFaceSelfModelPredictor:
                 pass
         self.model = None
         self.tokenizer = None
+        self._lmfe_tokenizer_data = None
         gc.collect()
         if self._torch.cuda.is_available():
             self._torch.cuda.empty_cache()
