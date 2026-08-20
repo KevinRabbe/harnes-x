@@ -2,14 +2,14 @@
 
 The experiment asks a narrow question: after self-model training, can stable Harness X
 operating knowledge move out of repeated prompt text without losing grounded behavior?
-Live state is never compressed away.  Every profile retains the task, current system
+Live state is never compressed away. Every profile retains the task, current system
 version, source-state fingerprint, live input state, and requested output shape.
 """
 
 from __future__ import annotations
 
 from math import ceil
-from typing import Any, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,11 +121,21 @@ def _fallback_prompt_chars(example: SelfModelExample, profile: SelfModelContextP
     return sum(len(item.role) + len(item.content) + 2 for item in record.prompt_messages)
 
 
-def _evaluate_profile(
+def evaluate_context_profile(
     examples: tuple[SelfModelExample, ...],
     predictor: ProfileAwareSelfModelPredictor,
     profile: SelfModelContextProfile,
 ) -> ContextProfileEvaluation:
+    """Evaluate one already-loaded predictor under one prompt profile.
+
+    Exposing this independently lets GPU operators evaluate the base model, release it,
+    then load the adapter once for the remaining profiles instead of keeping two models
+    resident simultaneously.
+    """
+
+    if not examples:
+        raise ValueError("context profile evaluation requires at least one example")
+    profile = SelfModelContextProfile(profile)
     evaluation = evaluate_self_model(examples, _ProfilePredictor(predictor, profile))
     measure = getattr(predictor, "prompt_measurement", None)
     chars: list[int] = []
@@ -232,28 +242,29 @@ def _qualify(
     )
 
 
-def evaluate_context_compression(
-    examples: tuple[SelfModelExample, ...],
+def compare_context_profiles(
     *,
-    base_predictor: ProfileAwareSelfModelPredictor,
-    adapter_predictor: ProfileAwareSelfModelPredictor,
+    base_rich: ContextProfileEvaluation,
+    adapter_rich: ContextProfileEvaluation,
+    adapter_standard: ContextProfileEvaluation,
+    adapter_minimal: ContextProfileEvaluation,
     policy: ContextCompressionPolicy | None = None,
     evidence_kind: str = "empirical_model",
 ) -> ContextCompressionReport:
-    if not examples:
-        raise ValueError("context compression evaluation requires at least one example")
     policy = policy or ContextCompressionPolicy()
-
-    base_rich = _evaluate_profile(examples, base_predictor, SelfModelContextProfile.RICH)
-    adapter_rich = _evaluate_profile(examples, adapter_predictor, SelfModelContextProfile.RICH)
-    standard = _evaluate_profile(
-        examples, adapter_predictor, SelfModelContextProfile.STANDARD
+    expected_profiles = (
+        (base_rich, SelfModelContextProfile.RICH),
+        (adapter_rich, SelfModelContextProfile.RICH),
+        (adapter_standard, SelfModelContextProfile.STANDARD),
+        (adapter_minimal, SelfModelContextProfile.MINIMAL),
     )
-    minimal = _evaluate_profile(examples, adapter_predictor, SelfModelContextProfile.MINIMAL)
+    for point, expected in expected_profiles:
+        if point.profile != expected:
+            raise ValueError(f"expected {expected.value} profile, got {point.profile.value}")
 
     fingerprints = {
         point.evaluation.evaluation_fingerprint
-        for point in (base_rich, adapter_rich, standard, minimal)
+        for point in (base_rich, adapter_rich, adapter_standard, adapter_minimal)
     }
     if len(fingerprints) != 1:
         raise ValueError("all context profiles must evaluate the exact same held-out cases")
@@ -261,18 +272,18 @@ def evaluate_context_compression(
     standard_q = _qualify(
         base_rich=base_rich,
         adapter_rich=adapter_rich,
-        candidate=standard,
+        candidate=adapter_standard,
         policy=policy,
     )
     minimal_q = _qualify(
         base_rich=base_rich,
         adapter_rich=adapter_rich,
-        candidate=minimal,
+        candidate=adapter_minimal,
         policy=policy,
     )
     qualified = [
-        (standard, standard_q),
-        (minimal, minimal_q),
+        (adapter_standard, standard_q),
+        (adapter_minimal, minimal_q),
     ]
     qualified = [item for item in qualified if item[1].qualified]
     if qualified:
@@ -301,8 +312,8 @@ def evaluate_context_compression(
         evaluation_fingerprint=fingerprints.pop(),
         base_rich=base_rich,
         adapter_rich=adapter_rich,
-        adapter_standard=standard,
-        adapter_minimal=minimal,
+        adapter_standard=adapter_standard,
+        adapter_minimal=adapter_minimal,
         standard_qualification=standard_q,
         minimal_qualification=minimal_q,
         selected_profile=selected.profile,
@@ -311,6 +322,42 @@ def evaluate_context_compression(
         selected_token_reduction_ratio=selected_q.token_reduction_ratio,
         selected_exact_accuracy_delta_vs_base_rich=selected_q.exact_accuracy_delta_vs_base_rich,
         selected_efficiency_gain_ratio_vs_adapter_rich=selected_q.efficiency_gain_ratio_vs_adapter_rich,
+    )
+
+
+def evaluate_context_compression(
+    examples: tuple[SelfModelExample, ...],
+    *,
+    base_predictor: ProfileAwareSelfModelPredictor,
+    adapter_predictor: ProfileAwareSelfModelPredictor,
+    policy: ContextCompressionPolicy | None = None,
+    evidence_kind: str = "empirical_model",
+) -> ContextCompressionReport:
+    """Convenience path for lightweight/reference predictors.
+
+    Real GPU callers should use ``evaluate_context_profile`` sequentially and then
+    ``compare_context_profiles`` so base and adapter weights never need to coexist.
+    """
+
+    base_rich = evaluate_context_profile(
+        examples, base_predictor, SelfModelContextProfile.RICH
+    )
+    adapter_rich = evaluate_context_profile(
+        examples, adapter_predictor, SelfModelContextProfile.RICH
+    )
+    standard = evaluate_context_profile(
+        examples, adapter_predictor, SelfModelContextProfile.STANDARD
+    )
+    minimal = evaluate_context_profile(
+        examples, adapter_predictor, SelfModelContextProfile.MINIMAL
+    )
+    return compare_context_profiles(
+        base_rich=base_rich,
+        adapter_rich=adapter_rich,
+        adapter_standard=standard,
+        adapter_minimal=minimal,
+        policy=policy,
+        evidence_kind=evidence_kind,
     )
 
 
@@ -350,7 +397,7 @@ class ReferenceContextCompressionPredictor:
                 return SelfModelPrediction(decision=dict(example.expected_decision), confidence=0.85)
             return SelfModelPrediction(decision={"unknown": True}, confidence=0.45)
 
-        # The simulated trained adapter retains the task under STANDARD context.  The
+        # The simulated trained adapter retains the task under STANDARD context. The
         # MINIMAL profile is intentionally too aggressive for diagnostics, proving that
         # the benchmark can reject compression instead of automatically rewarding it.
         if profile in {SelfModelContextProfile.RICH, SelfModelContextProfile.STANDARD}:
