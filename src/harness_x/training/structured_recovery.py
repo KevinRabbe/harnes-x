@@ -1,9 +1,9 @@
 """Bounded recovery for invalid structured model output.
 
-The primary model output remains evidence.  Recovery never edits malformed JSON or
-uses the held-out target values.  When strict parsing fails, the harness may ask the
-same already-loaded predictor for one fresh compact JSON attempt using only the
-original grounded prompt and the output keys that were already disclosed to it.
+The primary model output remains evidence. Recovery never edits malformed JSON or
+uses held-out target values. When strict parsing fails, the harness may ask the same
+already-loaded predictor for one fresh compact JSON attempt using only the original
+grounded prompt and target-independent output-protocol constraints.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ class StructuredRecoveryAttempt:
     primary_parse_error: str
     repair_raw_text: str | None
     repair_parse_error: str | None
+    constraint_mode: str = "bounded"
 
     @property
     def succeeded(self) -> bool:
@@ -37,14 +38,18 @@ class BoundedJsonRecoveryPredictor:
         *,
         max_attempts: int = 1,
         repair_max_new_tokens: int = 256,
+        repair_constraint_mode: str = "bounded",
     ) -> None:
         if max_attempts not in {0, 1}:
             raise ValueError("bounded JSON recovery supports only 0 or 1 repair attempt")
         if repair_max_new_tokens < 1:
             raise ValueError("repair_max_new_tokens must be positive")
+        if repair_constraint_mode not in {"bounded", "schema"}:
+            raise ValueError("repair_constraint_mode must be 'bounded' or 'schema'")
         self.source = source
         self.max_attempts = max_attempts
         self.repair_max_new_tokens = repair_max_new_tokens
+        self.repair_constraint_mode = repair_constraint_mode
         self.last_recovery: StructuredRecoveryAttempt | None = None
 
     @property
@@ -83,12 +88,14 @@ class BoundedJsonRecoveryPredictor:
             example,
             SelfModelContextProfile(profile),
             max_new_tokens=self.repair_max_new_tokens,
+            constraint_mode=self.repair_constraint_mode,
         )
         self.last_recovery = StructuredRecoveryAttempt(
             primary_raw_text=primary.raw_text,
             primary_parse_error=primary.parse_error,
             repair_raw_text=repaired.raw_text,
             repair_parse_error=repaired.parse_error,
+            constraint_mode=self.repair_constraint_mode,
         )
         return repaired
 
