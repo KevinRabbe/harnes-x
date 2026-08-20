@@ -1,10 +1,9 @@
 """Per-case empirical self-model evaluation observability.
 
 Milestone 20.2 records the externally visible prediction boundary, not hidden model
-reasoning. Milestone 20.3 additionally records bounded structured-output recovery:
-the malformed primary output remains evidence and a separately visible retry may be
-used only after strict parsing fails. Milestone 20.4 makes that retry explicit in the
-signed trace and records the fixed decoder-bound policy used for recovery.
+reasoning. Milestone 20.3 adds one bounded structured-output recovery attempt.
+Milestone 20.4 records decoder bounds explicitly. Milestone 20.5 additionally records
+whether repair used target-independent JSON-schema constrained decoding.
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ class EvaluationCaseRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-case-v3"
+    schema_version: str = "self-model-evaluation-case-v4"
     evaluation_name: str
     predictor_name: str
     profile: str
@@ -59,6 +58,7 @@ class EvaluationCaseRecord(BaseModel):
     primary_parse_error: str | None = None
     repair_attempted: bool = False
     repair_succeeded: bool = False
+    repair_constraint_mode: str | None = None
     repair_raw_text: str | None = None
     repair_parse_error: str | None = None
     raw_text: str | None = None
@@ -76,7 +76,7 @@ class EvaluationObservabilityReport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-observability-v3"
+    schema_version: str = "self-model-evaluation-observability-v4"
     experiment_report_fingerprint: str = Field(min_length=64, max_length=64)
     evaluation_fingerprint: str = Field(min_length=64, max_length=64)
     trace_files: tuple[FileDigest, ...]
@@ -88,6 +88,7 @@ class EvaluationObservabilityReport(BaseModel):
     repair_max_new_tokens: int = Field(gt=0)
     repair_no_repeat_ngram_size: int = Field(ge=0)
     repair_array_item_limit: int = Field(gt=0)
+    repair_constraint_mode: str
     json_completion_stopping: bool
     report_fingerprint: str = Field(min_length=64, max_length=64)
 
@@ -101,6 +102,8 @@ class EvaluationObservabilityReport(BaseModel):
             raise ValueError("recovered parse failures cannot exceed primary parse failures")
         if self.parse_repair_attempts == 0 and self.recovered_parse_failure_record_count:
             raise ValueError("recoveries require an enabled parse-repair attempt")
+        if self.repair_constraint_mode not in {"bounded", "schema"}:
+            raise ValueError("unknown repair constraint mode")
         return self
 
     def write(self, output_directory: str | Path) -> Path:
@@ -195,6 +198,7 @@ class JsonlEvaluationTraceRecorder:
         )
         repair_attempted = recovery is not None
         repair_succeeded = bool(recovery is not None and recovery.succeeded)
+        repair_constraint_mode = recovery.constraint_mode if recovery is not None else None
         repair_raw_text = recovery.repair_raw_text if recovery is not None else None
         repair_parse_error = recovery.repair_parse_error if recovery is not None else None
         record = EvaluationCaseRecord(
@@ -212,6 +216,7 @@ class JsonlEvaluationTraceRecorder:
             primary_parse_error=primary_parse_error,
             repair_attempted=repair_attempted,
             repair_succeeded=repair_succeeded,
+            repair_constraint_mode=repair_constraint_mode,
             repair_raw_text=repair_raw_text,
             repair_parse_error=repair_parse_error,
             raw_text=prediction.raw_text,
@@ -311,6 +316,7 @@ def _install_observability(
     *,
     parse_repair_attempts: int = 0,
     repair_max_new_tokens: int = 256,
+    repair_constraint_mode: str = "bounded",
 ) -> Iterator[list[JsonlEvaluationTraceRecorder]]:
     original_evaluate = _empirical.evaluate_self_model
     original_context = _empirical.evaluate_context_profile
@@ -320,6 +326,8 @@ def _install_observability(
         raise ValueError("parse_repair_attempts must be 0 or 1")
     if repair_max_new_tokens < 1:
         raise ValueError("repair_max_new_tokens must be positive")
+    if repair_constraint_mode not in {"bounded", "schema"}:
+        raise ValueError("repair_constraint_mode must be 'bounded' or 'schema'")
 
     def recorder(name: str) -> JsonlEvaluationTraceRecorder:
         item = JsonlEvaluationTraceRecorder(staging / f"{name}.jsonl", name)
@@ -333,6 +341,7 @@ def _install_observability(
             predictor,
             max_attempts=parse_repair_attempts,
             repair_max_new_tokens=repair_max_new_tokens,
+            repair_constraint_mode=repair_constraint_mode,
         )
 
     def observed_evaluate(examples: Any, predictor: Any) -> Any:
@@ -397,6 +406,7 @@ def run_observed_empirical_adapter_experiment(
     resume_training_directory: str | Path | None = None,
     parse_repair_attempts: int = 0,
     repair_max_new_tokens: int = 256,
+    repair_constraint_mode: str = "bounded",
 ) -> EmpiricalAdapterExperimentReport:
     """Run M20.1 and attach a separately signed, append-only prediction ledger."""
 
@@ -417,6 +427,7 @@ def run_observed_empirical_adapter_experiment(
             staging,
             parse_repair_attempts=parse_repair_attempts,
             repair_max_new_tokens=repair_max_new_tokens,
+            repair_constraint_mode=repair_constraint_mode,
         ):
             report = run_isolated_empirical_adapter_experiment(
                 prepared_directory,
@@ -444,7 +455,7 @@ def run_observed_empirical_adapter_experiment(
             raise ValueError("observed empirical run produced no evaluation trace records")
 
         payload = {
-            "schema_version": "self-model-evaluation-observability-v3",
+            "schema_version": "self-model-evaluation-observability-v4",
             "experiment_report_fingerprint": report.report_fingerprint,
             "evaluation_fingerprint": report.base_standard.evaluation_fingerprint,
             "trace_files": [item.model_dump(mode="json") for item in trace_files],
@@ -456,6 +467,7 @@ def run_observed_empirical_adapter_experiment(
             "repair_max_new_tokens": repair_max_new_tokens,
             "repair_no_repeat_ngram_size": REPAIR_NO_REPEAT_NGRAM_SIZE,
             "repair_array_item_limit": REPAIR_ARRAY_ITEM_LIMIT,
+            "repair_constraint_mode": repair_constraint_mode,
             "json_completion_stopping": True,
         }
         fingerprint = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
