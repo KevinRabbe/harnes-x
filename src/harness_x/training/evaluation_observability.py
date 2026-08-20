@@ -465,7 +465,9 @@ def run_observed_empirical_adapter_experiment(
             "parse_failure_record_count": parse_failure_count,
             "parse_repair_attempts": parse_repair_attempts,
             "repair_max_new_tokens": repair_max_new_tokens,
-            "repair_no_repeat_ngram_size": REPAIR_NO_REPEAT_NGRAM_SIZE,
+            "repair_no_repeat_ngram_size": (
+                0 if repair_constraint_mode == "schema" else REPAIR_NO_REPEAT_NGRAM_SIZE
+            ),
             "repair_array_item_limit": REPAIR_ARRAY_ITEM_LIMIT,
             "repair_constraint_mode": repair_constraint_mode,
             "json_completion_stopping": True,
