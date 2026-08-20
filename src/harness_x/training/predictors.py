@@ -343,11 +343,14 @@ class HuggingFaceSelfModelPredictor:
             profile,
             constraint_mode=constraint_mode,
         )
+        schema = repair_json_schema(example) if constraint_mode == "schema" else None
         text = self._generate_text(
             prompt,
             max_new_tokens=max_new_tokens,
-            no_repeat_ngram_size=REPAIR_NO_REPEAT_NGRAM_SIZE,
-            json_schema=(repair_json_schema(example) if constraint_mode == "schema" else None),
+            no_repeat_ngram_size=(
+                0 if constraint_mode == "schema" else REPAIR_NO_REPEAT_NGRAM_SIZE
+            ),
+            json_schema=schema,
         )
         return parse_structured_prediction(text)
 
