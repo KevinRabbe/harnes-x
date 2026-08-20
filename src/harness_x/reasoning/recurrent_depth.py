@@ -250,7 +250,7 @@ class HuginnTransformersBackend:
         except ImportError as exc:
             raise RecurrentDepthResearchError(
                 'Huginn recurrent-depth inference requires optional dependencies; '
-                'install Harness X with `pip install -e ".[recurrent]"`.'
+                'install Harness X with `pip install -e ".[recurrent]`.'
             ) from exc
 
         dtype = {
@@ -447,18 +447,23 @@ def _score_output(expected: RawReasoningOutput, actual: RawReasoningOutput) -> t
     exact = expected_json == actual_json
     if exact:
         return 1.0, True
+
+    # Partial credit is evidence-sensitive: matching an empty optional collection must
+    # not make a substantively wrong answer look good. This matters for depth curves,
+    # where shallow failures often return no actions simply because the task never
+    # needed an action in the first place.
     score = 0.0
     if expected.status == actual.status:
-        score += 0.25
-    if expected.proposals == actual.proposals:
         score += 0.30
-    if expected.actions == actual.actions:
-        score += 0.20
-    if expected.observations == actual.observations:
+    if expected.proposals and expected.proposals == actual.proposals:
+        score += 0.35
+    if expected.actions and expected.actions == actual.actions:
+        score += 0.15
+    if expected.observations and expected.observations == actual.observations:
         score += 0.15
     if expected.requested_additional_steps == actual.requested_additional_steps:
-        score += 0.10
-    return min(1.0, score), False
+        score += 0.05
+    return min(0.99, score), False
 
 
 def benchmark_fixed_depth_curve(
