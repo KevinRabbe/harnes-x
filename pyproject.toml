@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8,<10",
+  "lm-format-enforcer==0.11.3",
 ]
 training = [
   "torch>=2.4,<3",
