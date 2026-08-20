@@ -3,7 +3,8 @@
 Milestone 20.2 records the externally visible prediction boundary, not hidden model
 reasoning. Milestone 20.3 additionally records bounded structured-output recovery:
 the malformed primary output remains evidence and a separately visible retry may be
-used only after strict parsing fails.
+used only after strict parsing fails. Milestone 20.4 makes that retry explicit in the
+signed trace and records the fixed decoder-bound policy used for recovery.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from .evaluation import (
 )
 from .formatting import SelfModelContextProfile
 from .models import SelfModelExample, canonical_json
+from .predictors import REPAIR_ARRAY_ITEM_LIMIT, REPAIR_NO_REPEAT_NGRAM_SIZE
 from .structured_recovery import (
     BoundedJsonRecoveryPredictor,
     StructuredRecoveryAttempt,
@@ -42,7 +44,7 @@ class EvaluationCaseRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-case-v2"
+    schema_version: str = "self-model-evaluation-case-v3"
     evaluation_name: str
     predictor_name: str
     profile: str
@@ -57,6 +59,8 @@ class EvaluationCaseRecord(BaseModel):
     primary_parse_error: str | None = None
     repair_attempted: bool = False
     repair_succeeded: bool = False
+    repair_raw_text: str | None = None
+    repair_parse_error: str | None = None
     raw_text: str | None = None
     parsed_decision: dict[str, Any]
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -72,7 +76,7 @@ class EvaluationObservabilityReport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-observability-v2"
+    schema_version: str = "self-model-evaluation-observability-v3"
     experiment_report_fingerprint: str = Field(min_length=64, max_length=64)
     evaluation_fingerprint: str = Field(min_length=64, max_length=64)
     trace_files: tuple[FileDigest, ...]
@@ -80,6 +84,11 @@ class EvaluationObservabilityReport(BaseModel):
     primary_parse_failure_record_count: int = Field(ge=0)
     recovered_parse_failure_record_count: int = Field(ge=0)
     parse_failure_record_count: int = Field(ge=0)
+    parse_repair_attempts: int = Field(ge=0, le=1)
+    repair_max_new_tokens: int = Field(gt=0)
+    repair_no_repeat_ngram_size: int = Field(ge=0)
+    repair_array_item_limit: int = Field(gt=0)
+    json_completion_stopping: bool
     report_fingerprint: str = Field(min_length=64, max_length=64)
 
     @model_validator(mode="after")
@@ -90,6 +99,8 @@ class EvaluationObservabilityReport(BaseModel):
             raise ValueError("evaluation observability fingerprint does not match content")
         if self.recovered_parse_failure_record_count > self.primary_parse_failure_record_count:
             raise ValueError("recovered parse failures cannot exceed primary parse failures")
+        if self.parse_repair_attempts == 0 and self.recovered_parse_failure_record_count:
+            raise ValueError("recoveries require an enabled parse-repair attempt")
         return self
 
     def write(self, output_directory: str | Path) -> Path:
@@ -184,6 +195,8 @@ class JsonlEvaluationTraceRecorder:
         )
         repair_attempted = recovery is not None
         repair_succeeded = bool(recovery is not None and recovery.succeeded)
+        repair_raw_text = recovery.repair_raw_text if recovery is not None else None
+        repair_parse_error = recovery.repair_parse_error if recovery is not None else None
         record = EvaluationCaseRecord(
             evaluation_name=self.evaluation_name,
             predictor_name=predictor_name,
@@ -199,6 +212,8 @@ class JsonlEvaluationTraceRecorder:
             primary_parse_error=primary_parse_error,
             repair_attempted=repair_attempted,
             repair_succeeded=repair_succeeded,
+            repair_raw_text=repair_raw_text,
+            repair_parse_error=repair_parse_error,
             raw_text=prediction.raw_text,
             parsed_decision=dict(prediction.decision),
             confidence=prediction.confidence,
@@ -429,7 +444,7 @@ def run_observed_empirical_adapter_experiment(
             raise ValueError("observed empirical run produced no evaluation trace records")
 
         payload = {
-            "schema_version": "self-model-evaluation-observability-v2",
+            "schema_version": "self-model-evaluation-observability-v3",
             "experiment_report_fingerprint": report.report_fingerprint,
             "evaluation_fingerprint": report.base_standard.evaluation_fingerprint,
             "trace_files": [item.model_dump(mode="json") for item in trace_files],
@@ -437,6 +452,11 @@ def run_observed_empirical_adapter_experiment(
             "primary_parse_failure_record_count": primary_parse_failure_count,
             "recovered_parse_failure_record_count": recovered_parse_failure_count,
             "parse_failure_record_count": parse_failure_count,
+            "parse_repair_attempts": parse_repair_attempts,
+            "repair_max_new_tokens": repair_max_new_tokens,
+            "repair_no_repeat_ngram_size": REPAIR_NO_REPEAT_NGRAM_SIZE,
+            "repair_array_item_limit": REPAIR_ARRAY_ITEM_LIMIT,
+            "json_completion_stopping": True,
         }
         fingerprint = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
         observability = EvaluationObservabilityReport.model_validate(
