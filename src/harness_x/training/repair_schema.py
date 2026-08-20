@@ -28,13 +28,30 @@ def _string(*, max_length: int = TEXT_LIMIT, enum: list[str] | None = None) -> d
     return result
 
 
+def _any_json() -> dict[str, Any]:
+    # A bare nested {} is valid JSON Schema for "any JSON", but LMFE 0.11.3
+    # materializes it with type=None and rejects it when traversal reaches that
+    # property.  LMFE's own schemaless top-level fallback uses the same explicit
+    # anyOf strategy, with integer intentionally covered by JSON number.
+    return {
+        "anyOf": [
+            {"type": "string"},
+            {"type": "number"},
+            {"type": "object"},
+            {"type": "array"},
+            {"type": "boolean"},
+            {"type": "null"},
+        ]
+    }
+
+
 def _base_object(example: SelfModelExample, properties: dict[str, Any]) -> dict[str, Any]:
     # Top-level expected key names are already included in every normal evaluation
     # prompt by formatting._user_payload.  Values are deliberately never read here.
     required = sorted(example.expected_decision.keys())
     missing = [key for key in required if key not in properties]
     for key in missing:
-        properties[key] = {}
+        properties[key] = _any_json()
     return {
         "type": "object",
         "properties": properties,
@@ -48,7 +65,7 @@ def _diagnostic_schema(example: SelfModelExample) -> dict[str, Any]:
         "type": "object",
         "properties": {
             "path": _string(max_length=160),
-            "value": {},
+            "value": _any_json(),
             "minimum": {"type": "number"},
             "relationship": _string(max_length=80),
             "repeated_tool_failures": {"type": "integer"},
@@ -164,5 +181,5 @@ def repair_json_schema(example: SelfModelExample) -> dict[str, Any]:
     # nested free-form JSON finite without supplying target values.
     return _base_object(
         example,
-        {key: {} for key in sorted(example.expected_decision.keys())},
+        {key: _any_json() for key in sorted(example.expected_decision.keys())},
     )
