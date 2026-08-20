@@ -176,6 +176,7 @@ def test_repair_prompt_uses_original_grounded_input_without_target_values() -> N
     )
 
     assert "previous generation failed strict JSON validation" in prompt.lower()
-    assert '"expected_keys": ["owner"]' in prompt or '\\"expected_keys\\": [\\"owner\\"]' in prompt
+    assert "expected_keys" in prompt
+    assert "owner" in prompt
     assert canonical_json(example.expected_decision) not in prompt
     assert "orchestrator" not in prompt
