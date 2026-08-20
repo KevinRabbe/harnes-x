@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+import pytest
 
 from harness_x.benchmarks.runtime import BenchmarkRuntime
 from harness_x.config import load_config
@@ -251,8 +252,8 @@ def test_compression_rejects_diagnostic_component_regression_hidden_by_exact_flo
         adapter_minimal=minimal,
     )
 
-    assert report.standard_qualification.diagnostic_accuracy_delta_vs_adapter_rich == -0.1
+    assert report.standard_qualification.diagnostic_accuracy_delta_vs_adapter_rich == pytest.approx(-0.1)
     assert "diagnostic_accuracy_regression" in report.standard_qualification.reasons
-    assert report.minimal_qualification.diagnostic_accuracy_delta_vs_adapter_rich == -0.7
+    assert report.minimal_qualification.diagnostic_accuracy_delta_vs_adapter_rich == pytest.approx(-0.7)
     assert "diagnostic_accuracy_regression" in report.minimal_qualification.reasons
     assert report.compression_qualified is False
