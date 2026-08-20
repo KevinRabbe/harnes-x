@@ -1,19 +1,33 @@
 """Grounded curriculum, training, and evaluation for Harness X self-model adapters."""
 
 from .adapter_training import (
+    DEFAULT_LORA_TARGET_MODULES,
     AdapterMethod,
+    AdapterTrainer,
     AdapterTrainingArtifact,
     AdapterTrainingConfig,
     HuggingFacePeftTrainer,
     PreparedTrainingBundle,
+    TrainingBackend,
+    UnslothPeftTrainer,
     load_prepared_training_bundle,
     prepare_training_bundle,
+    trainer_for_backend,
 )
 from .cohort import (
     TrainingCohort,
     TrainingCohortManifest,
     build_training_cohort,
     load_training_cohort,
+)
+from .context_compression import (
+    ContextCompressionPolicy,
+    ContextCompressionReport,
+    ContextProfileEvaluation,
+    ContextProfileQualification,
+    ProfileAwareSelfModelPredictor,
+    ReferenceContextCompressionPredictor,
+    evaluate_context_compression,
 )
 from .curriculum import (
     AUTHORITY_OWNERS,
@@ -36,7 +50,9 @@ from .evaluation import (
 )
 from .fault_injection import FaultFamily, InjectedFaultCase, inject_fault
 from .formatting import (
+    STATIC_ARCHITECTURE_REFERENCE,
     FormattedSelfModelRecord,
+    SelfModelContextProfile,
     TrainingMessage,
     format_self_model_example,
 )
@@ -53,13 +69,20 @@ from .predictors import HuggingFaceSelfModelPredictor, parse_structured_predicti
 
 __all__ = [
     "AUTHORITY_OWNERS",
+    "DEFAULT_LORA_TARGET_MODULES",
     "GENERATOR_VERSION",
     "HELD_OUT_FAULT_FAMILIES",
+    "STATIC_ARCHITECTURE_REFERENCE",
     "AdapterComparisonReport",
     "AdapterMethod",
     "AdapterPromotionPolicy",
+    "AdapterTrainer",
     "AdapterTrainingArtifact",
     "AdapterTrainingConfig",
+    "ContextCompressionPolicy",
+    "ContextCompressionReport",
+    "ContextProfileEvaluation",
+    "ContextProfileQualification",
     "CurriculumDataset",
     "CurriculumFamily",
     "CurriculumGenerationError",
@@ -75,16 +98,22 @@ __all__ = [
     "InjectedFaultCase",
     "LabelSource",
     "PreparedTrainingBundle",
+    "ProfileAwareSelfModelPredictor",
+    "ReferenceContextCompressionPredictor",
     "ScenarioDefinition",
+    "SelfModelContextProfile",
     "SelfModelEvaluationReport",
     "SelfModelExample",
     "SelfModelPrediction",
+    "TrainingBackend",
     "TrainingCohort",
     "TrainingCohortManifest",
     "TrainingMessage",
+    "UnslothPeftTrainer",
     "architecture_family",
     "build_training_cohort",
     "compare_base_and_adapter",
+    "evaluate_context_compression",
     "evaluate_self_model",
     "format_self_model_example",
     "inject_fault",
@@ -93,4 +122,5 @@ __all__ = [
     "load_training_cohort",
     "parse_structured_prediction",
     "prepare_training_bundle",
+    "trainer_for_backend",
 ]
