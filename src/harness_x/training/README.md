@@ -1,122 +1,3 @@
-# Grounded self-model training
-
-Milestones 12–13 build the first training path for teaching a replaceable reasoning core how Harness X actually works. Milestone 19B adds interchangeable PEFT implementations and a held-out test for whether stable self-model knowledge can reduce repeated context. Milestone 20 packages those components into one signed local empirical experiment.
-
-## Ground-truth curriculum
-
-Milestone 12 generates self-model records from Harness X ground truth. Labels may come only from:
-
-- deterministic system rules and active configuration;
-- known fault injections;
-- known interventions with deterministic before/after relations.
-
-Teacher-model answers are not used as labels. Each record keeps its scenario seed, architecture family, source system/state fingerprint, expected structured decision, accepted alternatives, rationale metadata, and label source.
-
-The curriculum files are:
-
-- `train.jsonl`
-- `eval.jsonl`
-- `manifest.json`
-
-Evaluation seed IDs are separate from training IDs and complete diagnostic fault families are held out rather than randomly splitting rows.
-
-## Milestone 13 cohort
-
-Several grounded curricula can be combined into one `TrainingCohort`. An architecture family can be held out completely, which means every example from that configuration is evaluation-only even when its original Milestone 12 record belonged to the training split. The source record is not rewritten; its original content fingerprint remains valid.
-
-A persisted cohort contains:
-
-- `cohort-manifest.json`
-- `train-examples.jsonl`
-- `eval-examples.jsonl`
-
-The manifest records the exact train/eval architecture families and a cohort fingerprint.
-
-## Preparing training
-
-```bash
-harness-x prepare-self-model-training \
-  path/to/curriculum-a \
-  path/to/curriculum-b \
-  --holdout-architecture architecture_<id> \
-  --base-model <model-id-or-local-path> \
-  --method qlora \
-  --max-train-examples 1000 \
-  --output .harness-x/self-model-training
-```
-
-The first stage is deliberately capped at roughly 1k high-quality examples. If more records exist, selection is deterministic and round-robins across architecture/family buckets instead of taking one large family first.
-
-The prepared directory contains a signed cohort plus:
-
-- `training-plan.json`
-- `train-sft.jsonl`
-- `eval-sft.jsonl`
-
-The SFT format is conversational prompt/completion. The prompt contains grounded system state and the completion contains only the structured target decision.
-
-The default LoRA target modules now cover both attention and feed-forward projections:
-
-```text
-q_proj k_proj v_proj o_proj gate_proj up_proj down_proj
-```
-
-A model with different module names can override the tuple through `AdapterTrainingConfig`; the trainer never silently substitutes another target set.
-
-## Interchangeable LoRA / QLoRA backends
-
-The prepared bundle is backend-neutral. The same exact cohort and hyperparameter contract can be passed to either implementation.
-
-### Hugging Face / PEFT
-
-```bash
-python -m pip install -e ".[training]"
-
-harness-x train-self-model-adapter \
-  .harness-x/self-model-training \
-  --backend huggingface_peft \
-  --output .harness-x/self-model-adapter-hf
-```
-
-### Unsloth
-
-Unsloth is deliberately isolated in its own optional extra because its Transformers/TRL compatibility window moves independently from Harness X's original pinned training environment:
-
-```bash
-python -m pip install -e ".[unsloth-training]"
-
-harness-x train-self-model-adapter \
-  .harness-x/self-model-training \
-  --backend unsloth \
-  --output .harness-x/self-model-adapter-unsloth
-```
-
-The Unsloth backend uses the same LoRA/QLoRA settings, applies response-only training loss, and saves a PEFT adapter rather than a merged model. The existing Harness X evaluator therefore remains the comparison authority.
-
-Both training artifacts record backend identity, cohort fingerprint, wall-clock training time, peak allocated CUDA memory when available, and trainer metrics. These measurements make an eventual HF-vs-Unsloth comparison empirical rather than based on vendor benchmark claims.
-
-`lora` trains adapters on the normally loaded base model. `qlora` loads the base model in 4-bit and trains LoRA adapters. The base weights remain the permanent comparison baseline.
-
-## Held-out evaluation
-
-```bash
-harness-x evaluate-self-model-adapter \
-  .harness-x/self-model-training/cohort \
-  --base-model <same-base-model> \
-  --adapter .harness-x/self-model-adapter-unsloth/adapter \
-  --output .harness-x/self-model-evaluation
-```
-
-The base model is evaluated first and released before the adapter-backed model is loaded. Both reports are bound to the SHA-256 fingerprint of the exact evaluation examples, and cross-dataset comparison is refused.
-
-Metrics include:
-
-- exact structured-decision accuracy;
-- field-level accuracy;
-- diagnostic component accuracy;
-- safe-next-experiment accuracy;
-- uncertainty-label accuracy;
-- authority-violation rate;
 - parse-failure rate;
 - optional confidence/Brier calibration;
 - per-curriculum-family accuracy.
@@ -203,3 +84,20 @@ harness-x-empirical-adapter \
 ```
 
 Reference reports are permanently marked non-empirical and cannot become promotion-ready.
+
+### M20.5 schema-constrained repair
+
+After strict parsing fails, an empirical run may enable one target-independent schema-constrained retry:
+
+```bash
+harness-x-empirical-adapter \
+  .harness-x/self-model-training \
+  --backend unsloth \
+  --base-model-revision <40-char-model-commit-sha> \
+  --resume-training <existing-experiment-or-training-dir> \
+  --parse-repair-attempts 1 \
+  --repair-constraint-mode schema \
+  --output .harness-x/empirical-schema-repair
+```
+
+Schema mode uses `lm-format-enforcer==0.11.3` only on the single retry. Harness X deliberately bypasses LM Format Enforcer's optional `integrations.transformers` shim and adapts its stable lower-level `TokenEnforcer` API directly, because Transformers 5.x moved tokenizer base classes used by the shim. The schema is derived only from task family/tags, stable Harness X vocabularies, visible protocol structure, and top-level keys already disclosed by the normal prompt; held-out target values and accepted-alternative values are never used to construct it. Strict `json.loads` remains the final parse authority.
