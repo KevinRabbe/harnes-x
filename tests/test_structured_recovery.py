@@ -175,7 +175,7 @@ def test_repair_prompt_uses_original_grounded_input_without_target_values() -> N
         example, SelfModelContextProfile.STANDARD
     )
 
-    assert "previous generation failed strict JSON validation" in prompt.lower()
+    assert "previous generation failed strict json validation" in prompt.lower()
     assert "expected_keys" in prompt
     assert "owner" in prompt
     assert canonical_json(example.expected_decision) not in prompt
