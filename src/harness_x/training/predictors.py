@@ -50,17 +50,14 @@ def parse_structured_prediction(text: str) -> SelfModelPrediction:
 
 
 class HuggingFaceSelfModelPredictor:
-    """Optional local deterministic-generation predictor for base or PEFT adapter.
-
-    ``context_profile`` defaults to the unchanged Milestone 13 STANDARD prompt. The
-    explicit ``predict_with_profile`` surface lets Milestone 19B evaluate the same
-    loaded model against richer or smaller prompt projections without reloading weights.
-    """
+    """Optional deterministic-generation predictor for base or PEFT adapter."""
 
     def __init__(
         self,
         *,
         base_model: str,
+        base_model_revision: str | None = None,
+        tokenizer_revision: str | None = None,
         adapter_path: str | Path | None = None,
         load_in_4bit: bool = True,
         max_new_tokens: int = 512,
@@ -80,11 +77,18 @@ class HuggingFaceSelfModelPredictor:
         )
         self.max_new_tokens = max_new_tokens
         self.context_profile = SelfModelContextProfile(context_profile)
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            base_model,
+            revision=tokenizer_revision or base_model_revision,
+            use_fast=True,
+        )
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        model_kwargs: dict[str, Any] = {"device_map": "auto"}
+        model_kwargs: dict[str, Any] = {
+            "device_map": "auto",
+            "revision": base_model_revision,
+        }
         if load_in_4bit:
             dtype = (
                 torch.bfloat16
@@ -121,13 +125,15 @@ class HuggingFaceSelfModelPredictor:
             self.tokenizer, record.prompt_messages, add_generation_prompt=True
         )
 
+    @property
+    def token_measurement_kind(self) -> str:
+        return "tokenizer"
+
     def prompt_measurement(
         self,
         example: SelfModelExample,
         profile: SelfModelContextProfile,
     ) -> tuple[int, int]:
-        """Return rendered prompt characters and exact tokenizer token count."""
-
         prompt = self._render_prompt(example, SelfModelContextProfile(profile))
         tokenized = self.tokenizer(prompt, add_special_tokens=False)
         return len(prompt), len(tokenized["input_ids"])
@@ -161,7 +167,6 @@ class HuggingFaceSelfModelPredictor:
         return parse_structured_prediction(text)
 
     def close(self) -> None:
-        """Release model references so base and adapter can be evaluated sequentially."""
         model = getattr(self, "model", None)
         if model is not None:
             try:
