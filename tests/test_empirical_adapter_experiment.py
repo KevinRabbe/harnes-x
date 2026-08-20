@@ -190,4 +190,5 @@ def test_installed_empirical_cli_help() -> None:
         text=True,
     )
     assert completed.returncode == 0
-    assert "signed held-out/context compression evidence bundle" in completed.stdout
+    normalized = " ".join(completed.stdout.split())
+    assert "signed held-out/context compression evidence bundle" in normalized
