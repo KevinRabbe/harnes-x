@@ -19,6 +19,49 @@ from .models import SelfModelExample
 
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+REPAIR_ARRAY_ITEM_LIMIT = 8
+REPAIR_NO_REPEAT_NGRAM_SIZE = 8
+
+
+def top_level_json_object_end(text: str) -> int | None:
+    """Return the exclusive end of the first complete top-level JSON object.
+
+    This is a lexical completion detector, not a permissive parser. It deliberately
+    does not repair malformed text or infer missing delimiters; strict ``json.loads``
+    remains the authority for whether the resulting output is valid JSON.
+    """
+
+    start = 0
+    while start < len(text) and text[start].isspace():
+        start += 1
+    if start >= len(text) or text[start] != "{":
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+            if depth < 0:
+                return None
+    return None
 
 
 def parse_structured_prediction(text: str) -> SelfModelPrediction:
@@ -139,9 +182,11 @@ class HuggingFaceSelfModelPredictor:
             system.content
             + " A previous generation failed strict JSON validation. Retry from the "
             "same grounded input. Return exactly one compact JSON object and nothing "
-            "else. Use each requested top-level key at most once. Keep arrays finite "
-            "and concise, do not repeat list entries, and stop immediately after the "
-            "top-level closing brace."
+            "else. Use each requested top-level key at most once. Every array must "
+            f"contain at most {REPAIR_ARRAY_ITEM_LIMIT} items and duplicate items are "
+            "forbidden. Never create identifiers by repeatedly appending the same "
+            "suffix. If uncertain, prefer a shorter answer over repetition. Stop "
+            "immediately after the top-level closing brace."
         )
         messages = (
             TrainingMessage(role="system", content=repair_instruction),
@@ -151,24 +196,62 @@ class HuggingFaceSelfModelPredictor:
             self.tokenizer, messages, add_generation_prompt=True
         )
 
-    def _generate_text(self, prompt: str, *, max_new_tokens: int) -> str:
+    def _json_stopping_criteria(self, prompt_length: int) -> Any:
+        """Build a transformers stopping criterion for one complete JSON object."""
+
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        tokenizer = self.tokenizer
+        torch = self._torch
+
+        class _CompleteJsonObject(StoppingCriteria):
+            def __call__(self, input_ids: Any, scores: Any, **kwargs: Any) -> Any:
+                completed: list[bool] = []
+                for row in input_ids:
+                    generated = row[prompt_length:]
+                    text = tokenizer.decode(generated, skip_special_tokens=True)
+                    completed.append(top_level_json_object_end(text) is not None)
+                return torch.tensor(
+                    completed,
+                    dtype=torch.bool,
+                    device=input_ids.device,
+                )
+
+        return StoppingCriteriaList([_CompleteJsonObject()])
+
+    def _generate_text(
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        no_repeat_ngram_size: int = 0,
+    ) -> str:
         encoded = self.tokenizer(prompt, return_tensors="pt")
         try:
             device = next(self.model.parameters()).device
             encoded = {key: value.to(device) for key, value in encoded.items()}
         except (StopIteration, AttributeError):
             pass
-        with self._torch.no_grad():
-            output = self.model.generate(
-                **encoded,
-                do_sample=False,
-                max_new_tokens=max_new_tokens,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
         input_length = encoded["input_ids"].shape[-1]
+        generation_kwargs: dict[str, Any] = {
+            **encoded,
+            "do_sample": False,
+            "max_new_tokens": max_new_tokens,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+            "stopping_criteria": self._json_stopping_criteria(input_length),
+        }
+        if no_repeat_ngram_size > 0:
+            generation_kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+
+        with self._torch.no_grad():
+            output = self.model.generate(**generation_kwargs)
         generated = output[0][input_length:]
-        return self.tokenizer.decode(generated, skip_special_tokens=True)
+        text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        complete_end = top_level_json_object_end(text)
+        if complete_end is not None:
+            text = text[:complete_end]
+        return text
 
     @property
     def token_measurement_kind(self) -> str:
@@ -207,14 +290,19 @@ class HuggingFaceSelfModelPredictor:
 
         The malformed primary output is deliberately not fed back into the model: the
         retry is grounded only in the original prompt plus stricter formatting rules,
-        so repeated garbage cannot become new input evidence.
+        so repeated garbage cannot become new input evidence. Repair decoding also
+        blocks repeated 8-token n-grams while strict JSON parsing remains authoritative.
         """
 
         if max_new_tokens < 1:
             raise ValueError("repair max_new_tokens must be positive")
         profile = SelfModelContextProfile(profile)
         prompt = self._render_repair_prompt(example, profile)
-        text = self._generate_text(prompt, max_new_tokens=max_new_tokens)
+        text = self._generate_text(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            no_repeat_ngram_size=REPAIR_NO_REPEAT_NGRAM_SIZE,
+        )
         return parse_structured_prediction(text)
 
     def close(self) -> None:
