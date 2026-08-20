@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–19A implemented on the current development stack.**
+**Milestones 0–19B implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -72,9 +72,12 @@ The implementation now contains:
 - an externally authorized fixed-depth recurrent `ReasoningCore` wrapper whose recurrence count is software-owned and SHA-256 bound before backend invocation;
 - fixed-depth quality/cost curves across explicit recurrence budgets, including Pareto-frontier and dominated-depth detection before any learned depth selector is allowed to compete;
 - a permanent deterministic external depth selector plus a dependency-free learned selector trained only from the shallowest fixed depth that actually solved each training case, with disjoint held-out evaluation cases;
-- an optional local Huginn Transformers adapter behind the separate `[recurrent]` dependency group and explicit custom-code trust opt-in, while CI uses only a deterministic recurrent-depth reference simulator and downloads no recurrent model weights.
+- an optional local Huginn Transformers adapter behind the separate `[recurrent]` dependency group and explicit custom-code trust opt-in, while CI uses only a deterministic recurrent-depth reference simulator and downloads no recurrent model weights;
+- backend-neutral self-model training bundles that can be executed by either the original Hugging Face/PEFT trainer or an optional Unsloth trainer without changing the signed cohort or held-out evaluator;
+- seven-module attention+feed-forward LoRA defaults (`q/k/v/o + gate/up/down`), backend-labelled adapter artifacts, wall-time and peak allocated CUDA-memory telemetry, and a separate `[unsloth-training]` dependency surface;
+- rich/standard/minimal self-model context profiles plus a held-out context-compression benchmark that preserves live authoritative state, measures real tokenizer counts when model weights are used, and rejects compression that degrades exact, structural, diagnostic, authority, or parsing behavior.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, grounded controller-data pipeline, first learned peripheral-controller benchmark, and recurrent-depth research boundary now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform GPU model training or a real recurrent-model benchmark. The untuned base model and deterministic controllers remain permanent comparison controls. Milestone 19A remains experimental: its reference simulator qualifies recurrence-control mechanics, not production Huginn performance, and learned depth selection remains external/recommendation-only.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, interchangeable PEFT training backends, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, grounded controller-data pipeline, first learned peripheral-controller benchmark, recurrent-depth research boundary, and self-model context-compression benchmark now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform GPU model training, a real recurrent-model benchmark, or a real adapter context-compression claim. The untuned base model and deterministic controllers remain permanent comparison controls. Milestone 19B's reference compression fixture validates benchmark mechanics only; actual context compression must be earned by a real trained adapter on the held-out cohort.
 
 ## Getting started
 
@@ -96,13 +99,21 @@ harness-x benchmark-dynamic-compute --output .harness-x/benchmark-dynamic-comput
 harness-x-recurrent-depth --backend reference --output .harness-x/recurrent-depth-reference
 ```
 
-Optional adapter training is installed separately:
+Optional adapter training is installed separately. The original path is:
 
 ```bash
 python -m pip install -e ".[training]"
 harness-x prepare-self-model-training path/to/curriculum --base-model <model> --method qlora
-harness-x train-self-model-adapter .harness-x/self-model-training
+harness-x train-self-model-adapter .harness-x/self-model-training --backend huggingface_peft
 harness-x evaluate-self-model-adapter .harness-x/self-model-training/cohort --base-model <model> --adapter .harness-x/self-model-adapter/adapter
+```
+
+Unsloth is an alternative execution backend for the same prepared bundle:
+
+```bash
+python -m pip install -e ".[unsloth-training]"
+harness-x train-self-model-adapter .harness-x/self-model-training --backend unsloth --output .harness-x/self-model-adapter-unsloth
+harness-x benchmark-context-compression .harness-x/self-model-training/cohort --base-model <model> --adapter .harness-x/self-model-adapter-unsloth/adapter --output .harness-x/context-compression
 ```
 
 Optional recurrent-model inference is also isolated from the normal install:
@@ -196,6 +207,8 @@ Milestone 18 adds the first learned controller while preserving that authority s
 
 Milestone 19A adds the recurrent-depth research boundary behind the same replaceable reasoning interface. Harness X first measures explicit fixed recurrence depths, treats recurrence as software-authorized test-time compute, derives minimal-depth labels only from measured training curves, and then compares a learned external depth selector against a permanent deterministic selector on disjoint held-out cases. A lazy optional Huginn adapter exists for real experiments, but the default CI path remains a deterministic reference simulator and adaptive/core-level halting is deliberately deferred.
 
+Milestone 19B makes self-model training implementation-independent and begins measuring whether training can compress stable system knowledge out of transient context. Hugging Face/PEFT and Unsloth consume the same prepared cohort, while context evaluation gives the generic base a rich static architecture reference and then asks whether the adapter can retain held-out behavior under standard or minimal context. Live state is preserved in every profile; prompt reduction alone never qualifies a result.
+
 The initial neural strategy is intentionally modest:
 
 1. start with an existing capable small/medium reasoning model;
@@ -248,6 +261,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Milestone 17 grounded gate training data](docs/MILESTONE_17_GATE_TRAINING_DATA.md)
 - [Milestone 18 dynamic compute allocation](docs/MILESTONE_18_DYNAMIC_COMPUTE.md)
 - [Milestone 19A recurrent-depth experiment](docs/MILESTONE_19A_RECURRENT_DEPTH.md)
+- [Milestone 19B Unsloth and context compression](docs/MILESTONE_19B_UNSLOTH_CONTEXT_COMPRESSION.md)
 - [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question
