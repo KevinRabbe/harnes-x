@@ -12,7 +12,7 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–17 implemented on the current development stack.**
+**Milestones 0–18 implemented on the current development stack.**
 
 The implementation now contains:
 
@@ -63,9 +63,14 @@ The implementation now contains:
 - the first complete closed system-improvement demonstration: real maintenance-gate traces reveal excess moderate-pressure maintenance, grounded self-analysis proposes `working_pressure_trigger: 0.85 -> 0.90`, three matched sandbox runs measure maintenance cycles `3 -> 1`, the versioned config is promoted after independent verification, and the next self-analysis loads the promoted whole-system version and does not repropose the resolved issue;
 - a Milestone 17 gate-training dataset contract that binds each deterministic gate input/decision to exact trace identity, policy metadata, optional explicitly keyed model recommendations, bounded downstream outcomes, and evidence-backed later usefulness;
 - conservative `positive` / `negative` / `unknown` usefulness labels that preserve unknown counterfactuals instead of converting missing evidence into reward zero, plus SHA-256 record/source/dataset integrity and fail-closed duplicate/orphan handling;
-- side-effect-free gate-data collection for retrieval, write, focus, compute, and maintenance policies plus `harness-x collect-gate-training-data`, while deterministic gates remain the permanent authoritative baseline.
+- side-effect-free gate-data collection for retrieval, write, focus, compute, and maintenance policies plus `harness-x collect-gate-training-data`, while deterministic gates remain the permanent authoritative baseline;
+- the full Milestone 18 dynamic-compute recommendation vocabulary (`stop`, another reasoning call, larger context, stronger model, extra retrieval, extra verification, parallel candidates) behind a replaceable controller protocol;
+- a dependency-free learned nearest-centroid compute controller with SHA-256-bound artifacts, conservative conversion from evidence-bearing Milestone 17 compute traces, and a permanent deterministic dynamic-compute baseline;
+- a capability/cost benchmark that scores realized utility, realized cost, net value, exact action accuracy, premature stopping, unnecessary extra compute, strongest-model/retrieval use, and value calibration against the trajectory that actually followed the controller decision;
+- a separate `ComputeAuthorityAdjudicator` that sends learned recommendations back through the existing deterministic `ComputeGate`, so a learned controller cannot grant itself reasoning budget or bypass hard stop/suspend decisions;
+- explicit rejection coverage for always-stop, always-max-compute, always-strongest-model, retrieval-explosion, and overconfident trajectory-prediction policies, plus `harness-x train-dynamic-compute-controller` and `harness-x benchmark-dynamic-compute` operator paths.
 
-A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, and grounded controller-data pipeline now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model and deterministic controllers remain permanent comparison controls. Live promotion remains deliberately narrow: operator approval is required by default, source-code/tool/model-weight candidates remain excluded, and the promoted config can be restored from an immutable rollback artifact. The next planned milestone is **Milestone 18 — dynamic/learned compute allocation experiments**, where learned controllers must beat deterministic predecessors on the capability/cost frontier before earning any promotion path.
+A **real model-runtime adapter, model-assisted decision layer, grounded self-model curriculum generator, optional PEFT training/evaluation path, bounded improvement-candidate layer, isolated experiment sandbox, first evidence-gated live improvement loop, grounded controller-data pipeline, and first learned peripheral-controller benchmark now exist**. Harness X still deliberately does **not** bundle or download model weights, and GitHub Actions does not perform a GPU training run. The untuned base model and deterministic controllers remain permanent comparison controls. The Milestone 18 learned controller is still experimental and recommendation-only: passing the deterministic reference simulator is not production evidence, and all active compute remains software-budget-authorized. The next planned implementation-plan branch is **Milestone 19A — recurrent-depth core experiments** behind the existing `ReasoningCore` interface.
 
 ## Getting started
 
@@ -82,6 +87,8 @@ harness-x benchmark-model-assisted configs/default.yaml --base-url http://127.0.
 harness-x generate-self-model-curriculum configs/default.yaml path/to/system-self-schema.json --output .harness-x/self-model-curriculum
 harness-x run-improvement-sandbox path/to/sandbox-eligible-candidate.json configs/default.yaml --output .harness-x/improvement-sandbox
 harness-x collect-gate-training-data path/to/trace.jsonl --output .harness-x/gate-training-data
+harness-x train-dynamic-compute-controller .harness-x/gate-training-data --output .harness-x/dynamic-compute-controller.json
+harness-x benchmark-dynamic-compute --output .harness-x/benchmark-dynamic-compute
 ```
 
 Optional adapter training is installed separately:
@@ -173,6 +180,8 @@ Milestone 16 closes the first loop. A separate promotion authority revalidates s
 
 Milestone 17 begins learned-control preparation without learning yet. Existing deterministic gate traces are converted into immutable controller-training records containing state features, baseline policy output, optional explicitly bound model recommendations, observed downstream outcomes, cost, and conservative later-usefulness labels. Missing counterfactual evidence remains `unknown`; a later learned controller therefore inherits neither fabricated reward nor authority from the collector.
 
+Milestone 18 adds the first learned controller while preserving that authority structure. A small learned dynamic-compute model competes against a permanent deterministic baseline across held-out simulator cases and is judged on realized task utility versus compute cost, premature stopping, waste, and calibration. The learned output remains a recommendation: every non-stop allocation is rechecked by the existing deterministic `ComputeGate` before any owning runtime may consume budget. Trace-derived training remains restricted to actions with real evidence; the complete seven-action reference fixture is explicitly simulator data used to qualify the controller/benchmark machinery rather than to claim production gains.
+
 The initial neural strategy is intentionally modest:
 
 1. start with an existing capable small/medium reasoning model;
@@ -223,6 +232,7 @@ These ideas are useful because they potentially decouple parameter count, active
 - [Design invariants](docs/DESIGN_INVARIANTS.md)
 - [Milestone 16 closed improvement loop](docs/MILESTONE_16_CLOSED_IMPROVEMENT_LOOP.md)
 - [Milestone 17 grounded gate training data](docs/MILESTONE_17_GATE_TRAINING_DATA.md)
+- [Milestone 18 dynamic compute allocation](docs/MILESTONE_18_DYNAMIC_COMPUTE.md)
 - [Grounded self-model training](src/harness_x/training/README.md)
 
 ## Guiding question
