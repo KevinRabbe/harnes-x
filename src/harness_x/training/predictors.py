@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from .evaluation import SelfModelPrediction
-from .formatting import format_self_model_example, render_messages_with_tokenizer
+from .formatting import (
+    SelfModelContextProfile,
+    format_self_model_example,
+    render_messages_with_tokenizer,
+)
 from .models import SelfModelExample
 
 
@@ -46,7 +50,12 @@ def parse_structured_prediction(text: str) -> SelfModelPrediction:
 
 
 class HuggingFaceSelfModelPredictor:
-    """Optional local deterministic-generation predictor for base or PEFT adapter."""
+    """Optional local deterministic-generation predictor for base or PEFT adapter.
+
+    ``context_profile`` defaults to the unchanged Milestone 13 STANDARD prompt. The
+    explicit ``predict_with_profile`` surface lets Milestone 19B evaluate the same
+    loaded model against richer or smaller prompt projections without reloading weights.
+    """
 
     def __init__(
         self,
@@ -55,6 +64,7 @@ class HuggingFaceSelfModelPredictor:
         adapter_path: str | Path | None = None,
         load_in_4bit: bool = True,
         max_new_tokens: int = 512,
+        context_profile: SelfModelContextProfile = SelfModelContextProfile.STANDARD,
     ) -> None:
         try:
             import torch
@@ -69,6 +79,7 @@ class HuggingFaceSelfModelPredictor:
             f"adapter:{Path(adapter_path).name}" if adapter_path is not None else f"base:{base_model}"
         )
         self.max_new_tokens = max_new_tokens
+        self.context_profile = SelfModelContextProfile(context_profile)
         self.tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -100,11 +111,36 @@ class HuggingFaceSelfModelPredictor:
     def name(self) -> str:
         return self._name
 
-    def predict(self, example: SelfModelExample) -> SelfModelPrediction:
-        record = format_self_model_example(example)
-        prompt = render_messages_with_tokenizer(
+    def _render_prompt(
+        self,
+        example: SelfModelExample,
+        profile: SelfModelContextProfile,
+    ) -> str:
+        record = format_self_model_example(example, context_profile=profile)
+        return render_messages_with_tokenizer(
             self.tokenizer, record.prompt_messages, add_generation_prompt=True
         )
+
+    def prompt_measurement(
+        self,
+        example: SelfModelExample,
+        profile: SelfModelContextProfile,
+    ) -> tuple[int, int]:
+        """Return rendered prompt characters and exact tokenizer token count."""
+
+        prompt = self._render_prompt(example, SelfModelContextProfile(profile))
+        tokenized = self.tokenizer(prompt, add_special_tokens=False)
+        return len(prompt), len(tokenized["input_ids"])
+
+    def predict(self, example: SelfModelExample) -> SelfModelPrediction:
+        return self.predict_with_profile(example, self.context_profile)
+
+    def predict_with_profile(
+        self,
+        example: SelfModelExample,
+        profile: SelfModelContextProfile,
+    ) -> SelfModelPrediction:
+        prompt = self._render_prompt(example, SelfModelContextProfile(profile))
         encoded = self.tokenizer(prompt, return_tensors="pt")
         try:
             device = next(self.model.parameters()).device

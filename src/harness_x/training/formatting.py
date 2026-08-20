@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,6 +17,48 @@ SELF_MODEL_SYSTEM_INSTRUCTION = (
     "mutations, verification results, memory writes, or hidden causes. Return one "
     "JSON object matching the requested decision shape."
 )
+
+SELF_MODEL_MINIMAL_INSTRUCTION = (
+    "Harness X reasoning core. Use only supplied live state. Return the requested JSON "
+    "decision. Do not claim authority, execution, mutation, or verification you do not have."
+)
+
+# This block is intentionally static.  It represents the kind of architecture explanation
+# a generic base model may need repeated in context, but which a self-model adapter should
+# eventually be able to internalize as a stable prior.  It never contains live task state,
+# permissions, current budgets, current system versions, or current observations.
+STATIC_ARCHITECTURE_REFERENCE: dict[str, tuple[str, ...]] = {
+    "authority": (
+        "The orchestrator owns lifecycle state and externally enforced compute budgets.",
+        "Memory repositories own durable memory mutation; a model or gate may only propose writes.",
+        "Gates and learned controllers recommend flow decisions; owning software performs mutation.",
+        "A tool proposal is not tool execution; execution passes through registry, permission, budget, and verifier boundaries.",
+        "System-improvement experiments and promotion are separate authorities with evidence and rollback requirements.",
+    ),
+    "epistemic": (
+        "Observation is not automatically fact, episode is not automatically knowledge, and model output is unverified by default.",
+        "Verification is separate from generation, and semantic/procedural promotion requires explicit evidence.",
+        "The self-schema is generated from authoritative runtime owners and telemetry rather than model autobiography.",
+    ),
+    "control": (
+        "Reasoning depth, retrieval, verification, and model use are externally budgeted resources.",
+        "Hard permissions, governing constraints, and live state cannot be overridden by a recommendation.",
+    ),
+}
+
+
+class SelfModelContextProfile(StrEnum):
+    """How much stable architecture explanation is repeated in the model prompt.
+
+    ``STANDARD`` is the exact Milestone 13 training/evaluation format and remains the
+    default for backwards compatibility. ``RICH`` gives a generic base model additional
+    static architecture help. ``MINIMAL`` removes repeatable descriptive metadata but
+    preserves all live state required to answer safely.
+    """
+
+    RICH = "rich"
+    STANDARD = "standard"
+    MINIMAL = "minimal"
 
 
 class TrainingMessage(BaseModel):
@@ -41,12 +84,13 @@ class FormattedSelfModelRecord(BaseModel):
         return self.messages[:-1]
 
 
-def _user_payload(example: SelfModelExample) -> dict[str, Any]:
-    return {
+def _user_payload(
+    example: SelfModelExample,
+    profile: SelfModelContextProfile,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "task": example.definition.task,
-        "curriculum_family": example.definition.family.value,
         "system_version": example.system_version,
-        "architecture_family": example.definition.architecture_family,
         "source_state_fingerprint": example.source_state_fingerprint,
         "input_state": example.input_state,
         "output_requirement": {
@@ -54,13 +98,35 @@ def _user_payload(example: SelfModelExample) -> dict[str, Any]:
             "expected_keys": sorted(example.expected_decision),
         },
     }
+    if profile != SelfModelContextProfile.MINIMAL:
+        payload["curriculum_family"] = example.definition.family.value
+        payload["architecture_family"] = example.definition.architecture_family
+    if profile == SelfModelContextProfile.RICH:
+        payload["static_architecture_reference"] = STATIC_ARCHITECTURE_REFERENCE
+    return payload
 
 
-def format_self_model_example(example: SelfModelExample) -> FormattedSelfModelRecord:
+def format_self_model_example(
+    example: SelfModelExample,
+    *,
+    context_profile: SelfModelContextProfile = SelfModelContextProfile.STANDARD,
+) -> FormattedSelfModelRecord:
+    """Format one example without leaking its target into the prompt.
+
+    Training continues to use ``STANDARD``. Context-compression experiments may evaluate
+    the exact same held-out example under richer or smaller prompt profiles.
+    """
+
+    profile = SelfModelContextProfile(context_profile)
     target = canonical_json(example.expected_decision)
+    instruction = (
+        SELF_MODEL_MINIMAL_INSTRUCTION
+        if profile == SelfModelContextProfile.MINIMAL
+        else SELF_MODEL_SYSTEM_INSTRUCTION
+    )
     messages = (
-        TrainingMessage(role="system", content=SELF_MODEL_SYSTEM_INSTRUCTION),
-        TrainingMessage(role="user", content=canonical_json(_user_payload(example))),
+        TrainingMessage(role="system", content=instruction),
+        TrainingMessage(role="user", content=canonical_json(_user_payload(example, profile))),
         TrainingMessage(role="assistant", content=target),
     )
     return FormattedSelfModelRecord(
