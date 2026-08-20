@@ -40,6 +40,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-4bit-eval", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument(
+        "--parse-repair-attempts",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        help=(
+            "After strict JSON parsing fails, allow at most one fresh format-repair "
+            "generation. The primary malformed output remains in the signed trace."
+        ),
+    )
+    parser.add_argument(
+        "--repair-max-new-tokens",
+        type=int,
+        default=256,
+        help="Maximum generation budget for the one bounded JSON repair attempt",
+    )
     parser.add_argument("--general-baseline-score", type=float, default=None)
     parser.add_argument("--general-adapter-score", type=float, default=None)
     parser.add_argument("--general-metric-name", default="general_regression_score")
@@ -96,6 +112,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("both general regression scores must be supplied together")
     if args.reference and args.resume_training is not None:
         parser.error("--reference cannot be combined with --resume-training")
+    if args.repair_max_new_tokens < 1:
+        parser.error("--repair-max-new-tokens must be positive")
 
     general = None
     if args.general_baseline_score is not None:
@@ -124,6 +142,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             general_regression=general,
             reference=args.reference,
             resume_training_directory=args.resume_training,
+            parse_repair_attempts=args.parse_repair_attempts,
+            repair_max_new_tokens=args.repair_max_new_tokens,
         )
 
     print(report.model_dump_json(indent=2))

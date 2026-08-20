@@ -1,10 +1,9 @@
 """Per-case empirical self-model evaluation observability.
 
 Milestone 20.2 records the externally visible prediction boundary, not hidden model
-reasoning. Each evaluated held-out case stores its grounded expected decision, raw
-model output, parsed decision, parse status, exact/field score and authority-boundary
-status. Records are append-only JSONL so a later evaluation failure does not erase the
-cases that already ran.
+reasoning. Milestone 20.3 additionally records bounded structured-output recovery:
+the malformed primary output remains evidence and a separately visible retry may be
+used only after strict parsing fails.
 """
 
 from __future__ import annotations
@@ -32,6 +31,10 @@ from .evaluation import (
 )
 from .formatting import SelfModelContextProfile
 from .models import SelfModelExample, canonical_json
+from .structured_recovery import (
+    BoundedJsonRecoveryPredictor,
+    StructuredRecoveryAttempt,
+)
 
 
 class EvaluationCaseRecord(BaseModel):
@@ -39,7 +42,7 @@ class EvaluationCaseRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-case-v1"
+    schema_version: str = "self-model-evaluation-case-v2"
     evaluation_name: str
     predictor_name: str
     profile: str
@@ -50,6 +53,10 @@ class EvaluationCaseRecord(BaseModel):
     fault_family: str | None = None
     expected_decision: dict[str, Any]
     accepted_alternatives: tuple[dict[str, Any], ...]
+    primary_raw_text: str | None = None
+    primary_parse_error: str | None = None
+    repair_attempted: bool = False
+    repair_succeeded: bool = False
     raw_text: str | None = None
     parsed_decision: dict[str, Any]
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -65,11 +72,13 @@ class EvaluationObservabilityReport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "self-model-evaluation-observability-v1"
+    schema_version: str = "self-model-evaluation-observability-v2"
     experiment_report_fingerprint: str = Field(min_length=64, max_length=64)
     evaluation_fingerprint: str = Field(min_length=64, max_length=64)
     trace_files: tuple[FileDigest, ...]
     trace_record_count: int = Field(gt=0)
+    primary_parse_failure_record_count: int = Field(ge=0)
+    recovered_parse_failure_record_count: int = Field(ge=0)
     parse_failure_record_count: int = Field(ge=0)
     report_fingerprint: str = Field(min_length=64, max_length=64)
 
@@ -79,6 +88,8 @@ class EvaluationObservabilityReport(BaseModel):
         expected = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
         if self.report_fingerprint != expected:
             raise ValueError("evaluation observability fingerprint does not match content")
+        if self.recovered_parse_failure_record_count > self.primary_parse_failure_record_count:
+            raise ValueError("recovered parse failures cannot exceed primary parse failures")
         return self
 
     def write(self, output_directory: str | Path) -> Path:
@@ -141,13 +152,15 @@ def _contains_authority_violation(value: Any) -> bool:
 
 
 class JsonlEvaluationTraceRecorder:
-    """Append one record immediately after every model prediction."""
+    """Append one record immediately after every final prediction."""
 
     def __init__(self, path: str | Path, evaluation_name: str) -> None:
         self.path = Path(path)
         self.evaluation_name = evaluation_name
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.record_count = 0
+        self.primary_parse_failure_count = 0
+        self.recovered_parse_failure_count = 0
         self.parse_failure_count = 0
 
     def append(
@@ -157,11 +170,20 @@ class JsonlEvaluationTraceRecorder:
         profile: SelfModelContextProfile,
         example: SelfModelExample,
         prediction: SelfModelPrediction,
+        recovery: StructuredRecoveryAttempt | None = None,
     ) -> EvaluationCaseRecord:
         matches, total = _field_score(example.expected_decision, prediction.decision)
         exact = prediction.parse_error is None and _matches_expected(
             example, prediction.decision
         )
+        primary_raw_text = (
+            recovery.primary_raw_text if recovery is not None else prediction.raw_text
+        )
+        primary_parse_error = (
+            recovery.primary_parse_error if recovery is not None else prediction.parse_error
+        )
+        repair_attempted = recovery is not None
+        repair_succeeded = bool(recovery is not None and recovery.succeeded)
         record = EvaluationCaseRecord(
             evaluation_name=self.evaluation_name,
             predictor_name=predictor_name,
@@ -173,6 +195,10 @@ class JsonlEvaluationTraceRecorder:
             fault_family=example.definition.fault_family,
             expected_decision=dict(example.expected_decision),
             accepted_alternatives=tuple(dict(item) for item in example.accepted_alternatives),
+            primary_raw_text=primary_raw_text,
+            primary_parse_error=primary_parse_error,
+            repair_attempted=repair_attempted,
+            repair_succeeded=repair_succeeded,
             raw_text=prediction.raw_text,
             parsed_decision=dict(prediction.decision),
             confidence=prediction.confidence,
@@ -185,6 +211,8 @@ class JsonlEvaluationTraceRecorder:
         with self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(record.model_dump_json() + "\n")
         self.record_count += 1
+        self.primary_parse_failure_count += int(primary_parse_error is not None)
+        self.recovered_parse_failure_count += int(repair_succeeded)
         self.parse_failure_count += int(prediction.parse_error is not None)
         return record
 
@@ -228,6 +256,7 @@ class RecordingSelfModelPredictor:
             profile=self.default_profile,
             example=example,
             prediction=prediction,
+            recovery=getattr(self.source, "last_recovery", None),
         )
         return prediction
 
@@ -243,6 +272,7 @@ class RecordingSelfModelPredictor:
             profile=profile,
             example=example,
             prediction=prediction,
+            recovery=getattr(self.source, "last_recovery", None),
         )
         return prediction
 
@@ -261,20 +291,39 @@ def _staging_directory_for(output: Path) -> Path:
 
 
 @contextmanager
-def _install_observability(staging: Path) -> Iterator[list[JsonlEvaluationTraceRecorder]]:
+def _install_observability(
+    staging: Path,
+    *,
+    parse_repair_attempts: int = 0,
+    repair_max_new_tokens: int = 256,
+) -> Iterator[list[JsonlEvaluationTraceRecorder]]:
     original_evaluate = _empirical.evaluate_self_model
     original_context = _empirical.evaluate_context_profile
     recorders: list[JsonlEvaluationTraceRecorder] = []
+
+    if parse_repair_attempts not in {0, 1}:
+        raise ValueError("parse_repair_attempts must be 0 or 1")
+    if repair_max_new_tokens < 1:
+        raise ValueError("repair_max_new_tokens must be positive")
 
     def recorder(name: str) -> JsonlEvaluationTraceRecorder:
         item = JsonlEvaluationTraceRecorder(staging / f"{name}.jsonl", name)
         recorders.append(item)
         return item
 
+    def maybe_recover(predictor: Any) -> Any:
+        if parse_repair_attempts == 0:
+            return predictor
+        return BoundedJsonRecoveryPredictor(
+            predictor,
+            max_attempts=parse_repair_attempts,
+            repair_max_new_tokens=repair_max_new_tokens,
+        )
+
     def observed_evaluate(examples: Any, predictor: Any) -> Any:
         role = _role(predictor.name)
         wrapped = RecordingSelfModelPredictor(
-            predictor,
+            maybe_recover(predictor),
             recorder(f"{role}-standard-primary"),
             default_profile=SelfModelContextProfile.STANDARD,
         )
@@ -284,7 +333,7 @@ def _install_observability(staging: Path) -> Iterator[list[JsonlEvaluationTraceR
         profile = SelfModelContextProfile(profile)
         role = _role(predictor.name)
         wrapped = RecordingSelfModelPredictor(
-            predictor,
+            maybe_recover(predictor),
             recorder(f"{role}-{profile.value}-context"),
             default_profile=profile,
         )
@@ -299,17 +348,26 @@ def _install_observability(staging: Path) -> Iterator[list[JsonlEvaluationTraceR
         _empirical.evaluate_context_profile = original_context
 
 
-def _count_trace_records(trace_root: Path) -> tuple[int, int]:
+def _count_trace_records(trace_root: Path) -> tuple[int, int, int, int]:
     records = 0
-    parse_failures = 0
+    primary_parse_failures = 0
+    recovered_parse_failures = 0
+    final_parse_failures = 0
     for path in sorted(trace_root.glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             record = EvaluationCaseRecord.model_validate_json(line)
             records += 1
-            parse_failures += int(record.parse_error is not None)
-    return records, parse_failures
+            primary_parse_failures += int(record.primary_parse_error is not None)
+            recovered_parse_failures += int(record.repair_succeeded)
+            final_parse_failures += int(record.parse_error is not None)
+    return (
+        records,
+        primary_parse_failures,
+        recovered_parse_failures,
+        final_parse_failures,
+    )
 
 
 def run_observed_empirical_adapter_experiment(
@@ -322,6 +380,8 @@ def run_observed_empirical_adapter_experiment(
     general_regression: GeneralRegressionResult | None = None,
     reference: bool = False,
     resume_training_directory: str | Path | None = None,
+    parse_repair_attempts: int = 0,
+    repair_max_new_tokens: int = 256,
 ) -> EmpiricalAdapterExperimentReport:
     """Run M20.1 and attach a separately signed, append-only prediction ledger."""
 
@@ -338,7 +398,11 @@ def run_observed_empirical_adapter_experiment(
 
     completed = False
     try:
-        with _install_observability(staging):
+        with _install_observability(
+            staging,
+            parse_repair_attempts=parse_repair_attempts,
+            repair_max_new_tokens=repair_max_new_tokens,
+        ):
             report = run_isolated_empirical_adapter_experiment(
                 prepared_directory,
                 backend=backend,
@@ -355,16 +419,23 @@ def run_observed_empirical_adapter_experiment(
             raise ValueError("final evaluation trace directory already exists")
         shutil.move(str(staging), str(final_traces))
         trace_files = digest_tree(final_traces)
-        record_count, parse_failure_count = _count_trace_records(final_traces)
+        (
+            record_count,
+            primary_parse_failure_count,
+            recovered_parse_failure_count,
+            parse_failure_count,
+        ) = _count_trace_records(final_traces)
         if record_count == 0:
             raise ValueError("observed empirical run produced no evaluation trace records")
 
         payload = {
-            "schema_version": "self-model-evaluation-observability-v1",
+            "schema_version": "self-model-evaluation-observability-v2",
             "experiment_report_fingerprint": report.report_fingerprint,
             "evaluation_fingerprint": report.base_standard.evaluation_fingerprint,
             "trace_files": [item.model_dump(mode="json") for item in trace_files],
             "trace_record_count": record_count,
+            "primary_parse_failure_record_count": primary_parse_failure_count,
+            "recovered_parse_failure_record_count": recovered_parse_failure_count,
             "parse_failure_record_count": parse_failure_count,
         }
         fingerprint = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
