@@ -11,6 +11,7 @@ from typing import Any
 from .evaluation import SelfModelPrediction
 from .formatting import (
     SelfModelContextProfile,
+    TrainingMessage,
     format_self_model_example,
     render_messages_with_tokenizer,
 )
@@ -125,6 +126,50 @@ class HuggingFaceSelfModelPredictor:
             self.tokenizer, record.prompt_messages, add_generation_prompt=True
         )
 
+    def _render_repair_prompt(
+        self,
+        example: SelfModelExample,
+        profile: SelfModelContextProfile,
+    ) -> str:
+        """Build a fresh strict-format retry without exposing held-out target values."""
+
+        record = format_self_model_example(example, context_profile=profile)
+        system = record.prompt_messages[0]
+        repair_instruction = (
+            system.content
+            + " A previous generation failed strict JSON validation. Retry from the "
+            "same grounded input. Return exactly one compact JSON object and nothing "
+            "else. Use each requested top-level key at most once. Keep arrays finite "
+            "and concise, do not repeat list entries, and stop immediately after the "
+            "top-level closing brace."
+        )
+        messages = (
+            TrainingMessage(role="system", content=repair_instruction),
+            record.prompt_messages[1],
+        )
+        return render_messages_with_tokenizer(
+            self.tokenizer, messages, add_generation_prompt=True
+        )
+
+    def _generate_text(self, prompt: str, *, max_new_tokens: int) -> str:
+        encoded = self.tokenizer(prompt, return_tensors="pt")
+        try:
+            device = next(self.model.parameters()).device
+            encoded = {key: value.to(device) for key, value in encoded.items()}
+        except (StopIteration, AttributeError):
+            pass
+        with self._torch.no_grad():
+            output = self.model.generate(
+                **encoded,
+                do_sample=False,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        input_length = encoded["input_ids"].shape[-1]
+        generated = output[0][input_length:]
+        return self.tokenizer.decode(generated, skip_special_tokens=True)
+
     @property
     def token_measurement_kind(self) -> str:
         return "tokenizer"
@@ -146,24 +191,30 @@ class HuggingFaceSelfModelPredictor:
         example: SelfModelExample,
         profile: SelfModelContextProfile,
     ) -> SelfModelPrediction:
-        prompt = self._render_prompt(example, SelfModelContextProfile(profile))
-        encoded = self.tokenizer(prompt, return_tensors="pt")
-        try:
-            device = next(self.model.parameters()).device
-            encoded = {key: value.to(device) for key, value in encoded.items()}
-        except (StopIteration, AttributeError):
-            pass
-        with self._torch.no_grad():
-            output = self.model.generate(
-                **encoded,
-                do_sample=False,
-                max_new_tokens=self.max_new_tokens,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
-        input_length = encoded["input_ids"].shape[-1]
-        generated = output[0][input_length:]
-        text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        profile = SelfModelContextProfile(profile)
+        prompt = self._render_prompt(example, profile)
+        text = self._generate_text(prompt, max_new_tokens=self.max_new_tokens)
+        return parse_structured_prediction(text)
+
+    def repair_prediction(
+        self,
+        example: SelfModelExample,
+        profile: SelfModelContextProfile,
+        *,
+        max_new_tokens: int = 256,
+    ) -> SelfModelPrediction:
+        """Run one fresh strict-format retry after a parse failure.
+
+        The malformed primary output is deliberately not fed back into the model: the
+        retry is grounded only in the original prompt plus stricter formatting rules,
+        so repeated garbage cannot become new input evidence.
+        """
+
+        if max_new_tokens < 1:
+            raise ValueError("repair max_new_tokens must be positive")
+        profile = SelfModelContextProfile(profile)
+        prompt = self._render_repair_prompt(example, profile)
+        text = self._generate_text(prompt, max_new_tokens=max_new_tokens)
         return parse_structured_prediction(text)
 
     def close(self) -> None:
