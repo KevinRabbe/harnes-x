@@ -1,6 +1,6 @@
 # Grounded self-model training
 
-Milestones 12–13 build the first training path for teaching a replaceable reasoning core how Harness X actually works.
+Milestones 12–13 build the first training path for teaching a replaceable reasoning core how Harness X actually works. Milestone 19B adds interchangeable PEFT implementations and a held-out test for whether stable self-model knowledge can reduce repeated context.
 
 ## Ground-truth curriculum
 
@@ -55,21 +55,47 @@ The prepared directory contains a signed cohort plus:
 
 The SFT format is conversational prompt/completion. The prompt contains grounded system state and the completion contains only the structured target decision.
 
-## Optional LoRA / QLoRA backend
+The default LoRA target modules now cover both attention and feed-forward projections:
 
-The normal Harness X install does not require Torch or Hugging Face training libraries. Install the optional backend only on a training machine:
+```text
+q_proj k_proj v_proj o_proj gate_proj up_proj down_proj
+```
+
+A model with different module names can override the tuple through `AdapterTrainingConfig`; the trainer never silently substitutes another target set.
+
+## Interchangeable LoRA / QLoRA backends
+
+The prepared bundle is backend-neutral. The same exact cohort and hyperparameter contract can be passed to either implementation.
+
+### Hugging Face / PEFT
+
+The normal optional backend remains:
 
 ```bash
 python -m pip install -e ".[training]"
-```
 
-Then run:
-
-```bash
 harness-x train-self-model-adapter \
   .harness-x/self-model-training \
-  --output .harness-x/self-model-adapter
+  --backend huggingface_peft \
+  --output .harness-x/self-model-adapter-hf
 ```
+
+### Unsloth
+
+Unsloth is deliberately isolated in its own optional extra because its Transformers/TRL compatibility window moves independently from Harness X's original pinned training environment:
+
+```bash
+python -m pip install -e ".[unsloth-training]"
+
+harness-x train-self-model-adapter \
+  .harness-x/self-model-training \
+  --backend unsloth \
+  --output .harness-x/self-model-adapter-unsloth
+```
+
+The Unsloth backend uses the same LoRA/QLoRA settings, applies response-only training loss, and saves a PEFT adapter rather than a merged model. The existing Harness X evaluator therefore remains the comparison authority.
+
+Both training artifacts record backend identity, cohort fingerprint, wall-clock training time, peak allocated CUDA memory when available, and trainer metrics. These measurements make an eventual HF-vs-Unsloth comparison empirical rather than based on vendor benchmark claims.
 
 `lora` trains adapters on the normally loaded base model. `qlora` loads the base model in 4-bit and trains LoRA adapters. The base weights remain the permanent comparison baseline.
 
@@ -79,7 +105,7 @@ harness-x train-self-model-adapter \
 harness-x evaluate-self-model-adapter \
   .harness-x/self-model-training/cohort \
   --base-model <same-base-model> \
-  --adapter .harness-x/self-model-adapter/adapter \
+  --adapter .harness-x/self-model-adapter-unsloth/adapter \
   --output .harness-x/self-model-evaluation
 ```
 
@@ -100,3 +126,38 @@ Metrics include:
 Adapter promotion is separate from successful training. The default policy requires measurable exact-accuracy improvement, no structural regression, zero authority violations, bounded parse/calibration regression, and optionally a bounded external general-capability regression.
 
 Training loss alone never authorizes the adapter for Harness X use.
+
+## Milestone 19B context-compression benchmark
+
+A fine-tuned self-model is only strategically useful if stable operating knowledge can eventually reduce repeated prompt overhead. The benchmark therefore tests the exact same held-out examples under three context profiles:
+
+- `rich` — normal live state plus a repeated static Harness X architecture reference;
+- `standard` — the unchanged Milestone 13 training format;
+- `minimal` — shorter instruction/metadata while preserving task, current system version, source-state fingerprint, live input state, and required output shape.
+
+The generic base receives `rich` context. The adapter is measured under all three profiles.
+
+For real models:
+
+```bash
+harness-x benchmark-context-compression \
+  .harness-x/self-model-training/cohort \
+  --base-model <same-base-model> \
+  --adapter .harness-x/self-model-adapter-unsloth/adapter \
+  --output .harness-x/context-compression
+```
+
+The base is evaluated and released first. One adapter-backed model is then reused for rich/standard/minimal evaluation, so the test does not require two model instances in VRAM at once.
+
+Tokenizer-aware evaluation records exact prompt-token counts and reports accuracy per 1k context tokens. A compressed profile is rejected if context savings are obtained by regressing exact accuracy, structural self-knowledge, diagnostics, authority behavior, or parsing reliability.
+
+CI uses an explicit deterministic reference fixture only to qualify the benchmark mechanics:
+
+```bash
+harness-x benchmark-context-compression \
+  .harness-x/self-model-training/cohort \
+  --reference \
+  --output .harness-x/context-compression-reference
+```
+
+A green reference fixture is not evidence that a real trained adapter has compressed context. That claim requires the empirical model run above.
