@@ -83,9 +83,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     train = subparsers.add_parser(
         "train-self-model-adapter",
-        help="Run the optional LoRA/QLoRA backend on a prepared Milestone 13 bundle",
+        help="Run a selected LoRA/QLoRA backend on a prepared self-model bundle",
     )
     train.add_argument("prepared", type=Path)
+    train.add_argument(
+        "--backend",
+        choices=("huggingface_peft", "unsloth"),
+        default="huggingface_peft",
+        help="Training implementation; both consume the same prepared cohort",
+    )
     train.add_argument("--output", type=Path, default=Path(".harness-x/self-model-adapter"))
 
     evaluate = subparsers.add_parser(
@@ -101,6 +107,26 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--general-adapter-score", type=float, default=None)
     evaluate.add_argument("--general-metric-name", default="general_regression_score")
     evaluate.add_argument("--output", type=Path, default=Path(".harness-x/self-model-evaluation"))
+
+    compression = subparsers.add_parser(
+        "benchmark-context-compression",
+        help="Test whether a self-model adapter preserves quality with less repeated architecture context",
+    )
+    compression.add_argument("cohort", type=Path)
+    compression.add_argument(
+        "--reference",
+        action="store_true",
+        help="Use the deterministic mechanics fixture instead of loading model weights",
+    )
+    compression.add_argument("--base-model", default=None)
+    compression.add_argument("--adapter", type=Path, default=None)
+    compression.add_argument("--no-4bit", action="store_true")
+    compression.add_argument("--max-new-tokens", type=int, default=512)
+    compression.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".harness-x/context-compression"),
+    )
 
     sandbox = subparsers.add_parser(
         "run-improvement-sandbox",
@@ -281,10 +307,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "train-self-model-adapter":
-        from .training import HuggingFacePeftTrainer, load_prepared_training_bundle
+        from .training import (
+            TrainingBackend,
+            load_prepared_training_bundle,
+            trainer_for_backend,
+        )
 
         bundle = load_prepared_training_bundle(args.prepared)
-        artifact = HuggingFacePeftTrainer().train(bundle, args.output)
+        trainer = trainer_for_backend(TrainingBackend(args.backend))
+        artifact = trainer.train(bundle, args.output)
         print(artifact.model_dump_json(indent=2))
         return 0
 
@@ -340,6 +371,73 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(comparison.model_dump_json(indent=2))
         return 0 if comparison.promotion_allowed else 1
+
+    if args.command == "benchmark-context-compression":
+        from .training import (
+            HuggingFaceSelfModelPredictor,
+            ReferenceContextCompressionPredictor,
+            SelfModelContextProfile,
+            compare_context_profiles,
+            evaluate_context_compression,
+            evaluate_context_profile,
+            load_training_cohort,
+        )
+
+        cohort = load_training_cohort(args.cohort)
+        if args.reference:
+            report = evaluate_context_compression(
+                cohort.eval,
+                base_predictor=ReferenceContextCompressionPredictor("base"),
+                adapter_predictor=ReferenceContextCompressionPredictor("adapter"),
+                evidence_kind="reference_simulator",
+            )
+        else:
+            if not args.base_model or args.adapter is None:
+                parser.error(
+                    "real context compression requires --base-model and --adapter; "
+                    "use --reference for the deterministic mechanics fixture"
+                )
+            load_in_4bit = not args.no_4bit
+            base_predictor = HuggingFaceSelfModelPredictor(
+                base_model=args.base_model,
+                load_in_4bit=load_in_4bit,
+                max_new_tokens=args.max_new_tokens,
+            )
+            base_rich = evaluate_context_profile(
+                cohort.eval, base_predictor, SelfModelContextProfile.RICH
+            )
+            _release_predictor(base_predictor)
+
+            adapter_predictor = HuggingFaceSelfModelPredictor(
+                base_model=args.base_model,
+                adapter_path=args.adapter,
+                load_in_4bit=load_in_4bit,
+                max_new_tokens=args.max_new_tokens,
+            )
+            adapter_rich = evaluate_context_profile(
+                cohort.eval, adapter_predictor, SelfModelContextProfile.RICH
+            )
+            adapter_standard = evaluate_context_profile(
+                cohort.eval, adapter_predictor, SelfModelContextProfile.STANDARD
+            )
+            adapter_minimal = evaluate_context_profile(
+                cohort.eval, adapter_predictor, SelfModelContextProfile.MINIMAL
+            )
+            _release_predictor(adapter_predictor)
+            report = compare_context_profiles(
+                base_rich=base_rich,
+                adapter_rich=adapter_rich,
+                adapter_standard=adapter_standard,
+                adapter_minimal=adapter_minimal,
+                evidence_kind="empirical_model",
+            )
+
+        args.output.mkdir(parents=True, exist_ok=True)
+        (args.output / "context-compression-report.json").write_text(
+            report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        print(report.model_dump_json(indent=2))
+        return 0 if report.compression_qualified else 1
 
     if args.command == "run-improvement-sandbox":
         from .improvement import (
