@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+
+from lmformatenforcer import JsonSchemaParser
+
 from harness_x.reasoning import TransformersLocalSettings
 from harness_x.reasoning.adapters.repository_coding_transformers import (
     RepositoryCodingTransformersReasoningCore,
     repository_coding_reasoning_output_json_schema,
 )
-from harness_x.training.lmfe_compat import assert_lmfe_schema_supported
 
 
 def _branches_by_name() -> dict[str, dict]:
@@ -15,6 +18,14 @@ def _branches_by_name() -> dict[str, dict]:
         branch["properties"]["tool_name"]["enum"][0]: branch
         for branch in branches
     }
+
+
+def _traverse(payload: dict[str, object]) -> None:
+    parser = JsonSchemaParser(repository_coding_reasoning_output_json_schema())
+    text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    for char in text:
+        parser = parser.add_character(char)
+    assert parser.can_end()
 
 
 def test_repository_coding_schema_declares_exact_live_registry_surface() -> None:
@@ -43,8 +54,53 @@ def test_repository_coding_schema_declares_exact_live_registry_surface() -> None
     assert patch["additionalProperties"] is False
 
 
-def test_repository_coding_schema_is_supported_by_real_lmfe_parser() -> None:
-    assert_lmfe_schema_supported(repository_coding_reasoning_output_json_schema())
+def test_repository_coding_schema_real_lmfe_traversal() -> None:
+    _traverse({"status": "complete", "actions": []})
+    _traverse(
+        {
+            "status": "continue",
+            "actions": [
+                {
+                    "tool_name": "symbol_definition",
+                    "arguments": {"name": "RepositoryIntelligenceService"},
+                }
+            ],
+        }
+    )
+    _traverse(
+        {
+            "status": "continue",
+            "actions": [
+                {
+                    "tool_name": "workspace_patch",
+                    "arguments": {
+                        "mode": "exact",
+                        "path": "app.py",
+                        "old_text": "return a - b",
+                        "new_text": "return a + b",
+                    },
+                }
+            ],
+        }
+    )
+    _traverse(
+        {
+            "status": "continue",
+            "actions": [
+                {
+                    "tool_name": "workspace_patch",
+                    "arguments": {
+                        "mode": "range",
+                        "path": "app.py",
+                        "start_line": 10,
+                        "end_line": 12,
+                        "expected_sha256": "0" * 64,
+                        "replacement": "return fixed",
+                    },
+                }
+            ],
+        }
+    )
 
 
 def test_repository_coding_core_is_lazy_and_declares_distinct_identity() -> None:
