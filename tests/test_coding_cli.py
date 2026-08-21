@@ -24,6 +24,10 @@ def test_coding_cli_exposes_bounded_runtime_options() -> None:
             "4",
             "--max-same-failure-count",
             "2",
+            "--retain-workspace",
+            "on_failure",
+            "--isolation-copy-path",
+            "node_modules",
         ]
     )
     assert args.task == "Build the site"
@@ -33,9 +37,11 @@ def test_coding_cli_exposes_bounded_runtime_options() -> None:
     assert args.max_inspection_streak == 5
     assert args.max_no_progress_streak == 4
     assert args.max_same_failure_count == 2
+    assert args.retain_workspace == "on_failure"
+    assert args.isolation_copy_path == ["node_modules"]
 
 
-def test_coding_cli_controller_defaults() -> None:
+def test_coding_cli_controller_and_isolation_defaults() -> None:
     parser = build_parser()
     args = parser.parse_args(
         [".", "--task", "Build the site", "--verify", "npm run build"]
@@ -44,6 +50,10 @@ def test_coding_cli_controller_defaults() -> None:
     assert args.max_no_progress_streak == 4
     assert args.max_same_failure_count == 3
     assert args.max_idle_turns == 3
+    assert args.in_place is False
+    assert args.isolation_root is None
+    assert args.retain_workspace == "always"
+    assert args.isolation_copy_path == []
 
 
 def test_split_command_preserves_non_python_argv_shape() -> None:
