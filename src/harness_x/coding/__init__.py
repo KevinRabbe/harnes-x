@@ -1,6 +1,24 @@
 """Coding-task runtime for Harness X."""
 
 from .autonomous_runtime import AutonomousCodingTaskRuntime
+from .browser_runtime import (
+    BrowserContextReasoningCore,
+    BrowserVerifiedCodingTaskReport,
+    BrowserVerifiedIsolatedCodingTaskReport,
+    BrowserVerifiedIsolatedRepositoryCodingTaskRuntime,
+    BrowserVerifiedRepositoryCodingTaskRuntime,
+)
+from .browser_verification import (
+    BrowserConsoleVerificationCheck,
+    BrowserInteractionAction,
+    BrowserInteractionVerificationCheck,
+    BrowserPageVerificationCheck,
+    BrowserVerificationPlan,
+    BrowserVerificationPlatform,
+    BrowserVerificationResult,
+    BrowserVerificationRun,
+    load_browser_verification_plan,
+)
 from .isolated_runtime import (
     IsolatedCodingTaskReport,
     IsolatedRepositoryCodingTaskRuntime,
@@ -43,6 +61,19 @@ from .verified_runtime import (
 
 __all__ = [
     "AutonomousCodingTaskRuntime",
+    "BrowserConsoleVerificationCheck",
+    "BrowserContextReasoningCore",
+    "BrowserInteractionAction",
+    "BrowserInteractionVerificationCheck",
+    "BrowserPageVerificationCheck",
+    "BrowserVerificationPlan",
+    "BrowserVerificationPlatform",
+    "BrowserVerificationResult",
+    "BrowserVerificationRun",
+    "BrowserVerifiedCodingTaskReport",
+    "BrowserVerifiedIsolatedCodingTaskReport",
+    "BrowserVerifiedIsolatedRepositoryCodingTaskRuntime",
+    "BrowserVerifiedRepositoryCodingTaskRuntime",
     "CodingTaskReport",
     "CodingTaskRuntime",
     "CodingVerificationResult",
@@ -73,5 +104,6 @@ __all__ = [
     "VerifiedIsolatedRepositoryCodingTaskRuntime",
     "VerifiedRepositoryCodingTaskRuntime",
     "command_verification_plan",
+    "load_browser_verification_plan",
     "load_verification_plan",
 ]
