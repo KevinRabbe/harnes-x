@@ -45,6 +45,12 @@ recurrent = [
   "torch>=2.4,<3",
   "transformers>=4.55,<5",
 ]
+# Browser/application legibility is operator-selected. Installing this Python extra does
+# not download a browser binary; operators separately install the Chromium binary used by
+# Playwright. Standard Harness X and CI remain browser-free.
+browser = [
+  "playwright>=1.62,<2",
+]
 
 [project.scripts]
 harness-x = "harness_x.cli:main"
