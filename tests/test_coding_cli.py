@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from harness_x.coding.cli import _split_command, build_parser
 
 
@@ -24,5 +26,14 @@ def test_coding_cli_exposes_bounded_runtime_options() -> None:
     assert args.max_tool_actions == 20
 
 
-def test_split_command_preserves_argv_shape() -> None:
+def test_split_command_preserves_non_python_argv_shape() -> None:
     assert _split_command("npm run build") == ("npm", "run", "build")
+
+
+def test_split_command_binds_python_alias_to_active_harness_interpreter() -> None:
+    assert _split_command("python -m pytest -q") == (
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+    )
