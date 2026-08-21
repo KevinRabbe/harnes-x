@@ -19,20 +19,18 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
     RepositoryCodingTransformersReasoningCore,
 )
 
-from .browser_runtime import (
-    BrowserVerifiedIsolatedRepositoryCodingTaskRuntime,
-    BrowserVerifiedRepositoryCodingTaskRuntime,
-)
 from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
+from .long_horizon_runtime import (
+    LongHorizonBrowserIsolatedRepositoryCodingTaskRuntime,
+    LongHorizonBrowserRepositoryCodingTaskRuntime,
+    LongHorizonIsolatedRepositoryCodingTaskRuntime,
+    LongHorizonVerifiedRepositoryCodingTaskRuntime,
+)
 from .verification import (
     CommandVerificationCheck,
     VerificationPlan,
     load_verification_plan,
-)
-from .verified_runtime import (
-    VerifiedIsolatedRepositoryCodingTaskRuntime,
-    VerifiedRepositoryCodingTaskRuntime,
 )
 
 
@@ -44,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-code",
         description=(
-            "Run a bounded repository-aware Harness X coding task in an isolated task workspace."
+            "Run a bounded repository-aware Harness X coding task with durable long-horizon state."
         ),
     )
     parser.add_argument("workspace", type=Path)
@@ -73,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "Enable M26 browser/application mode using a JSON ApplicationServerSpec. "
+            "Enable browser/application mode using a JSON ApplicationServerSpec. "
             "Requires --browser-verification-plan."
         ),
     )
@@ -82,14 +80,32 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "M26 JSON browser-verification plan. Requires --application-spec. Browser "
-            "mode is opt-in; ordinary coding tasks remain browser-free."
+            "JSON browser-verification plan. Requires --application-spec. Browser mode "
+            "remains opt-in."
         ),
     )
     parser.add_argument(
         "--browser-headed",
         action="store_true",
         help="Launch the optional Playwright Chromium provider headed instead of headless.",
+    )
+    parser.add_argument(
+        "--resume-long-horizon-state",
+        type=Path,
+        default=None,
+        help=(
+            "Resume a fingerprinted M27 long-horizon state file. Resume requires --in-place "
+            "and the supplied workspace should be the retained/checkpointed task workspace."
+        ),
+    )
+    parser.add_argument(
+        "--resume-allow-workspace-drift",
+        action="store_true",
+        help=(
+            "Explicitly allow resume when the workspace no longer matches the latest exact "
+            "M27 checkpoint. Requires --resume-long-horizon-state; use only when the drift is "
+            "operator-understood."
+        ),
     )
     parser.add_argument(
         "--backend",
@@ -134,9 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-idle-turns",
         type=int,
         default=3,
-        help=(
-            "Protocol fallback: fail after this many consecutive no-action continue turns."
-        ),
+        help="Protocol fallback: fail after this many consecutive no-action continue turns.",
     )
     parser.add_argument(
         "--max-inspection-streak",
@@ -160,16 +174,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-same-failure-count",
         type=int,
         default=3,
-        help=(
-            "Controller threshold for the same verification failure before replanning."
-        ),
+        help="Controller threshold for the same verification failure before replanning.",
     )
     parser.add_argument(
         "--in-place",
         action="store_true",
         help=(
-            "Disable M24 task-workspace isolation and operate directly on the supplied "
-            "workspace. This is an explicit compatibility/debug escape hatch."
+            "Operate directly on the supplied workspace instead of creating an M24 isolated "
+            "workspace. Required when resuming a retained M27 checkpointed workspace."
         ),
     )
     parser.add_argument(
@@ -279,12 +291,14 @@ def _build_verification_inputs(
             )
         )
         next_index += 1
-    merged = VerificationPlan(
-        name=plan.name,
-        checks=(*plan.checks, *appended),
-        fail_fast_required=plan.fail_fast_required,
+    return (
+        VerificationPlan(
+            name=plan.name,
+            checks=(*plan.checks, *appended),
+            fail_fast_required=plan.fail_fast_required,
+        ),
+        commands,
     )
-    return merged, commands
 
 
 def _load_application_spec(path: Path) -> ApplicationServerSpec:
@@ -315,6 +329,17 @@ def _build_browser_inputs(args: argparse.Namespace):
         )
 
     return application, browser_plan, provider_factory
+
+
+def _validate_resume_args(args: argparse.Namespace) -> None:
+    if args.resume_long_horizon_state is not None and not args.in_place:
+        raise ValueError(
+            "--resume-long-horizon-state requires --in-place and a retained/checkpointed workspace"
+        )
+    if args.resume_allow_workspace_drift and args.resume_long_horizon_state is None:
+        raise ValueError(
+            "--resume-allow-workspace-drift requires --resume-long-horizon-state"
+        )
 
 
 def _build_core(args: argparse.Namespace):
@@ -355,6 +380,12 @@ def _runtime(
         max_no_progress_streak=args.max_no_progress_streak,
         max_same_failure_count=args.max_same_failure_count,
     )
+    if args.in_place:
+        common.update(
+            resume_state_path=args.resume_long_horizon_state,
+            require_resume_workspace_match=not args.resume_allow_workspace_drift,
+        )
+
     if browser_inputs is not None:
         application, browser_plan, provider_factory = browser_inputs
         common.update(
@@ -363,15 +394,15 @@ def _runtime(
             browser_provider_factory=provider_factory,
         )
         runtime_type = (
-            BrowserVerifiedRepositoryCodingTaskRuntime
+            LongHorizonBrowserRepositoryCodingTaskRuntime
             if args.in_place
-            else BrowserVerifiedIsolatedRepositoryCodingTaskRuntime
+            else LongHorizonBrowserIsolatedRepositoryCodingTaskRuntime
         )
     else:
         runtime_type = (
-            VerifiedRepositoryCodingTaskRuntime
+            LongHorizonVerifiedRepositoryCodingTaskRuntime
             if args.in_place
-            else VerifiedIsolatedRepositoryCodingTaskRuntime
+            else LongHorizonIsolatedRepositoryCodingTaskRuntime
         )
 
     if args.in_place:
@@ -391,6 +422,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        _validate_resume_args(args)
         verification_plan, verification_commands = _build_verification_inputs(args)
         browser_inputs = _build_browser_inputs(args)
     except ValueError as exc:
