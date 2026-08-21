@@ -9,7 +9,11 @@ from harness_x.coding.procedure_improvement_campaign import (
     ProcedureImprovementCampaignStore,
 )
 from harness_x.coding.procedure_reliability import ProcedureReliabilityStatus, ProcedureReliabilityStore
-from harness_x.coding.procedure_revision import ProcedureRevisionState, ProcedureRevisionStore
+from harness_x.coding.procedure_revision import (
+    ProcedureRevisionProposal,
+    ProcedureRevisionState,
+    ProcedureRevisionStore,
+)
 from harness_x.coding.project_memory import ProjectMemoryStore, ProposedProjectProcedure
 from harness_x.coding.verification import FileContainsVerificationCheck, VerificationPlan
 from harness_x.reasoning import RawActionProposal, RawProposal, RawReasoningOutput, ReasoningCoreInfo
@@ -32,6 +36,7 @@ class CampaignCore:
             transport="in_process",
             model_inference=False,
         )
+        self.calls = 0
         self.proposals = 0
         self.trials = 0
 
@@ -40,13 +45,14 @@ class CampaignCore:
         return self._info
 
     def generate(self, context) -> RawReasoningOutput:
+        self.calls += 1
         instruction = str(context.payload.get("instruction", ""))
         revision = context.payload["sections"]["procedure_revision"]
         if "proposal step" in instruction:
             assert revision["trial_allowed"] is False
-            self.proposals += 1
-            parent = revision["suspended_parents"][0]
-            if self.proposals == 1:
+            if self.calls == 1:
+                self.proposals += 1
+                parent = revision["suspended_parents"][0]
                 return RawReasoningOutput(
                     status="continue",
                     proposals=(
@@ -92,31 +98,33 @@ class CampaignCore:
 
         assert "validation step" in instruction
         assert revision["trial_allowed"] is True
-        self.trials += 1
-        candidate = revision["data"]["open_candidates"][0]
-        return RawReasoningOutput(
-            status="continue" if self.trials in (1, 2) else "complete",
-            proposals=(
-                RawProposal(
-                    summary="trial campaign revision",
-                    payload={
-                        "kind": "procedure_revision_update",
-                        "used_revision_candidate_ids": [candidate["candidate_id"]],
-                    },
+        if self.calls in (3, 5):
+            self.trials += 1
+            candidate = revision["data"]["open_candidates"][0]
+            return RawReasoningOutput(
+                status="continue",
+                proposals=(
+                    RawProposal(
+                        summary="trial campaign revision",
+                        payload={
+                            "kind": "procedure_revision_update",
+                            "used_revision_candidate_ids": [candidate["candidate_id"]],
+                        },
+                    ),
                 ),
-            ) if self.trials in (1, 2) else (),
-            actions=(
-                RawActionProposal(
-                    tool_name="workspace_patch",
-                    arguments={
-                        "mode": "exact",
-                        "path": "trial.txt",
-                        "old_text": "bad",
-                        "new_text": "good",
-                    },
+                actions=(
+                    RawActionProposal(
+                        tool_name="workspace_patch",
+                        arguments={
+                            "mode": "exact",
+                            "path": "trial.txt",
+                            "old_text": "bad",
+                            "new_text": "good",
+                        },
+                    ),
                 ),
-            ) if self.trials in (1, 2) else (),
-        )
+            )
+        return RawReasoningOutput(status="complete")
 
 
 class NoCandidateCore:
@@ -281,12 +289,12 @@ def test_pending_trial_recovery_consumes_budget_without_replaying_after_m30_delt
     revisions = ProcedureRevisionStore(tmp_path, project_id=memory.project_id)
     failed = _episode(memory, "revision-origin", succeeded=False)
     candidate = revisions.propose(
-        proposal={
-            "parent_procedure_id": parent.entry_id,
-            "statement": "Run targeted tests, inspect failure, then run the full suite",
-            "steps": ["Run targeted pytest", "Inspect failure", "Run the full suite"],
-            "rationale": "Address repeated verified reuse failures",
-        },
+        proposal=ProcedureRevisionProposal(
+            parent_procedure_id=parent.entry_id,
+            statement="Run targeted tests, inspect failure, then run the full suite",
+            steps=("Run targeted pytest", "Inspect failure", "Run the full suite"),
+            rationale="Address repeated verified reuse failures",
+        ),
         parent=parent,
         origin_episode=failed,
         reliability=reliability.record_for(parent.entry_id),
