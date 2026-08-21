@@ -14,11 +14,11 @@ from harness_x.reasoning import (
     OpenAICompatibleSettings,
     TransformersLocalSettings,
 )
-from harness_x.reasoning.adapters.coding_transformers import (
-    CodingTransformersReasoningCore,
+from harness_x.reasoning.adapters.repository_coding_transformers import (
+    RepositoryCodingTransformersReasoningCore,
 )
 
-from .autonomous_runtime import AutonomousCodingTaskRuntime
+from .repository_runtime import RepositoryAwareAutonomousCodingTaskRuntime
 
 
 _DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
@@ -28,7 +28,7 @@ _PYTHON_ALIASES = frozenset({"python", "python.exe", "python3", "python3.exe"})
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-code",
-        description="Run a bounded Harness X coding task against a local workspace.",
+        description="Run a bounded repository-aware Harness X coding task against a local workspace.",
     )
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--task", required=True)
@@ -136,7 +136,7 @@ def _split_command(command: str) -> tuple[str, ...]:
 
 def _build_core(args: argparse.Namespace):
     if args.backend == "transformers":
-        return CodingTransformersReasoningCore(
+        return RepositoryCodingTransformersReasoningCore(
             TransformersLocalSettings(
                 model=args.model,
                 revision=args.revision,
@@ -164,7 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
 
     core = _build_core(args)
-    runtime = AutonomousCodingTaskRuntime(
+    runtime = RepositoryAwareAutonomousCodingTaskRuntime(
         args.workspace,
         core,
         args.output,
