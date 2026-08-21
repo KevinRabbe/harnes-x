@@ -42,7 +42,8 @@ class ApplicationBrowserSession:
         self.provider_factory = provider_factory
         self.allowed_executables = allowed_executables
         self._manager = self._new_manager()
-        self._provider = provider_factory(application.base_url, self.artifact_root / "browser")
+        self._provider_generation = 0
+        self._provider = self._new_provider("browser")
         self.latest_observation: BrowserObservation | None = None
         self.start_failures: list[str] = []
         self.closed = False
@@ -56,6 +57,13 @@ class ApplicationBrowserSession:
             self.artifact_root / "application",
             self.application,
             **kwargs,
+        )
+
+    def _new_provider(self, purpose: str) -> BrowserProvider:
+        self._provider_generation += 1
+        return self.provider_factory(
+            self.application.base_url,
+            self.artifact_root / f"{purpose}-{self._provider_generation:03d}",
         )
 
     @property
@@ -81,6 +89,17 @@ class ApplicationBrowserSession:
             finally:
                 self._manager = self._new_manager()
             raise
+
+    def reset_browser_client(self, *, purpose: str = "verification") -> None:
+        """Replace browser client state while preserving the software-owned app process."""
+
+        if self.closed:
+            raise RuntimeError("application browser session is closed")
+        try:
+            self._provider.close()
+        finally:
+            self._provider = self._new_provider(purpose)
+            self.latest_observation = None
 
     def _observe(self, operation) -> BrowserObservation:
         self.ensure_application()
