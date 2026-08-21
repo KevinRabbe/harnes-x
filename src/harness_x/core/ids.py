@@ -64,6 +64,18 @@ class EventId(Identifier):
     prefix = "event"
 
 
+class CodingPlanId(Identifier):
+    """Stable identity for a versioned coding plan artifact."""
+
+    prefix = "codingplan"
+
+
+class CommitmentId(Identifier):
+    """Stable identity for one durable coding obligation."""
+
+    prefix = "commitment"
+
+
 class SystemVersion(BaseModel):
     """Version of the complete running Harness X system, not only the model."""
 
