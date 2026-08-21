@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import socket
-import subprocess
 import sys
 from pathlib import Path
 
@@ -284,7 +283,9 @@ def test_browser_runtime_does_not_reuse_old_browser_failure_for_code_failure(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    workspace.joinpath("index.html").write_text("Broken\n", encoding="utf-8")
+    workspace.joinpath("index.html").write_text(
+        "RequiredValue Broken\n", encoding="utf-8"
+    )
     port = _free_port()
 
     def provider_factory(base_url: str, artifact_root: Path):
@@ -307,8 +308,8 @@ def test_browser_runtime_does_not_reuse_old_browser_failure_for_code_failure(
                             arguments={
                                 "mode": "exact",
                                 "path": "index.html",
-                                "old_text": "Broken",
-                                "new_text": "Missing required marker",
+                                "old_text": "RequiredValue",
+                                "new_text": "MissingValue",
                             },
                         ),
                     ),
@@ -328,15 +329,8 @@ def test_browser_runtime_does_not_reuse_old_browser_failure_for_code_failure(
                     name="required marker exists",
                     path="index.html",
                     needle="RequiredValue",
-                    requirement="advisory",
                 ),
-                FileExistsVerificationCheck(
-                    check_id="must_exist",
-                    name="must exist",
-                    path="must-exist.txt",
-                ),
-            ),
-            fail_fast_required=False,
+            )
         ),
         baseline_verification=False,
         max_reasoning_steps=8,
@@ -346,6 +340,10 @@ def test_browser_runtime_does_not_reuse_old_browser_failure_for_code_failure(
     report = runtime.run("Exercise independent verification identity")
 
     assert report.succeeded is False
-    # Code verification never passed, so no browser verification should have executed.
-    assert report.browser_verification_runs == ()
-    assert report.verification_runs[-1].failure_signature is not None
+    assert len(report.browser_verification_runs) == 1
+    assert report.browser_verification_runs[0].verdict == VerificationVerdict.FAIL
+    latest_code_run = report.verification_runs[-1]
+    assert latest_code_run.verdict == VerificationVerdict.FAIL
+    assert latest_code_run.failure_signature is not None
+    assert runtime._browser_run_for_current_verification is None
+    assert runtime._verification_failure_signature(report.verification) == latest_code_run.failure_signature
