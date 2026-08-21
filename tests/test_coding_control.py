@@ -34,7 +34,7 @@ def test_plan_artifact_and_root_commitment_are_durable(tmp_path: Path) -> None:
     plan_path = tmp_path / "coding-plan.json"
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
 
-    assert payload["plan_id"].startswith("codingplan_")
+    assert payload["plan_id"]["value"].startswith("codingplan_")
     assert payload["phase"] == "orient"
     assert len(payload["commitments"]) == 1
     assert payload["commitments"][0]["status"] == "active"
