@@ -1,8 +1,8 @@
 """Durable, bounded long-horizon task state for autonomous coding.
 
-The active state is intentionally small and structured. Full bounded evidence records are
-append-only on disk and can be recalled on demand, so model context does not grow with the
-raw trajectory length.
+M27 deliberately separates durable task state from transient model context. The active
+projection stays small; bounded evidence records are append-only on disk and can be recalled
+when older information becomes relevant.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _sha256(value: bytes) -> str:
 
 
 def _bounded_json(value: object, *, max_chars: int = 3000) -> object:
-    """Return JSON-compatible evidence bounded without hiding that it was reduced."""
+    """Return JSON-compatible evidence with an explicit truncation marker if needed."""
 
     try:
         serialized = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
@@ -75,7 +75,7 @@ def _bounded_json(value: object, *, max_chars: int = 3000) -> object:
 
 
 def workspace_content_fingerprint(root: str | Path, *, max_files: int = 20000) -> str:
-    """Exact source-relevant workspace fingerprint used by M27 resume checkpoints."""
+    """Exact source-relevant workspace fingerprint used by resume checkpoints."""
 
     workspace = Path(root).resolve()
     if not workspace.is_dir():
@@ -146,7 +146,7 @@ class LongHorizonStrategy(BaseModel):
 
     @field_validator("next_actions", "risks")
     @classmethod
-    def bound_items(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+    def normalize_items(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(item.strip()[:800] for item in values if item.strip())
         if len(normalized) != len(set(normalized)):
             raise ValueError("long-horizon strategy items must be unique")
@@ -201,7 +201,7 @@ class LongHorizonCheckpoint(BaseModel):
     checkpoint_id: str
     revision: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=300)
-    state_fingerprint: str = Field(min_length=64, max_length=64)
+    parent_state_fingerprint: str = Field(min_length=64, max_length=64)
     workspace_fingerprint: str = Field(min_length=64, max_length=64)
     workspace_root: str
     evidence_total: int = Field(ge=0)
@@ -223,7 +223,6 @@ class LongHorizonTaskState(BaseModel):
     evidence_rollups: dict[str, int] = Field(default_factory=dict)
     next_obligation_index: int = Field(default=1, ge=1)
     next_decision_index: int = Field(default=1, ge=1)
-    next_evidence_index: int = Field(default=1, ge=1)
     checkpoint_count: int = Field(default=0, ge=0)
     latest_checkpoint: LongHorizonCheckpoint | None = None
     resumed: bool = False
@@ -262,7 +261,7 @@ class ProposedLongHorizonStrategy(BaseModel):
 
 
 class LongHorizonStateUpdateProposal(BaseModel):
-    """Advisory model proposal; cannot rewrite task or acceptance authority."""
+    """Advisory model proposal; it cannot rewrite task or acceptance authority."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -308,7 +307,7 @@ class LongHorizonRecallMatch(BaseModel):
 
 
 class LongHorizonStateStore:
-    """Atomic active state plus append-only bounded evidence records."""
+    """Atomic active state plus an append-only evidence ledger."""
 
     def __init__(
         self,
@@ -335,7 +334,12 @@ class LongHorizonStateStore:
         self.state: LongHorizonTaskState | None = None
         self._resume_requested = resume_state_path is not None
         if self._resume_requested:
-            self.state = self._load_state(self.state_path).model_copy(update={"resumed": True})
+            loaded = self._load_state(self.state_path)
+            self.state = self._validated_state_update(
+                loaded,
+                revision=loaded.revision + 1,
+                resumed=True,
+            )
 
     @property
     def initialized(self) -> bool:
@@ -354,15 +358,14 @@ class LongHorizonStateStore:
             dict.fromkeys(item.strip() for item in acceptance_requirements if item.strip())
         )
         if self.state is None:
-            state = LongHorizonTaskState(
+            self.state = LongHorizonTaskState(
                 session_id=f"longtask_{uuid.uuid4().hex[:20]}",
                 task=normalized_task,
                 acceptance_requirements=normalized_acceptance,
                 revision=1,
             )
-            self.state = state
             self._write_state()
-            return state
+            return self.state
 
         state = self.state
         if state.task != normalized_task:
@@ -376,8 +379,9 @@ class LongHorizonStateStore:
                 raise ValueError(
                     "resume workspace fingerprint does not match the latest long-horizon checkpoint"
                 )
+        self._reconcile_evidence_ledger()
         self._write_state()
-        return state
+        return self._require_state()
 
     def apply_model_update(
         self,
@@ -390,32 +394,27 @@ class LongHorizonStateStore:
         next_obligation = state.next_obligation_index
         next_decision = state.next_decision_index
 
-        by_obligation = {item.obligation_id: index for index, item in enumerate(obligations)}
-        for obligation_id in update.resolve_obligation_ids:
-            if obligation_id not in by_obligation:
+        obligation_positions = {
+            item.obligation_id: index for index, item in enumerate(obligations)
+        }
+        for obligation_id, new_status in (
+            *(
+                (item, LongHorizonObligationStatus.RESOLVED)
+                for item in update.resolve_obligation_ids
+            ),
+            *(
+                (item, LongHorizonObligationStatus.SUPERSEDED)
+                for item in update.supersede_obligation_ids
+            ),
+        ):
+            if obligation_id not in obligation_positions:
                 raise ValueError(f"unknown obligation ID {obligation_id}")
-            index = by_obligation[obligation_id]
+            index = obligation_positions[obligation_id]
             current = obligations[index]
             if current.status != LongHorizonObligationStatus.OPEN:
                 raise ValueError(f"obligation {obligation_id} is not open")
             obligations[index] = current.model_copy(
-                update={
-                    "status": LongHorizonObligationStatus.RESOLVED,
-                    "updated_revision": next_revision,
-                }
-            )
-        for obligation_id in update.supersede_obligation_ids:
-            if obligation_id not in by_obligation:
-                raise ValueError(f"unknown obligation ID {obligation_id}")
-            index = by_obligation[obligation_id]
-            current = obligations[index]
-            if current.status != LongHorizonObligationStatus.OPEN:
-                raise ValueError(f"obligation {obligation_id} is not open")
-            obligations[index] = current.model_copy(
-                update={
-                    "status": LongHorizonObligationStatus.SUPERSEDED,
-                    "updated_revision": next_revision,
-                }
+                update={"status": new_status, "updated_revision": next_revision}
             )
         for proposed in update.add_obligations:
             obligation_id = f"obl_{next_obligation:06d}"
@@ -431,11 +430,16 @@ class LongHorizonStateStore:
                 )
             )
 
-        by_decision = {item.decision_id: index for index, item in enumerate(decisions)}
-        for decision_id in update.supersede_decision_ids:
-            if decision_id not in by_decision:
+        decision_positions = {
+            item.decision_id: index for index, item in enumerate(decisions)
+        }
+        explicitly_superseded = set(update.supersede_decision_ids)
+        for proposed in update.decisions:
+            explicitly_superseded.update(proposed.supersedes)
+        for decision_id in explicitly_superseded:
+            if decision_id not in decision_positions:
                 raise ValueError(f"unknown decision ID {decision_id}")
-            index = by_decision[decision_id]
+            index = decision_positions[decision_id]
             current = decisions[index]
             if current.status != LongHorizonDecisionStatus.ACTIVE:
                 raise ValueError(f"decision {decision_id} is not active")
@@ -446,9 +450,6 @@ class LongHorizonStateStore:
                 }
             )
         for proposed in update.decisions:
-            for superseded in proposed.supersedes:
-                if superseded not in by_decision:
-                    raise ValueError(f"unknown superseded decision ID {superseded}")
             decision_id = f"decision_{next_decision:06d}"
             next_decision += 1
             decisions.append(
@@ -462,16 +463,6 @@ class LongHorizonStateStore:
                     updated_revision=next_revision,
                 )
             )
-            for superseded in proposed.supersedes:
-                index = by_decision[superseded]
-                current = decisions[index]
-                if current.status == LongHorizonDecisionStatus.ACTIVE:
-                    decisions[index] = current.model_copy(
-                        update={
-                            "status": LongHorizonDecisionStatus.SUPERSEDED,
-                            "updated_revision": next_revision,
-                        }
-                    )
 
         strategy = state.strategy
         if update.strategy is not None:
@@ -511,9 +502,13 @@ class LongHorizonStateStore:
         if tool in {"workspace_write", "workspace_patch"}:
             path = output.get("path")
             summary_parts.append(f"workspace mutation {path}")
-            metadata["path"] = path
-            metadata["sha256_before"] = output.get("sha256_before")
-            metadata["sha256_after"] = output.get("sha256_after")
+            metadata.update(
+                {
+                    "path": path,
+                    "sha256_before": output.get("sha256_before"),
+                    "sha256_after": output.get("sha256_after"),
+                }
+            )
             importance = 0.9
         elif tool == "process_run":
             argv = output.get("argv", ())
@@ -569,27 +564,35 @@ class LongHorizonStateStore:
         metadata: object = None,
     ) -> LongHorizonEvidence:
         state = self._require_state()
+        normalized_kind = kind.strip()
+        normalized_summary = summary.strip()
+        normalized_source = source_ref.strip()
+        if not normalized_kind or not normalized_summary or not normalized_source:
+            raise ValueError("long-horizon evidence kind, summary, and source are required")
         next_revision = state.revision + 1
-        evidence_id = f"evidence_{state.next_evidence_index:08d}"
+        evidence_id = f"evidence_{uuid.uuid4().hex[:24]}"
         bounded_metadata = _bounded_json({} if metadata is None else metadata)
         fingerprint_material = {
-            "kind": kind,
-            "summary": summary,
-            "source_ref": source_ref,
+            "evidence_id": evidence_id,
+            "kind": normalized_kind,
+            "summary": normalized_summary,
+            "source_ref": normalized_source,
             "success": success,
             "metadata": bounded_metadata,
         }
         evidence = LongHorizonEvidence(
             evidence_id=evidence_id,
-            kind=kind.strip(),
-            summary=summary.strip()[:2400],
-            source_ref=source_ref.strip()[:500],
+            kind=normalized_kind,
+            summary=normalized_summary[:2400],
+            source_ref=normalized_source[:500],
             importance=importance,
             success=success,
             created_revision=next_revision,
             metadata=bounded_metadata,
             fingerprint=_sha256(_canonical(fingerprint_material)),
         )
+        # Append first. UUID identity makes a crash between ledger append and state write
+        # recoverable without ever reusing an evidence ID; initialize() reconciles orphans.
         self._append_evidence(evidence)
         active = self._trim_active_evidence((*state.evidence_index, evidence))
         rollups = dict(state.evidence_rollups)
@@ -599,7 +602,6 @@ class LongHorizonStateStore:
             evidence_index=active,
             evidence_total=state.evidence_total + 1,
             evidence_rollups=rollups,
-            next_evidence_index=state.next_evidence_index + 1,
         )
         return evidence
 
@@ -618,7 +620,6 @@ class LongHorizonStateStore:
             ),
             source_ref=f"controller:reasoning-step:{reasoning_step}",
             importance=0.84,
-            success=None,
             metadata={
                 "phase": phase,
                 "reason": reason,
@@ -632,14 +633,12 @@ class LongHorizonStateStore:
         normalized = reason.strip()
         if not normalized:
             raise ValueError("checkpoint reason cannot be blank")
-        workspace_fingerprint = workspace_content_fingerprint(self.workspace_root)
-        checkpoint_id = f"checkpoint_{state.checkpoint_count + 1:05d}"
         checkpoint = LongHorizonCheckpoint(
-            checkpoint_id=checkpoint_id,
+            checkpoint_id=f"checkpoint_{state.checkpoint_count + 1:05d}",
             revision=state.revision + 1,
             reason=normalized,
-            state_fingerprint=state.fingerprint,
-            workspace_fingerprint=workspace_fingerprint,
+            parent_state_fingerprint=state.fingerprint,
+            workspace_fingerprint=workspace_content_fingerprint(self.workspace_root),
             workspace_root=str(self.workspace_root),
             evidence_total=state.evidence_total,
         )
@@ -648,7 +647,7 @@ class LongHorizonStateStore:
             checkpoint_count=state.checkpoint_count + 1,
             latest_checkpoint=checkpoint,
         )
-        snapshot = self.checkpoint_root / f"{checkpoint_id}.json"
+        snapshot = self.checkpoint_root / f"{checkpoint.checkpoint_id}.json"
         self._atomic_json(snapshot, updated.model_dump(mode="json"))
         return checkpoint
 
@@ -665,30 +664,20 @@ class LongHorizonStateStore:
             raise ValueError("long-horizon recall requires a query or evidence kind")
         if limit < 1 or limit > 50:
             raise ValueError("long-horizon recall limit must be between 1 and 50")
-        if not self.evidence_path.exists():
-            return ()
         matches: list[LongHorizonEvidence] = []
-        with self.evidence_path.open("r", encoding="utf-8") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    item = LongHorizonEvidence.model_validate_json(raw)
-                except Exception:
-                    continue
-                if normalized_kinds and item.kind not in normalized_kinds:
-                    continue
-                searchable = (
-                    item.summary
-                    + "\n"
-                    + item.source_ref
-                    + "\n"
-                    + json.dumps(item.metadata, ensure_ascii=False, default=str)
-                ).casefold()
-                if normalized_query and normalized_query not in searchable:
-                    continue
-                matches.append(item)
+        for item in self._read_evidence_ledger():
+            if normalized_kinds and item.kind not in normalized_kinds:
+                continue
+            searchable = (
+                item.summary
+                + "\n"
+                + item.source_ref
+                + "\n"
+                + json.dumps(item.metadata, ensure_ascii=False, default=str)
+            ).casefold()
+            if normalized_query and normalized_query not in searchable:
+                continue
+            matches.append(item)
         matches.sort(
             key=lambda item: (item.importance, item.created_revision, item.evidence_id),
             reverse=True,
@@ -786,18 +775,42 @@ class LongHorizonStateStore:
                 else state.latest_checkpoint.model_dump(mode="json")
             ),
             "recall_rule": (
-                "The selected evidence is a bounded active index, not the full history. "
-                "Use task_state_recall when an older fact, failure, file, command, or decision "
+                "Selected evidence is a bounded active index, not the full history. Use "
+                "task_state_recall when an older fact, failure, file, command, or decision "
                 "may matter."
             ),
         }
+
+    def _reconcile_evidence_ledger(self) -> None:
+        state = self._require_state()
+        ledger = self._read_evidence_ledger()
+        if len(ledger) < state.evidence_total:
+            raise ValueError(
+                "long-horizon evidence ledger is shorter than the authoritative state count"
+            )
+        ledger_by_id = {item.evidence_id: item for item in ledger}
+        if len(ledger_by_id) != len(ledger):
+            raise ValueError("long-horizon evidence ledger contains duplicate evidence IDs")
+        if len(ledger) == state.evidence_total:
+            return
+        # Recover evidence appended before a crash but not yet indexed in the atomic state.
+        rollups: dict[str, int] = {}
+        for item in ledger:
+            rollups[item.kind] = rollups.get(item.kind, 0) + 1
+        active = self._trim_active_evidence(tuple(ledger))
+        self._replace_state(
+            revision=state.revision + 1,
+            evidence_index=active,
+            evidence_total=len(ledger),
+            evidence_rollups=rollups,
+        )
 
     def _trim_active_evidence(
         self, evidence: tuple[LongHorizonEvidence, ...]
     ) -> tuple[LongHorizonEvidence, ...]:
         if len(evidence) <= _MAX_ACTIVE_EVIDENCE:
             return evidence
-        by_importance = sorted(
+        important = sorted(
             evidence,
             key=lambda item: (item.importance, item.created_revision, item.evidence_id),
             reverse=True,
@@ -807,7 +820,7 @@ class LongHorizonStateStore:
             key=lambda item: (item.created_revision, item.evidence_id),
             reverse=True,
         )[:160]
-        selected = {item.evidence_id: item for item in (*by_importance, *recent)}
+        selected = {item.evidence_id: item for item in (*important, *recent)}
         rows = sorted(
             selected.values(),
             key=lambda item: (item.created_revision, item.evidence_id),
@@ -824,15 +837,38 @@ class LongHorizonStateStore:
             except OSError:
                 pass
 
+    def _read_evidence_ledger(self) -> tuple[LongHorizonEvidence, ...]:
+        if not self.evidence_path.exists():
+            return ()
+        rows: list[LongHorizonEvidence] = []
+        with self.evidence_path.open("r", encoding="utf-8") as handle:
+            for line_number, raw in enumerate(handle, 1):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rows.append(LongHorizonEvidence.model_validate_json(raw))
+                except Exception as exc:
+                    raise ValueError(
+                        f"invalid long-horizon evidence record at line {line_number}: {exc}"
+                    ) from exc
+        return tuple(rows)
+
     def _replace_state(self, **updates: object) -> LongHorizonTaskState:
-        current = self._require_state()
-        payload = current.model_dump(mode="python", exclude={"fingerprint"})
-        payload.update(updates)
-        payload["fingerprint"] = ""
-        state = LongHorizonTaskState.model_validate(payload)
+        state = self._validated_state_update(self._require_state(), **updates)
         self.state = state
         self._write_state()
         return state
+
+    @staticmethod
+    def _validated_state_update(
+        current: LongHorizonTaskState,
+        **updates: object,
+    ) -> LongHorizonTaskState:
+        payload = current.model_dump(mode="python", exclude={"fingerprint"})
+        payload.update(updates)
+        payload["fingerprint"] = ""
+        return LongHorizonTaskState.model_validate(payload)
 
     def _write_state(self) -> None:
         state = self._require_state()
