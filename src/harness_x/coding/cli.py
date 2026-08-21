@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from harness_x.browser import ApplicationServerSpec, PlaywrightBrowserProvider
 from harness_x.reasoning import (
     OpenAICompatibleReasoningCore,
     OpenAICompatibleSettings,
@@ -18,6 +19,11 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
     RepositoryCodingTransformersReasoningCore,
 )
 
+from .browser_runtime import (
+    BrowserVerifiedIsolatedRepositoryCodingTaskRuntime,
+    BrowserVerifiedRepositoryCodingTaskRuntime,
+)
+from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
 from .verification import (
     CommandVerificationCheck,
@@ -61,6 +67,29 @@ def build_parser() -> argparse.ArgumentParser:
             "changed-file targeting. Repeatable --verify commands are appended as required "
             "command checks when both inputs are supplied."
         ),
+    )
+    parser.add_argument(
+        "--application-spec",
+        type=Path,
+        default=None,
+        help=(
+            "Enable M26 browser/application mode using a JSON ApplicationServerSpec. "
+            "Requires --browser-verification-plan."
+        ),
+    )
+    parser.add_argument(
+        "--browser-verification-plan",
+        type=Path,
+        default=None,
+        help=(
+            "M26 JSON browser-verification plan. Requires --application-spec. Browser "
+            "mode is opt-in; ordinary coding tasks remain browser-free."
+        ),
+    )
+    parser.add_argument(
+        "--browser-headed",
+        action="store_true",
+        help="Launch the optional Playwright Chromium provider headed instead of headless.",
     )
     parser.add_argument(
         "--backend",
@@ -258,6 +287,36 @@ def _build_verification_inputs(
     return merged, commands
 
 
+def _load_application_spec(path: Path) -> ApplicationServerSpec:
+    try:
+        spec = ApplicationServerSpec.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"invalid application spec {path}: {exc}") from exc
+    argv = _normalize_python_argv(spec.argv)
+    return spec if argv == spec.argv else spec.model_copy(update={"argv": argv})
+
+
+def _build_browser_inputs(args: argparse.Namespace):
+    enabled = args.application_spec is not None or args.browser_verification_plan is not None
+    if not enabled:
+        return None
+    if args.application_spec is None or args.browser_verification_plan is None:
+        raise ValueError(
+            "browser mode requires both --application-spec and --browser-verification-plan"
+        )
+    application = _load_application_spec(args.application_spec)
+    browser_plan = load_browser_verification_plan(str(args.browser_verification_plan))
+
+    def provider_factory(base_url: str, artifact_root: Path):
+        return PlaywrightBrowserProvider(
+            base_url,
+            artifact_root,
+            headless=not args.browser_headed,
+        )
+
+    return application, browser_plan, provider_factory
+
+
 def _build_core(args: argparse.Namespace):
     if args.backend == "transformers":
         return RepositoryCodingTransformersReasoningCore(
@@ -279,7 +338,12 @@ def _build_core(args: argparse.Namespace):
     )
 
 
-def _runtime(args: argparse.Namespace, core, verification_plan: VerificationPlan):
+def _runtime(
+    args: argparse.Namespace,
+    core,
+    verification_plan: VerificationPlan,
+    browser_inputs=None,
+):
     common = dict(
         verification_plan=verification_plan,
         max_reasoning_steps=args.max_reasoning_steps,
@@ -291,14 +355,28 @@ def _runtime(args: argparse.Namespace, core, verification_plan: VerificationPlan
         max_no_progress_streak=args.max_no_progress_streak,
         max_same_failure_count=args.max_same_failure_count,
     )
-    if args.in_place:
-        return VerifiedRepositoryCodingTaskRuntime(
-            args.workspace,
-            core,
-            args.output,
-            **common,
+    if browser_inputs is not None:
+        application, browser_plan, provider_factory = browser_inputs
+        common.update(
+            application=application,
+            browser_verification_plan=browser_plan,
+            browser_provider_factory=provider_factory,
         )
-    return VerifiedIsolatedRepositoryCodingTaskRuntime(
+        runtime_type = (
+            BrowserVerifiedRepositoryCodingTaskRuntime
+            if args.in_place
+            else BrowserVerifiedIsolatedRepositoryCodingTaskRuntime
+        )
+    else:
+        runtime_type = (
+            VerifiedRepositoryCodingTaskRuntime
+            if args.in_place
+            else VerifiedIsolatedRepositoryCodingTaskRuntime
+        )
+
+    if args.in_place:
+        return runtime_type(args.workspace, core, args.output, **common)
+    return runtime_type(
         args.workspace,
         core,
         args.output,
@@ -314,11 +392,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         verification_plan, verification_commands = _build_verification_inputs(args)
+        browser_inputs = _build_browser_inputs(args)
     except ValueError as exc:
         parser.error(str(exc))
 
     core = _build_core(args)
-    runtime = _runtime(args, core, verification_plan)
+    runtime = _runtime(args, core, verification_plan, browser_inputs)
     try:
         report = runtime.run(
             args.task,
