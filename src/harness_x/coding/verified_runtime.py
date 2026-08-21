@@ -18,10 +18,10 @@ from .isolated_runtime import IsolatedCodingTaskReport
 from .isolation import IsolationResult, IsolationRetention, TaskWorkspaceIsolationManager
 from .repository_runtime import RepositoryAwareAutonomousCodingTaskRuntime
 from .runtime import CodingTaskReport, CodingVerificationResult, _CODING_PERMISSIONS
+from .strict_verification import StrictVerificationPlatform
 from .verification import (
     VerificationCheckStatus,
     VerificationPlan,
-    VerificationPlatform,
     VerificationRequirement,
     VerificationRun,
     command_verification_plan,
@@ -38,7 +38,9 @@ def _canonical(value: object) -> str:
     )
 
 
-def _bounded_projection(platform: VerificationPlatform, *, max_chars: int = 7600) -> dict:
+def _bounded_projection(
+    platform: StrictVerificationPlatform, *, max_chars: int = 7600
+) -> dict:
     projection = copy.deepcopy(platform.context_projection())
     serialized = _canonical(projection)
     if len(serialized) <= max_chars:
@@ -92,7 +94,9 @@ def _bounded_projection(platform: VerificationPlatform, *, max_chars: int = 7600
 class VerificationContextReasoningCore:
     """Add bounded software-owned verification state to model context."""
 
-    def __init__(self, core: ReasoningCore, platform: VerificationPlatform) -> None:
+    def __init__(
+        self, core: ReasoningCore, platform: StrictVerificationPlatform
+    ) -> None:
         self.core = core
         self.platform = platform
 
@@ -161,7 +165,7 @@ class VerifiedRepositoryCodingTaskRuntime(RepositoryAwareAutonomousCodingTaskRun
         max_no_progress_streak: int = 4,
         max_same_failure_count: int = 3,
     ) -> None:
-        platform = VerificationPlatform(workspace_root, verification_plan)
+        platform = StrictVerificationPlatform(workspace_root, verification_plan)
         verification_core = VerificationContextReasoningCore(core, platform)
         super().__init__(
             workspace_root,
@@ -278,10 +282,14 @@ class VerifiedRepositoryCodingTaskRuntime(RepositoryAwareAutonomousCodingTaskRun
             argv = tuple(str(item) for item in evidence.get("argv", ()))
             if not argv:
                 argv = ("harness-x-verification", result.check_id)
-            blocking = result.requirement == VerificationRequirement.REQUIRED and result.status in {
-                VerificationCheckStatus.FAILED,
-                VerificationCheckStatus.ERROR,
-            }
+            blocking = (
+                result.requirement == VerificationRequirement.REQUIRED
+                and result.status
+                in {
+                    VerificationCheckStatus.FAILED,
+                    VerificationCheckStatus.ERROR,
+                }
+            )
             returncode = 1 if blocking else 0
             if blocking and result.status == VerificationCheckStatus.ERROR:
                 returncode = 125
@@ -292,7 +300,9 @@ class VerifiedRepositoryCodingTaskRuntime(RepositoryAwareAutonomousCodingTaskRun
             if isinstance(evidence.get("stderr"), str):
                 stderr = evidence["stderr"]
             if result.failure_code:
-                detail = json.dumps(evidence, sort_keys=True, ensure_ascii=False, default=str)
+                detail = json.dumps(
+                    evidence, sort_keys=True, ensure_ascii=False, default=str
+                )
                 note = f"{result.check_id}:{result.failure_code} {detail[:1800]}"
                 stderr = f"{stderr}\n{note}".strip()
             rows.append(
@@ -304,6 +314,37 @@ class VerifiedRepositoryCodingTaskRuntime(RepositoryAwareAutonomousCodingTaskRun
                 )
             )
         return tuple(rows)
+
+    def _verification_failure_signature(
+        self, verification: tuple[CodingVerificationResult, ...]
+    ) -> str | None:
+        """Use M25's canonical typed failure identity for M22 repetition control."""
+
+        if self.verification_runs:
+            return self.verification_runs[-1].failure_signature
+        return super()._verification_failure_signature(verification)
+
+    def _completion_evidence_refs(
+        self,
+        verification: tuple[CodingVerificationResult, ...],
+        *,
+        context_fingerprint: str | None,
+    ) -> tuple[str, ...]:
+        """Bind completion to the exact typed run, plan, and verified workspace state."""
+
+        if not self.verification_runs:
+            return super()._completion_evidence_refs(
+                verification, context_fingerprint=context_fingerprint
+            )
+        run = self.verification_runs[-1]
+        refs = [
+            f"verification-run:{run.run_fingerprint}",
+            f"verification-plan:{run.plan_fingerprint}",
+            f"workspace:{run.workspace_fingerprint_after}",
+        ]
+        if context_fingerprint:
+            refs.append(f"reasoning:{context_fingerprint}")
+        return tuple(refs)
 
     def _write_verification_artifacts(self) -> None:
         plan = self.verification_platform.plan
@@ -322,7 +363,13 @@ class VerifiedRepositoryCodingTaskRuntime(RepositoryAwareAutonomousCodingTaskRun
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f"{path.name}.tmp")
         temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False, default=str),
+            json.dumps(
+                payload,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            ),
             encoding="utf-8",
         )
         temporary.replace(path)
@@ -401,7 +448,8 @@ class VerifiedIsolatedRepositoryCodingTaskRuntime:
                 manager.finalize(succeeded=False)
             except Exception as finalize_exc:
                 exc.add_note(
-                    f"M25 isolation finalization also failed: {type(finalize_exc).__name__}: {finalize_exc}"
+                    "M25 isolation finalization also failed: "
+                    f"{type(finalize_exc).__name__}: {finalize_exc}"
                 )
             raise
 
