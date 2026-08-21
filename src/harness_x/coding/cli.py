@@ -21,11 +21,11 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
 
 from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
-from .project_memory_runtime import (
-    ProjectMemoryBrowserIsolatedRepositoryCodingTaskRuntime,
-    ProjectMemoryBrowserRepositoryCodingTaskRuntime,
-    ProjectMemoryIsolatedRepositoryCodingTaskRuntime,
-    ProjectMemoryVerifiedRepositoryCodingTaskRuntime,
+from .procedure_reliability_runtime import (
+    ProcedureReliabilityBrowserIsolatedRepositoryCodingTaskRuntime,
+    ProcedureReliabilityBrowserRepositoryCodingTaskRuntime,
+    ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime,
+    ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime,
 )
 from .verification import (
     CommandVerificationCheck,
@@ -42,7 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-code",
         description=(
-            "Run a bounded repository-aware Harness X coding task with durable task and project memory."
+            "Run a bounded repository-aware Harness X coding task with durable task/project "
+            "memory and verified procedure reliability."
         ),
     )
     parser.add_argument("workspace", type=Path)
@@ -112,8 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "Persistent M28 project-memory directory. Defaults to .harness-x/project-memory "
-            "under the source project; isolated tasks share that source-scoped memory."
+            "Persistent M28/M29 project-memory directory. Defaults to .harness-x/project-memory "
+            "under the source project; isolated tasks share that source-scoped memory and "
+            "procedure-reliability ledger."
         ),
     )
     parser.add_argument(
@@ -414,15 +416,15 @@ def _runtime(
             browser_provider_factory=provider_factory,
         )
         runtime_type = (
-            ProjectMemoryBrowserRepositoryCodingTaskRuntime
+            ProcedureReliabilityBrowserRepositoryCodingTaskRuntime
             if args.in_place
-            else ProjectMemoryBrowserIsolatedRepositoryCodingTaskRuntime
+            else ProcedureReliabilityBrowserIsolatedRepositoryCodingTaskRuntime
         )
     else:
         runtime_type = (
-            ProjectMemoryVerifiedRepositoryCodingTaskRuntime
+            ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime
             if args.in_place
-            else ProjectMemoryIsolatedRepositoryCodingTaskRuntime
+            else ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime
         )
 
     if args.in_place:

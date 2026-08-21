@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from harness_x.coding.cli import _runtime, _validate_resume_args, build_parser
-from harness_x.coding.project_memory_runtime import (
-    ProjectMemoryIsolatedRepositoryCodingTaskRuntime,
-    ProjectMemoryVerifiedRepositoryCodingTaskRuntime,
+from harness_x.coding.procedure_reliability_runtime import (
+    ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime,
+    ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime,
 )
 from harness_x.coding.verification import FileExistsVerificationCheck, VerificationPlan
 from harness_x.reasoning import RawReasoningOutput, ReasoningCoreInfo
@@ -17,7 +17,7 @@ class NoopCore:
     @property
     def info(self) -> ReasoningCoreInfo:
         return ReasoningCoreInfo(
-            name="m28-cli-test",
+            name="m29-cli-test",
             version="1",
             model="noop",
             transport="in_process",
@@ -102,7 +102,7 @@ def test_workspace_drift_escape_requires_resume_state() -> None:
         _validate_resume_args(args)
 
 
-def test_runtime_selection_uses_m28_by_default(tmp_path: Path) -> None:
+def test_runtime_selection_uses_m29_by_default(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     workspace.joinpath("README.md").write_text("ok\n", encoding="utf-8")
@@ -123,7 +123,7 @@ def test_runtime_selection_uses_m28_by_default(tmp_path: Path) -> None:
         ]
     )
     isolated = _runtime(isolated_args, NoopCore(), _plan())
-    assert isinstance(isolated, ProjectMemoryIsolatedRepositoryCodingTaskRuntime)
+    assert isinstance(isolated, ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime)
 
     in_place_args = build_parser().parse_args(
         [
@@ -142,4 +142,4 @@ def test_runtime_selection_uses_m28_by_default(tmp_path: Path) -> None:
         ]
     )
     direct = _runtime(in_place_args, NoopCore(), _plan())
-    assert isinstance(direct, ProjectMemoryVerifiedRepositoryCodingTaskRuntime)
+    assert isinstance(direct, ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime)
