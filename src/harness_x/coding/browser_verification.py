@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from pathlib import Path
 from typing import Annotated, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -153,12 +154,14 @@ class BrowserVerificationPlatform:
         self.session = session
         self.plan = plan
         self.latest_run: BrowserVerificationRun | None = None
+        self._run_index = 0
 
     def execute(
         self,
         *,
         code_freshness_check: Callable[[], bool],
     ) -> BrowserVerificationRun:
+        self._run_index += 1
         results: list[BrowserVerificationResult] = []
         blocked = False
         for check in self.plan.checks:
@@ -175,6 +178,11 @@ class BrowserVerificationPlatform:
                 )
                 continue
             result = self._execute_check(check)
+            if result.status in {
+                VerificationCheckStatus.FAILED,
+                VerificationCheckStatus.ERROR,
+            }:
+                result = self._attach_failure_screenshot(result)
             results.append(result)
             if self.plan.fail_fast_required and result.blocking_failure:
                 blocked = True
@@ -227,6 +235,22 @@ class BrowserVerificationPlatform:
         self.latest_run = run
         return run
 
+    def _attach_failure_screenshot(
+        self, result: BrowserVerificationResult
+    ) -> BrowserVerificationResult:
+        evidence = dict(result.evidence)
+        if not self.session.application_state.running:
+            return result
+        try:
+            screenshot = self.session.screenshot(
+                f"verification/run-{self._run_index:03d}/{result.check_id}.png",
+                full_page=True,
+            )
+            evidence["screenshot_path"] = screenshot.path
+        except Exception as exc:
+            evidence["screenshot_error"] = f"{type(exc).__name__}: {exc}"[:1000]
+        return result.model_copy(update={"evidence": evidence})
+
     def _execute_check(self, check: BrowserVerificationCheck) -> BrowserVerificationResult:
         try:
             observation = self.session.open(check.path)
@@ -244,56 +268,22 @@ class BrowserVerificationPlatform:
                     check,
                     observation.aria_snapshot,
                     observation.title,
+                    observation.aria_truncated,
                     check.snapshot_contains,
                     check.snapshot_excludes,
                 )
             if isinstance(check, BrowserConsoleVerificationCheck):
-                forbidden = {item.casefold() for item in check.forbidden_console_levels}
-                console_hits = [
-                    item.model_dump(mode="json")
-                    for item in observation.console_messages
-                    if item.level.casefold() in forbidden
-                ]
-                page_errors = list(observation.page_errors) if check.require_no_page_errors else []
-                passed = not console_hits and not page_errors
-                return BrowserVerificationResult(
-                    check_id=check.check_id,
-                    name=check.name,
-                    kind=check.kind,
-                    requirement=check.requirement,
-                    status=(
-                        VerificationCheckStatus.PASSED
-                        if passed
-                        else VerificationCheckStatus.FAILED
-                    ),
-                    failure_code=(None if passed else "browser_console_or_page_error"),
-                    evidence={
-                        "url": observation.url,
-                        "forbidden_console_messages": console_hits[:30],
-                        "page_errors": page_errors[:30],
-                    },
-                )
+                return self._console_result(check, observation)
             assert isinstance(check, BrowserPageVerificationCheck)
             return self._snapshot_result(
                 check,
                 observation.aria_snapshot,
                 observation.title,
+                observation.aria_truncated,
                 check.snapshot_contains,
                 check.snapshot_excludes,
             )
         except Exception as exc:
-            evidence: dict[str, object] = {
-                "error": f"{type(exc).__name__}: {exc}"[:4000],
-            }
-            try:
-                screenshot = self.session.screenshot(
-                    f"verification/{check.check_id}-failure.png", full_page=True
-                )
-                evidence["screenshot_path"] = screenshot.path
-            except Exception as screenshot_exc:
-                evidence["screenshot_error"] = (
-                    f"{type(screenshot_exc).__name__}: {screenshot_exc}"[:1000]
-                )
             return BrowserVerificationResult(
                 check_id=check.check_id,
                 name=check.name,
@@ -301,14 +291,67 @@ class BrowserVerificationPlatform:
                 requirement=check.requirement,
                 status=VerificationCheckStatus.ERROR,
                 failure_code="browser_check_error",
-                evidence=evidence,
+                evidence={"error": f"{type(exc).__name__}: {exc}"[:4000]},
             )
+
+    @staticmethod
+    def _console_result(check: BrowserConsoleVerificationCheck, observation) -> BrowserVerificationResult:
+        forbidden = {item.casefold() for item in check.forbidden_console_levels}
+        console_hits = [
+            item.model_dump(mode="json")
+            for item in observation.console_messages
+            if item.level.casefold() in forbidden
+        ]
+        page_errors = list(observation.page_errors) if check.require_no_page_errors else []
+        if console_hits or page_errors:
+            return BrowserVerificationResult(
+                check_id=check.check_id,
+                name=check.name,
+                kind=check.kind,
+                requirement=check.requirement,
+                status=VerificationCheckStatus.FAILED,
+                failure_code="browser_console_or_page_error",
+                evidence={
+                    "url": observation.url,
+                    "forbidden_console_messages": console_hits[:30],
+                    "page_errors": page_errors[:30],
+                    "console_truncated": observation.console_truncated,
+                    "page_errors_truncated": observation.page_errors_truncated,
+                },
+            )
+        indeterminate = (
+            bool(forbidden) and observation.console_truncated
+        ) or (check.require_no_page_errors and observation.page_errors_truncated)
+        return BrowserVerificationResult(
+            check_id=check.check_id,
+            name=check.name,
+            kind=check.kind,
+            requirement=check.requirement,
+            status=(
+                VerificationCheckStatus.ERROR
+                if indeterminate
+                else VerificationCheckStatus.PASSED
+            ),
+            failure_code=(
+                "browser_console_evidence_indeterminate_truncated"
+                if indeterminate
+                else None
+            ),
+            evidence={
+                "url": observation.url,
+                "forbidden_console_messages": [],
+                "page_errors": [],
+                "console_truncated": observation.console_truncated,
+                "page_errors_truncated": observation.page_errors_truncated,
+            },
+        )
 
     @staticmethod
     def _snapshot_result(
         check: BrowserPageVerificationCheck | BrowserInteractionVerificationCheck,
         snapshot: str,
         title: str,
+        snapshot_truncated: bool,
         required_fragments: tuple[str, ...],
         forbidden_fragments: tuple[str, ...],
     ) -> BrowserVerificationResult:
@@ -319,29 +362,55 @@ class BrowserVerificationPlatform:
             and check.title_contains is not None
             and check.title_contains not in title
         )
-        passed = not missing and not forbidden and not title_missing
+        evidence = {
+            "title": title,
+            "title_contains": (
+                check.title_contains
+                if isinstance(check, BrowserPageVerificationCheck)
+                else None
+            ),
+            "missing_snapshot_fragments": missing,
+            "forbidden_snapshot_fragments": forbidden,
+            "snapshot_truncated": snapshot_truncated,
+            "snapshot_excerpt": snapshot[:12000],
+        }
+        if title_missing or forbidden:
+            return BrowserVerificationResult(
+                check_id=check.check_id,
+                name=check.name,
+                kind=check.kind,
+                requirement=check.requirement,
+                status=VerificationCheckStatus.FAILED,
+                failure_code="browser_expectation_failed",
+                evidence=evidence,
+            )
+        if snapshot_truncated and (missing or forbidden_fragments):
+            return BrowserVerificationResult(
+                check_id=check.check_id,
+                name=check.name,
+                kind=check.kind,
+                requirement=check.requirement,
+                status=VerificationCheckStatus.ERROR,
+                failure_code="browser_snapshot_indeterminate_truncated",
+                evidence=evidence,
+            )
+        if missing:
+            return BrowserVerificationResult(
+                check_id=check.check_id,
+                name=check.name,
+                kind=check.kind,
+                requirement=check.requirement,
+                status=VerificationCheckStatus.FAILED,
+                failure_code="browser_expectation_failed",
+                evidence=evidence,
+            )
         return BrowserVerificationResult(
             check_id=check.check_id,
             name=check.name,
             kind=check.kind,
             requirement=check.requirement,
-            status=(
-                VerificationCheckStatus.PASSED
-                if passed
-                else VerificationCheckStatus.FAILED
-            ),
-            failure_code=(None if passed else "browser_expectation_failed"),
-            evidence={
-                "title": title,
-                "title_contains": (
-                    check.title_contains
-                    if isinstance(check, BrowserPageVerificationCheck)
-                    else None
-                ),
-                "missing_snapshot_fragments": missing,
-                "forbidden_snapshot_fragments": forbidden,
-                "snapshot_excerpt": snapshot[:12000],
-            },
+            status=VerificationCheckStatus.PASSED,
+            evidence=evidence,
         )
 
     def context_projection(self) -> dict[str, object]:
@@ -365,15 +434,16 @@ class BrowserVerificationPlatform:
         }
 
 
-def load_browser_verification_plan(path: str) -> BrowserVerificationPlan:
+def load_browser_verification_plan(path: str | Path) -> BrowserVerificationPlan:
+    source = Path(path)
     try:
-        text = open(path, "r", encoding="utf-8").read()
+        text = source.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ValueError(f"cannot read browser verification plan {path}: {exc}") from exc
+        raise ValueError(f"cannot read browser verification plan {source}: {exc}") from exc
     try:
         return BrowserVerificationPlan.model_validate_json(text)
     except Exception as exc:
-        raise ValueError(f"invalid browser verification plan {path}: {exc}") from exc
+        raise ValueError(f"invalid browser verification plan {source}: {exc}") from exc
 
 
 def parse_browser_verification_check(payload: dict[str, object]) -> BrowserVerificationCheck:
