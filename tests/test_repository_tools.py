@@ -14,6 +14,7 @@ from harness_x.repository import (
     SymbolSearchResult,
 )
 from harness_x.tools.coding_repository import build_repository_coding_registry
+from harness_x.tools.patch_v2 import WorkspacePatchV2Input
 from harness_x.tools.repository import (
     FileOutlineInput,
     GitDiffInput,
@@ -21,7 +22,6 @@ from harness_x.tools.repository import (
     RepositoryMapInput,
     SymbolReferencesInput,
     SymbolSearchInput,
-    WorkspacePatchRangeInput,
 )
 
 
@@ -71,7 +71,7 @@ class FakeSemanticProvider:
         )
 
 
-def test_repository_registry_extends_coding_tools_without_replacing_them(tmp_path: Path) -> None:
+def test_repository_registry_extends_coding_tools_and_upgrades_patch(tmp_path: Path) -> None:
     _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     service = RepositoryIntelligenceService(tmp_path)
     registry = build_repository_coding_registry(
@@ -97,9 +97,10 @@ def test_repository_registry_extends_coding_tools_without_replacing_them(tmp_pat
         "symbol_references",
         "git_status",
         "git_diff",
-        "workspace_patch_range",
     } <= names
-    assert len(names) == 14
+    assert "workspace_patch_range" not in names
+    assert len(names) == 13
+    assert registry.require("workspace_patch").spec.version == "workspace-patch-v2"
 
     search_def = registry.require("symbol_search")
     answer = search_def.handler(SymbolSearchInput(query="semantic"))
@@ -133,14 +134,31 @@ def test_repository_map_and_file_outline_are_bounded_structured_reads(tmp_path: 
         registry.require("file_outline").handler(FileOutlineInput(path="../escape.py"))
 
 
-def test_hash_guarded_range_patch_refuses_stale_file_and_preserves_line_boundary(tmp_path: Path) -> None:
+def test_workspace_patch_v2_preserves_exact_mode(tmp_path: Path) -> None:
+    target = _write(tmp_path, "app.py", "return a - b\n")
+    definition = build_repository_coding_registry(tmp_path).require("workspace_patch")
+
+    output = definition.handler(
+        WorkspacePatchV2Input(
+            mode="exact",
+            path="app.py",
+            old_text="a - b",
+            new_text="a + b",
+        )
+    )
+    assert output.mode == "exact"
+    assert output.replacements == 1
+    assert target.read_text(encoding="utf-8") == "return a + b\n"
+
+
+def test_hash_guarded_patch_range_refuses_stale_file_and_preserves_line_boundary(tmp_path: Path) -> None:
     target = _write(tmp_path, "app.py", "alpha\nbeta\ngamma\n")
-    registry = build_repository_coding_registry(tmp_path)
-    definition = registry.require("workspace_patch_range")
+    definition = build_repository_coding_registry(tmp_path).require("workspace_patch")
     before = hashlib.sha256(target.read_bytes()).hexdigest()
 
     output = definition.handler(
-        WorkspacePatchRangeInput(
+        WorkspacePatchV2Input(
+            mode="range",
             path="app.py",
             start_line=2,
             end_line=2,
@@ -148,13 +166,15 @@ def test_hash_guarded_range_patch_refuses_stale_file_and_preserves_line_boundary
             replacement="BETA",
         )
     )
+    assert output.mode == "range"
     assert target.read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
     assert output.sha256_before == before
     assert output.sha256_after != before
 
     with pytest.raises(ValueError, match="stale file"):
         definition.handler(
-            WorkspacePatchRangeInput(
+            WorkspacePatchV2Input(
+                mode="range",
                 path="app.py",
                 start_line=2,
                 end_line=2,
