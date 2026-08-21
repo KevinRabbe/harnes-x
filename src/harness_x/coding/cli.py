@@ -18,9 +18,16 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
     RepositoryCodingTransformersReasoningCore,
 )
 
-from .isolated_runtime import IsolatedRepositoryCodingTaskRuntime
 from .isolation import IsolationRetention
-from .repository_runtime import RepositoryAwareAutonomousCodingTaskRuntime
+from .verification import (
+    CommandVerificationCheck,
+    VerificationPlan,
+    load_verification_plan,
+)
+from .verified_runtime import (
+    VerifiedIsolatedRepositoryCodingTaskRuntime,
+    VerifiedRepositoryCodingTaskRuntime,
+)
 
 
 _DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
@@ -39,10 +46,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--verify",
         action="append",
-        required=True,
+        default=[],
         help=(
-            "Verification command; repeat for multiple commands "
-            '(for example: --verify "npm run build")'
+            "Required verification command; repeat for multiple commands. Commands are "
+            "compiled into the M25 typed verification plan."
+        ),
+    )
+    parser.add_argument(
+        "--verification-plan",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON VerificationPlan with typed required/advisory checks and "
+            "changed-file targeting. Repeatable --verify commands are appended as required "
+            "command checks when both inputs are supplied."
         ),
     )
     parser.add_argument(
@@ -163,14 +180,82 @@ def _split_command(command: str) -> tuple[str, ...]:
     parts = tuple(shlex.split(command, posix=os.name != "nt"))
     if not parts:
         raise ValueError("verification command cannot be empty")
-    # A verifier belongs to the Harness X runtime environment. On Windows,
-    # CreateProcess can otherwise resolve a bare `python` to the system install even
-    # when harness-x-code itself is running from an activated virtual environment.
-    # Preserve explicit interpreter paths, but bind ordinary aliases to the exact
-    # interpreter executing Harness X so installed pytest/lint dependencies match.
-    if parts[0].casefold() in _PYTHON_ALIASES:
-        return (sys.executable, *parts[1:])
-    return parts
+    return _normalize_python_argv(parts)
+
+
+def _normalize_python_argv(argv: tuple[str, ...]) -> tuple[str, ...]:
+    if argv and Path(argv[0]).name.casefold() in _PYTHON_ALIASES:
+        return (sys.executable, *argv[1:])
+    return argv
+
+
+def _normalize_plan_commands(plan: VerificationPlan) -> VerificationPlan:
+    checks = []
+    changed = False
+    for check in plan.checks:
+        if isinstance(check, CommandVerificationCheck):
+            argv = _normalize_python_argv(check.argv)
+            if argv != check.argv:
+                check = check.model_copy(update={"argv": argv})
+                changed = True
+        checks.append(check)
+    if not changed:
+        return plan
+    return VerificationPlan(
+        name=plan.name,
+        checks=tuple(checks),
+        fail_fast_required=plan.fail_fast_required,
+    )
+
+
+def _build_verification_inputs(
+    args: argparse.Namespace,
+) -> tuple[VerificationPlan, tuple[tuple[str, ...], ...]]:
+    commands = tuple(_split_command(item) for item in args.verify)
+    plan = (
+        _normalize_plan_commands(load_verification_plan(args.verification_plan))
+        if args.verification_plan is not None
+        else None
+    )
+    if plan is None and not commands:
+        raise ValueError("provide at least one --verify command or --verification-plan")
+
+    if plan is None:
+        checks = tuple(
+            CommandVerificationCheck(
+                check_id=f"command_{index:03d}",
+                name=" ".join(command),
+                argv=command,
+            )
+            for index, command in enumerate(commands, 1)
+        )
+        return VerificationPlan(checks=checks), commands
+
+    if not commands:
+        return plan, commands
+
+    used = {item.check_id for item in plan.checks}
+    appended = []
+    next_index = 1
+    for command in commands:
+        while f"cli_command_{next_index:03d}" in used:
+            next_index += 1
+        check_id = f"cli_command_{next_index:03d}"
+        used.add(check_id)
+        appended.append(
+            CommandVerificationCheck(
+                check_id=check_id,
+                name=" ".join(command),
+                argv=command,
+            )
+        )
+        next_index += 1
+    merged = VerificationPlan(
+        name=plan.name,
+        checks=(*plan.checks, *appended),
+        fail_fast_required=plan.fail_fast_required,
+    )
+    return merged, commands
 
 
 def _build_core(args: argparse.Namespace):
@@ -194,8 +279,9 @@ def _build_core(args: argparse.Namespace):
     )
 
 
-def _runtime(args: argparse.Namespace, core):
+def _runtime(args: argparse.Namespace, core, verification_plan: VerificationPlan):
     common = dict(
+        verification_plan=verification_plan,
         max_reasoning_steps=args.max_reasoning_steps,
         max_tool_actions=args.max_tool_actions,
         max_output_tokens=args.max_output_tokens,
@@ -206,13 +292,13 @@ def _runtime(args: argparse.Namespace, core):
         max_same_failure_count=args.max_same_failure_count,
     )
     if args.in_place:
-        return RepositoryAwareAutonomousCodingTaskRuntime(
+        return VerifiedRepositoryCodingTaskRuntime(
             args.workspace,
             core,
             args.output,
             **common,
         )
-    return IsolatedRepositoryCodingTaskRuntime(
+    return VerifiedIsolatedRepositoryCodingTaskRuntime(
         args.workspace,
         core,
         args.output,
@@ -227,12 +313,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        verification_commands = tuple(_split_command(item) for item in args.verify)
+        verification_plan, verification_commands = _build_verification_inputs(args)
     except ValueError as exc:
         parser.error(str(exc))
 
     core = _build_core(args)
-    runtime = _runtime(args, core)
+    runtime = _runtime(args, core, verification_plan)
     try:
         report = runtime.run(
             args.task,
