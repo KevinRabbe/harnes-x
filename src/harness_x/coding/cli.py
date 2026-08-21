@@ -18,6 +18,8 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
     RepositoryCodingTransformersReasoningCore,
 )
 
+from .isolated_runtime import IsolatedRepositoryCodingTaskRuntime
+from .isolation import IsolationRetention
 from .repository_runtime import RepositoryAwareAutonomousCodingTaskRuntime
 
 
@@ -28,7 +30,9 @@ _PYTHON_ALIASES = frozenset({"python", "python.exe", "python3", "python3.exe"})
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-code",
-        description="Run a bounded repository-aware Harness X coding task against a local workspace.",
+        description=(
+            "Run a bounded repository-aware Harness X coding task in an isolated task workspace."
+        ),
     )
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--task", required=True)
@@ -115,6 +119,41 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help=(
+            "Disable M24 task-workspace isolation and operate directly on the supplied "
+            "workspace. This is an explicit compatibility/debug escape hatch."
+        ),
+    )
+    parser.add_argument(
+        "--isolation-root",
+        type=Path,
+        default=None,
+        help=(
+            "Parent directory for isolated task workspaces. Defaults to the OS temporary "
+            "directory outside the source checkout."
+        ),
+    )
+    parser.add_argument(
+        "--retain-workspace",
+        choices=tuple(item.value for item in IsolationRetention),
+        default=IsolationRetention.ALWAYS.value,
+        help=(
+            "Isolated workspace retention policy. Changes are exported to the output "
+            "directory before cleanup regardless of this setting."
+        ),
+    )
+    parser.add_argument(
+        "--isolation-copy-path",
+        action="append",
+        default=[],
+        help=(
+            "Copy an ignored/support path from a Git source into the isolated workspace, "
+            "for example --isolation-copy-path node_modules. Repeat as needed."
+        ),
+    )
+    parser.add_argument(
         "--output", type=Path, default=Path(".harness-x/coding-run")
     )
     return parser
@@ -155,19 +194,8 @@ def _build_core(args: argparse.Namespace):
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        verification_commands = tuple(_split_command(item) for item in args.verify)
-    except ValueError as exc:
-        parser.error(str(exc))
-
-    core = _build_core(args)
-    runtime = RepositoryAwareAutonomousCodingTaskRuntime(
-        args.workspace,
-        core,
-        args.output,
+def _runtime(args: argparse.Namespace, core):
+    common = dict(
         max_reasoning_steps=args.max_reasoning_steps,
         max_tool_actions=args.max_tool_actions,
         max_output_tokens=args.max_output_tokens,
@@ -177,6 +205,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_no_progress_streak=args.max_no_progress_streak,
         max_same_failure_count=args.max_same_failure_count,
     )
+    if args.in_place:
+        return RepositoryAwareAutonomousCodingTaskRuntime(
+            args.workspace,
+            core,
+            args.output,
+            **common,
+        )
+    return IsolatedRepositoryCodingTaskRuntime(
+        args.workspace,
+        core,
+        args.output,
+        isolation_root=args.isolation_root,
+        retention=IsolationRetention(args.retain_workspace),
+        support_paths=tuple(args.isolation_copy_path),
+        **common,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        verification_commands = tuple(_split_command(item) for item in args.verify)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    core = _build_core(args)
+    runtime = _runtime(args, core)
     try:
         report = runtime.run(
             args.task,
