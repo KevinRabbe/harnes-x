@@ -18,12 +18,36 @@ from .repository_runtime import (
     RepositoryContextReasoningCore,
 )
 from .runtime import CodingTaskReport, CodingTaskRuntime, CodingVerificationResult
+from .verification import (
+    CommandVerificationCheck,
+    FileContainsVerificationCheck,
+    FileExistsVerificationCheck,
+    VerificationCheckResult,
+    VerificationCheckStatus,
+    VerificationPlan,
+    VerificationPlatform,
+    VerificationRequirement,
+    VerificationRun,
+    VerificationVerdict,
+    command_verification_plan,
+    load_verification_plan,
+)
+from .verified_runtime import (
+    VerificationContextReasoningCore,
+    VerifiedCodingTaskReport,
+    VerifiedIsolatedCodingTaskReport,
+    VerifiedIsolatedRepositoryCodingTaskRuntime,
+    VerifiedRepositoryCodingTaskRuntime,
+)
 
 __all__ = [
     "AutonomousCodingTaskRuntime",
     "CodingTaskReport",
     "CodingTaskRuntime",
     "CodingVerificationResult",
+    "CommandVerificationCheck",
+    "FileContainsVerificationCheck",
+    "FileExistsVerificationCheck",
     "IsolatedCodingTaskReport",
     "IsolatedRepositoryCodingTaskRuntime",
     "IsolationResult",
@@ -34,4 +58,18 @@ __all__ = [
     "SourceWorkspaceIdentity",
     "TaskWorkspaceChange",
     "TaskWorkspaceIsolationManager",
+    "VerificationCheckResult",
+    "VerificationCheckStatus",
+    "VerificationContextReasoningCore",
+    "VerificationPlan",
+    "VerificationPlatform",
+    "VerificationRequirement",
+    "VerificationRun",
+    "VerificationVerdict",
+    "VerifiedCodingTaskReport",
+    "VerifiedIsolatedCodingTaskReport",
+    "VerifiedIsolatedRepositoryCodingTaskRuntime",
+    "VerifiedRepositoryCodingTaskRuntime",
+    "command_verification_plan",
+    "load_verification_plan",
 ]
