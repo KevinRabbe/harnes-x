@@ -193,6 +193,6 @@ def test_coding_transformers_core_is_lazy_and_declares_coding_identity() -> None
         TransformersLocalSettings(model="Qwen/Qwen3-4B-Instruct-2507")
     )
     assert core.info.name == "transformers_local_coding"
-    assert core.info.version == "transformers-local-coding-v3"
+    assert core.info.version == "transformers-local-coding-v4"
     assert core.info.transport == "in_process_transformers"
     assert core.info.model_inference is True

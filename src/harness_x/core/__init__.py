@@ -29,7 +29,18 @@ from .errors import (
     TraceError,
 )
 from .events import EVENT_SCHEMA_VERSION, EventType, TraceEvent
-from .ids import CandidateId, EventId, GoalId, MemoryId, RoutineId, SystemVersion, TaskId, TraceId
+from .ids import (
+    CandidateId,
+    CodingPlanId,
+    CommitmentId,
+    EventId,
+    GoalId,
+    MemoryId,
+    RoutineId,
+    SystemVersion,
+    TaskId,
+    TraceId,
+)
 from .provenance import Provenance, SourceKind, VerificationState
 
 __all__ = [
@@ -38,6 +49,8 @@ __all__ = [
     "CandidateId",
     "CheckpointError",
     "Clock",
+    "CodingPlanId",
+    "CommitmentId",
     "ComputeBudget",
     "EVENT_SCHEMA_VERSION",
     "ErrorCode",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,6 +61,11 @@ class CodingTaskReport(BaseModel):
     verification: tuple[CodingVerificationResult, ...] = ()
     final_model_status: str | None = None
     failure_reason: str | None = None
+    control_plan_path: str | None = None
+    final_coding_phase: str | None = None
+    pending_commitments: int = Field(default=0, ge=0)
+    coding_progress: dict[str, Any] = Field(default_factory=dict)
+    horizon_mode: str | None = None
 
 
 class CodingTaskRuntime:

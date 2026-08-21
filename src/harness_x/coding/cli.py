@@ -84,7 +84,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-idle-turns",
         type=int,
         default=3,
-        help="Fail after this many consecutive no-action continue turns.",
+        help=(
+            "Protocol fallback: fail after this many consecutive no-action continue turns."
+        ),
+    )
+    parser.add_argument(
+        "--max-inspection-streak",
+        type=int,
+        default=6,
+        help=(
+            "Controller threshold for consecutive inspection actions before an "
+            "implementation intervention."
+        ),
+    )
+    parser.add_argument(
+        "--max-no-progress-streak",
+        type=int,
+        default=4,
+        help=(
+            "Controller threshold for consecutive steps producing no new evidence or "
+            "workspace state change."
+        ),
+    )
+    parser.add_argument(
+        "--max-same-failure-count",
+        type=int,
+        default=3,
+        help=(
+            "Controller threshold for the same verification failure before replanning."
+        ),
     )
     parser.add_argument(
         "--output", type=Path, default=Path(".harness-x/coding-run")
@@ -145,6 +173,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_output_tokens=args.max_output_tokens,
         baseline_verification=not args.no_baseline_verify,
         max_idle_turns=args.max_idle_turns,
+        max_inspection_streak=args.max_inspection_streak,
+        max_no_progress_streak=args.max_no_progress_streak,
+        max_same_failure_count=args.max_same_failure_count,
     )
     try:
         report = runtime.run(

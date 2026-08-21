@@ -18,12 +18,32 @@ def test_coding_cli_exposes_bounded_runtime_options() -> None:
             "12",
             "--max-tool-actions",
             "20",
+            "--max-inspection-streak",
+            "5",
+            "--max-no-progress-streak",
+            "4",
+            "--max-same-failure-count",
+            "2",
         ]
     )
     assert args.task == "Build the site"
     assert args.verify == ["npm run build"]
     assert args.max_reasoning_steps == 12
     assert args.max_tool_actions == 20
+    assert args.max_inspection_streak == 5
+    assert args.max_no_progress_streak == 4
+    assert args.max_same_failure_count == 2
+
+
+def test_coding_cli_controller_defaults() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [".", "--task", "Build the site", "--verify", "npm run build"]
+    )
+    assert args.max_inspection_streak == 6
+    assert args.max_no_progress_streak == 4
+    assert args.max_same_failure_count == 3
+    assert args.max_idle_turns == 3
 
 
 def test_split_command_preserves_non_python_argv_shape() -> None:
