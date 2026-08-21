@@ -15,6 +15,7 @@ from harness_x.browser import (
 )
 from harness_x.reasoning import RawReasoningOutput, ReasoningCore, ReasoningCoreInfo
 from harness_x.reasoning.context_builder import ContextBuildResult
+from harness_x.repository import RepositorySemanticProvider
 from harness_x.tools import ToolSpec
 from harness_x.tools.coding_browser import build_browser_coding_registry
 
@@ -25,13 +26,15 @@ from .browser_verification import (
 )
 from .isolation import IsolationResult, IsolationRetention, TaskWorkspaceIsolationManager
 from .runtime import CodingVerificationResult
-from .verification import VerificationCheckStatus, VerificationRequirement, VerificationVerdict
+from .verification import (
+    VerificationCheckStatus,
+    VerificationPlan,
+    VerificationVerdict,
+)
 from .verified_runtime import (
     VerifiedCodingTaskReport,
-    VerifiedIsolatedCodingTaskReport,
     VerifiedRepositoryCodingTaskRuntime,
 )
-from .verification import VerificationPlan
 
 
 def _canonical(value: object) -> str:
@@ -156,7 +159,7 @@ class BrowserVerifiedRepositoryCodingTaskRuntime(VerifiedRepositoryCodingTaskRun
         browser_verification_plan: BrowserVerificationPlan,
         browser_provider_factory: BrowserProviderFactory,
         verification_plan: VerificationPlan | None = None,
-        semantic_provider=None,
+        semantic_provider: RepositorySemanticProvider | None = None,
         max_reasoning_steps: int = 32,
         max_tool_actions: int = 48,
         max_output_tokens: int = 65536,
@@ -206,6 +209,7 @@ class BrowserVerifiedRepositoryCodingTaskRuntime(VerifiedRepositoryCodingTaskRun
         self.browser_verification = browser_verification
         self.browser_context_core = browser_context_core
         self.browser_verification_runs: list[BrowserVerificationRun] = []
+        self._browser_run_for_current_verification: BrowserVerificationRun | None = None
         self.semantic_provider = semantic_provider
         registry = build_browser_coding_registry(
             workspace,
@@ -257,33 +261,20 @@ class BrowserVerifiedRepositoryCodingTaskRuntime(VerifiedRepositoryCodingTaskRun
         )
 
     def _verify(self, commands, executor, recorder, task_id):
+        self._browser_run_for_current_verification = None
         code_rows = super()._verify(commands, executor, recorder, task_id)
         code_run = self.verification_runs[-1]
         if code_run.verdict != VerificationVerdict.PASS:
             return code_rows
 
-        self._reset_browser_client_state()
+        self.browser_session.reset_browser_client(purpose="verification")
         browser_run = self.browser_verification.execute(
             code_freshness_check=self.verification_platform.latest_is_fresh,
         )
+        self._browser_run_for_current_verification = browser_run
         self.browser_verification_runs.append(browser_run)
         self._write_browser_artifacts()
         return (*code_rows, *self._legacy_browser_projection(browser_run))
-
-    def _reset_browser_client_state(self) -> None:
-        # Recreate only browser client state, not the software-owned app process. This
-        # prevents model-created cookies/localStorage/page state from being accepted as
-        # independent browser verification evidence.
-        session = self.browser_session
-        provider = session._provider
-        try:
-            provider.close()
-        finally:
-            session._provider = session.provider_factory(
-                session.application.base_url,
-                session.artifact_root / "browser-verifier",
-            )
-            session.latest_observation = None
 
     @staticmethod
     def _legacy_browser_projection(
@@ -316,10 +307,9 @@ class BrowserVerifiedRepositoryCodingTaskRuntime(VerifiedRepositoryCodingTaskRun
     def _verification_failure_signature(
         self, verification: tuple[CodingVerificationResult, ...]
     ) -> str | None:
-        if self.browser_verification_runs:
-            latest_browser = self.browser_verification_runs[-1]
-            if latest_browser.verdict == VerificationVerdict.FAIL:
-                return f"browser:{latest_browser.failure_signature}"
+        current = self._browser_run_for_current_verification
+        if current is not None and current.verdict == VerificationVerdict.FAIL:
+            return f"browser:{current.failure_signature}"
         return super()._verification_failure_signature(verification)
 
     def _completion_evidence_refs(
@@ -334,15 +324,14 @@ class BrowserVerifiedRepositoryCodingTaskRuntime(VerifiedRepositoryCodingTaskRun
                 context_fingerprint=context_fingerprint,
             )
         )
-        if self.browser_verification_runs:
-            run = self.browser_verification_runs[-1]
-            if run.verdict == VerificationVerdict.PASS:
-                refs.extend(
-                    [
-                        f"browser-verification-run:{run.run_fingerprint}",
-                        f"browser-verification-plan:{run.plan_fingerprint}",
-                    ]
-                )
+        current = self._browser_run_for_current_verification
+        if current is not None and current.verdict == VerificationVerdict.PASS:
+            refs.extend(
+                [
+                    f"browser-verification-run:{current.run_fingerprint}",
+                    f"browser-verification-plan:{current.plan_fingerprint}",
+                ]
+            )
         return tuple(refs)
 
     def _write_browser_artifacts(self) -> None:
