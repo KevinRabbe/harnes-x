@@ -150,17 +150,19 @@ def _run_bytes(
     input_data: bytes | None = None,
     timeout: float = 120.0,
 ) -> subprocess.CompletedProcess[bytes]:
+    kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "capture_output": True,
+        "shell": False,
+        "timeout": timeout,
+        "check": False,
+    }
+    if input_data is None:
+        kwargs["stdin"] = subprocess.DEVNULL
+    else:
+        kwargs["input"] = input_data
     try:
-        completed = subprocess.run(
-            list(argv),
-            cwd=cwd,
-            input=input_data,
-            stdin=(subprocess.PIPE if input_data is not None else subprocess.DEVNULL),
-            capture_output=True,
-            shell=False,
-            timeout=timeout,
-            check=False,
-        )
+        completed = subprocess.run(list(argv), **kwargs)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"isolation command failed to execute: {exc}") from exc
     if completed.returncode != 0:
@@ -189,10 +191,6 @@ def _inside(root: Path, relative: str) -> Path:
     except ValueError as exc:
         raise ValueError("support path escapes the source workspace") from exc
     return target
-
-
-def _relative(root: Path, path: Path) -> str:
-    return path.relative_to(root).as_posix()
 
 
 def _copy_path(source_root: Path, workspace_root: Path, relative: str) -> None:
@@ -224,7 +222,6 @@ def _iter_content_files(root: Path):
             if any(part in _CHANGE_IGNORED_NAMES for part in relative.parts):
                 continue
             if path.is_symlink():
-                # Hash the link target text instead of following an arbitrary external target.
                 payload = os.readlink(path).encode("utf-8", errors="surrogateescape")
                 yield relative.as_posix(), WorkspaceFileState(
                     sha256=_sha256_bytes(b"symlink\0" + payload),
@@ -399,7 +396,13 @@ class TaskWorkspaceIsolationManager:
         self.isolation_root = base
         self.isolation_root.mkdir(parents=True, exist_ok=True)
         self.retention = IsolationRetention(retention)
-        normalized = tuple(dict.fromkeys(item.strip().replace("\\", "/") for item in support_paths if item.strip()))
+        normalized = tuple(
+            dict.fromkeys(
+                item.strip().replace("\\", "/")
+                for item in support_paths
+                if item.strip()
+            )
+        )
         for item in normalized:
             _inside(self.source_root, item)
         self.support_paths = normalized
@@ -430,7 +433,10 @@ class TaskWorkspaceIsolationManager:
             retention=self.retention,
             baseline_file_count=len(prepared.baseline),
         )
-        self._write_json(self.artifact_root / "isolation-start.json", start.model_dump(mode="json"))
+        self._write_json(
+            self.artifact_root / "isolation-start.json",
+            start.model_dump(mode="json"),
+        )
         self._prepared = prepared
         return prepared
 
@@ -440,7 +446,9 @@ class TaskWorkspaceIsolationManager:
         session_root: Path,
         workspace_root: Path,
     ) -> PreparedTaskWorkspace:
-        before, initial_patch, untracked = _git_source_identity(self.source_root, self.support_paths)
+        before, initial_patch, untracked = _git_source_identity(
+            self.source_root, self.support_paths
+        )
         assert before.head_sha is not None
         _run_bytes(
             (
@@ -469,7 +477,12 @@ class TaskWorkspaceIsolationManager:
             destination = workspace_root / Path(relative)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
-                shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=False)
+                shutil.copytree(
+                    source,
+                    destination,
+                    dirs_exist_ok=True,
+                    symlinks=False,
+                )
             else:
                 shutil.copy2(source, destination, follow_symlinks=True)
         for relative in self.support_paths:
@@ -477,7 +490,9 @@ class TaskWorkspaceIsolationManager:
 
         after, _, _ = _git_source_identity(self.source_root, self.support_paths)
         if after.fingerprint != before.fingerprint:
-            raise RuntimeError("source workspace changed while isolation snapshot was being prepared")
+            raise RuntimeError(
+                "source workspace changed while isolation snapshot was being prepared"
+            )
         baseline = _content_manifest(workspace_root)
         return PreparedTaskWorkspace(
             session_id=session_id,
@@ -504,10 +519,14 @@ class TaskWorkspaceIsolationManager:
         )
         source_after = _non_git_identity(self.source_root)
         if source_after.fingerprint != before.fingerprint:
-            raise RuntimeError("source workspace changed while isolation snapshot was being prepared")
+            raise RuntimeError(
+                "source workspace changed while isolation snapshot was being prepared"
+            )
         baseline = _content_manifest(workspace_root)
         if _manifest_fingerprint(baseline) != before.fingerprint:
-            raise RuntimeError("isolated filesystem snapshot does not match the source fingerprint")
+            raise RuntimeError(
+                "isolated filesystem snapshot does not match the source fingerprint"
+            )
         return PreparedTaskWorkspace(
             session_id=session_id,
             strategy=IsolationStrategy.SNAPSHOT_COPY,
@@ -536,8 +555,6 @@ class TaskWorkspaceIsolationManager:
             destination = changed_files_root / Path(change.path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if source.is_symlink():
-                # Export link content as a dereferenced regular file when possible; the
-                # bundle itself must not create a path back into the isolated workspace.
                 resolved = source.resolve()
                 if resolved.is_file():
                     shutil.copy2(resolved, destination)
@@ -553,7 +570,13 @@ class TaskWorkspaceIsolationManager:
             initial_patch_path.write_bytes(prepared.initial_git_patch)
             final_patch_path = self.artifact_root / "isolated-final.patch"
             final_patch_path.write_bytes(
-                _git_bytes(prepared.workspace_root, "diff", "--binary", "HEAD", "--")
+                _git_bytes(
+                    prepared.workspace_root,
+                    "diff",
+                    "--binary",
+                    "HEAD",
+                    "--",
+                )
             )
 
         should_retain = self.retention == IsolationRetention.ALWAYS or (
@@ -570,7 +593,9 @@ class TaskWorkspaceIsolationManager:
             changes=changes,
             change_manifest_path=str(manifest_path),
             changed_files_root=str(changed_files_root),
-            initial_git_patch_path=(str(initial_patch_path) if initial_patch_path else None),
+            initial_git_patch_path=(
+                str(initial_patch_path) if initial_patch_path else None
+            ),
             final_git_patch_path=(str(final_patch_path) if final_patch_path else None),
         )
         self._write_json(manifest_path, result.model_dump(mode="json"))
