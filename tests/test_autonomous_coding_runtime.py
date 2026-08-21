@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -102,7 +103,15 @@ def test_no_action_after_mutation_triggers_controller_verification(tmp_path: Pat
     # baseline + controller verification; the final complete turn reuses fresh evidence
     assert report.verification_attempts == 2
     assert report.tool_actions == 3
+    assert report.final_coding_phase == "complete"
+    assert report.pending_commitments == 0
+    assert report.coding_progress["mutation_actions"] == 1
     assert (workspace / "result.txt").read_text(encoding="utf-8") == "ok"
+
+    assert report.control_plan_path is not None
+    plan = json.loads(Path(report.control_plan_path).read_text(encoding="utf-8"))
+    assert plan["phase"] == "complete"
+    assert plan["commitments"][0]["status"] == "satisfied"
 
 
 def test_repeated_no_action_continue_fails_early_as_stalled(tmp_path: Path) -> None:
@@ -131,7 +140,14 @@ def test_repeated_no_action_continue_fails_early_as_stalled(tmp_path: Path) -> N
     assert report.succeeded is False
     assert report.reasoning_steps == 3
     assert report.failure_reason == "coding_model_stalled_without_action"
+    assert report.final_coding_phase == "blocked"
+    assert report.pending_commitments == 1
     assert any("coding_control_directive" in context for context in core.contexts[1:])
+
+    assert report.control_plan_path is not None
+    plan = json.loads(Path(report.control_plan_path).read_text(encoding="utf-8"))
+    assert plan["phase"] == "blocked"
+    assert plan["commitments"][0]["status"] == "blocked"
 
 
 def test_budget_end_preserves_verification_of_final_mutation(tmp_path: Path) -> None:
@@ -166,3 +182,80 @@ def test_budget_end_preserves_verification_of_final_mutation(tmp_path: Path) -> 
     assert report.verification_attempts == 1
     assert report.verification[0].returncode == 0
     assert report.failure_reason == "verification_passed_but_completion_unconfirmed"
+    assert report.final_coding_phase == "blocked"
+
+
+def test_analysis_treadmill_control_state_reaches_live_reasoning_loop(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for name in ("a.py", "b.py", "c.py"):
+        (workspace / name).write_text(f"# {name}\n", encoding="utf-8")
+
+    core = SequenceReasoningCore(
+        [
+            RawReasoningOutput(
+                status="continue",
+                actions=(
+                    RawActionProposal(
+                        tool_name="workspace_read",
+                        arguments={"path": "a.py"},
+                    ),
+                ),
+            ),
+            RawReasoningOutput(
+                status="continue",
+                actions=(
+                    RawActionProposal(
+                        tool_name="workspace_read",
+                        arguments={"path": "b.py"},
+                    ),
+                ),
+            ),
+            RawReasoningOutput(
+                status="continue",
+                actions=(
+                    RawActionProposal(
+                        tool_name="workspace_read",
+                        arguments={"path": "c.py"},
+                    ),
+                ),
+            ),
+            RawReasoningOutput(
+                status="continue",
+                actions=(
+                    RawActionProposal(
+                        tool_name="workspace_write",
+                        arguments={"path": "result.txt", "content": "ok"},
+                    ),
+                ),
+            ),
+            RawReasoningOutput(status="continue"),
+            RawReasoningOutput(status="complete"),
+        ]
+    )
+
+    report = AutonomousCodingTaskRuntime(
+        workspace,
+        core,
+        tmp_path / "run",
+        max_reasoning_steps=12,
+        max_tool_actions=20,
+        max_inspection_streak=3,
+        baseline_verification=False,
+    ).run(
+        "Inspect enough to understand the task, then create result.txt containing ok",
+        verification_commands=(_verify_result_file(),),
+    )
+
+    assert report.succeeded is True
+    assert report.coding_progress["inspection_actions"] == 3
+    assert report.coding_progress["mutation_actions"] == 1
+    assert report.final_coding_phase == "complete"
+
+    # The fourth model turn happens after three consecutive inspections. The software
+    # control plane must have switched to IMPLEMENT and surfaced the intervention in
+    # authoritative active_state before that model call.
+    assert '"phase":"implement"' in core.contexts[3]
+    assert '"force_implementation"' in core.contexts[3]
