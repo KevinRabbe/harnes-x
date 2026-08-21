@@ -80,6 +80,14 @@ class ApplicationBrowserSession:
         state = self._manager.state()
         if state.running:
             return state
+        if state.pid is not None:
+            # A previously running process exited. Discard its completed Popen owner so
+            # this attempt can immediately launch a fresh server rather than spending one
+            # browser turn on an artificial "already started" error.
+            try:
+                self._manager.close()
+            finally:
+                self._manager = self._new_manager()
         try:
             return self._manager.start()
         except Exception as exc:
