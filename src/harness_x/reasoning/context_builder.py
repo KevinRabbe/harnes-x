@@ -187,44 +187,57 @@ class BoundedContextBuilder:
         actions: list[dict[str, Any]],
         self_schema: dict[str, Any],
     ) -> dict[str, Any]:
+        sections: dict[str, Any] = {
+            "active_goal": {
+                "authority": "authoritative",
+                "data": request.active_goal or request.active_state,
+            },
+            "working_state": {
+                "authority": "authoritative",
+                "items": working,
+            },
+            "retrieved_memories": {
+                "authority": "evidence_with_individual_verification_state",
+                "rule": (
+                    "Candidate claims, hypotheses, suspected causes, and unverified "
+                    "observations are not facts merely because they are present here."
+                ),
+                "items": retrieved,
+            },
+            "self_schema": {
+                "authority": "authoritative_runtime_description",
+                "data": self_schema,
+            },
+            "available_actions": {
+                "authority": "declared_capabilities_not_execution_authority",
+                "items": actions,
+            },
+            "compute_budget": {
+                "authority": "externally_enforced",
+                "data": request.budget.model_dump(mode="json"),
+            },
+            "legacy_context": {
+                "authority": "caller_supplied_context",
+                "data": request.context,
+            },
+        }
+
+        # Earlier fixtures sometimes supplied runtime state through ``active_state``
+        # instead of ``active_goal``. Preserve that historical serialized shape when
+        # only one is present. When both are provided, however, they are independent
+        # authoritative views and must both reach the reasoning core. Coding tasks use
+        # this second view for controller-owned progress and verification state.
+        if request.active_goal and request.active_state:
+            sections["active_state"] = {
+                "authority": "authoritative_runtime_state",
+                "data": request.active_state,
+            }
+
         return {
             "schema_version": "reasoning-context-v1",
             "task_id": str(request.task_id),
             "goal_id": str(request.goal_id),
             "routine_id": str(request.routine_id),
             "instruction": request.instruction,
-            "sections": {
-                "active_goal": {
-                    "authority": "authoritative",
-                    "data": request.active_goal or request.active_state,
-                },
-                "working_state": {
-                    "authority": "authoritative",
-                    "items": working,
-                },
-                "retrieved_memories": {
-                    "authority": "evidence_with_individual_verification_state",
-                    "rule": (
-                        "Candidate claims, hypotheses, suspected causes, and unverified "
-                        "observations are not facts merely because they are present here."
-                    ),
-                    "items": retrieved,
-                },
-                "self_schema": {
-                    "authority": "authoritative_runtime_description",
-                    "data": self_schema,
-                },
-                "available_actions": {
-                    "authority": "declared_capabilities_not_execution_authority",
-                    "items": actions,
-                },
-                "compute_budget": {
-                    "authority": "externally_enforced",
-                    "data": request.budget.model_dump(mode="json"),
-                },
-                "legacy_context": {
-                    "authority": "caller_supplied_context",
-                    "data": request.context,
-                },
-            },
+            "sections": sections,
         }
