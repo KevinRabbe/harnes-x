@@ -54,13 +54,15 @@ class BrowserConsoleMessage(BaseModel):
 class BrowserObservation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    schema_version: str = "browser-observation-v1"
+    schema_version: str = "browser-observation-v2"
     url: str
     title: str = Field(max_length=1000)
     aria_snapshot: str = Field(max_length=30000)
     aria_truncated: bool = False
     console_messages: tuple[BrowserConsoleMessage, ...] = ()
+    console_truncated: bool = False
     page_errors: tuple[str, ...] = ()
+    page_errors_truncated: bool = False
 
 
 class BrowserScreenshot(BaseModel):
@@ -105,6 +107,8 @@ class ApplicationServerSpec(BaseModel):
             raise ValueError("application base_url must be loopback-only")
         if parsed.username or parsed.password:
             raise ValueError("application base_url cannot contain credentials")
+        if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+            raise ValueError("application base_url must be a pure origin without path/query/fragment")
         health = urlparse(self.health_path)
         if health.scheme or health.netloc or not self.health_path.startswith("/"):
             raise ValueError("health_path must be an absolute path on the declared app origin")
