@@ -6,10 +6,12 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+from typing import Iterable
 
 from harness_x.reasoning import RawReasoningOutput, ReasoningCore, ReasoningCoreInfo
 from harness_x.reasoning.context_builder import ContextBuildResult
 from harness_x.repository import RepositoryIntelligenceService, RepositorySemanticProvider
+from harness_x.tools import ToolSpec
 from harness_x.tools.coding_repository import build_repository_coding_registry
 
 from .autonomous_runtime import AutonomousCodingTaskRuntime
@@ -25,9 +27,48 @@ def _canonical(value: object) -> str:
     )
 
 
+def _compact_field_contract(schema: dict[str, object]) -> dict[str, object]:
+    contract: dict[str, object] = {}
+    if "type" in schema:
+        contract["type"] = schema["type"]
+    if "enum" in schema:
+        contract["enum"] = schema["enum"]
+    if "default" in schema:
+        contract["default"] = schema["default"]
+    if "minimum" in schema:
+        contract["minimum"] = schema["minimum"]
+    if "maximum" in schema:
+        contract["maximum"] = schema["maximum"]
+    return contract
+
+
+def _aci_manifest(specs: Iterable[ToolSpec]) -> list[dict[str, object]]:
+    """Compact all live tool contracts so char-budget trimming cannot hide capabilities."""
+
+    manifest: list[dict[str, object]] = []
+    for spec in specs:
+        input_schema = spec.input_schema
+        properties = input_schema.get("properties", {})
+        compact_properties = {
+            name: _compact_field_contract(dict(schema))
+            for name, schema in properties.items()
+            if isinstance(schema, dict)
+        }
+        manifest.append(
+            {
+                "name": spec.name,
+                "version": spec.version,
+                "required": list(input_schema.get("required", [])),
+                "properties": compact_properties,
+            }
+        )
+    return manifest
+
+
 def _repository_projection(
     service: RepositoryIntelligenceService,
     *,
+    tool_specs: Iterable[ToolSpec],
     max_map_chars: int = 4500,
     max_instruction_chars: int = 2800,
 ) -> dict[str, object]:
@@ -57,6 +98,7 @@ def _repository_projection(
         "test_roots": list(snapshot.test_roots),
         "instructions": instructions,
         "compact_map": snapshot.compact_map[:max_map_chars],
+        "aci_manifest": _aci_manifest(tool_specs),
         "snapshot_truncated": snapshot.truncated,
         "freshness_rule": (
             "This is bounded startup orientation. After structural edits or when exact current "
@@ -74,12 +116,16 @@ class RepositoryContextReasoningCore:
         core: ReasoningCore,
         service: RepositoryIntelligenceService,
         *,
-        max_total_chars: int = 24_000,
+        tool_specs: Iterable[ToolSpec],
+        max_total_chars: int = 40_000,
     ) -> None:
         self.core = core
         self.service = service
         self.max_total_chars = max_total_chars
-        self._projection = _repository_projection(service)
+        self._projection = _repository_projection(
+            service,
+            tool_specs=tuple(tool_specs),
+        )
 
     @property
     def info(self) -> ReasoningCoreInfo:
@@ -108,6 +154,9 @@ class RepositoryContextReasoningCore:
         }
         serialized = _canonical(payload)
 
+        # Repository orientation has its own bounded envelope above the base context
+        # builder's 24k governing-state budget. Reduce the repo map before instruction
+        # previews or the compact ACI manifest; those two prevent avoidable rediscovery.
         if len(serialized) > self.max_total_chars:
             overflow = len(serialized) - self.max_total_chars
             compact_map = str(projection.get("compact_map", ""))
@@ -115,11 +164,29 @@ class RepositoryContextReasoningCore:
             serialized = _canonical(payload)
 
         if len(serialized) > self.max_total_chars:
+            projection["compact_map"] = str(projection.get("compact_map", ""))[:600]
+            instructions = list(projection.get("instructions", []))
+            for item in reversed(instructions):
+                if len(serialized) <= self.max_total_chars:
+                    break
+                preview = str(item.get("preview", ""))
+                if len(preview) > 240:
+                    item["preview"] = preview[:240]
+                    item["truncated"] = True
+                    serialized = _canonical(payload)
+            projection["instructions"] = instructions
+            serialized = _canonical(payload)
+
+        if len(serialized) > self.max_total_chars:
             projection["instructions"] = [
-                {"path": item["path"], "kind": item["kind"], "preview": "(use workspace_read)", "truncated": True}
+                {
+                    "path": item["path"],
+                    "kind": item["kind"],
+                    "preview": "(use workspace_read)",
+                    "truncated": True,
+                }
                 for item in projection.get("instructions", [])
             ]
-            projection["compact_map"] = str(projection.get("compact_map", ""))[:1200]
             serialized = _canonical(payload)
 
         if len(serialized) > self.max_total_chars:
@@ -129,14 +196,14 @@ class RepositoryContextReasoningCore:
                 "identity": projection["identity"],
                 "languages": projection["languages"],
                 "manifests": projection["manifests"],
-                "freshness_rule": "Use repository tools for details.",
+                "aci_manifest": projection["aci_manifest"],
+                "freshness_rule": "Use repository tools for exact current details.",
             }
             sections["repository_intelligence"]["data"] = minimal
             serialized = _canonical(payload)
 
-        # The base context builder already fits its own 24k budget. If even the minimal
-        # repository projection cannot fit, preserve governing state and omit orientation
-        # rather than silently dropping authoritative task/working-state sections.
+        # If the governing base context itself leaves no room even for the minimal M23
+        # projection, preserve task/working-state authority rather than silently dropping it.
         if len(serialized) > self.max_total_chars:
             sections.pop("repository_intelligence", None)
             serialized = _canonical(payload)
@@ -173,11 +240,22 @@ class RepositoryAwareAutonomousCodingTaskRuntime(AutonomousCodingTaskRuntime):
         max_no_progress_streak: int = 4,
         max_same_failure_count: int = 3,
     ) -> None:
-        repository = RepositoryIntelligenceService(workspace_root)
+        workspace = Path(workspace_root).resolve()
+        repository = RepositoryIntelligenceService(workspace)
         repository.snapshot()
-        wrapped_core = RepositoryContextReasoningCore(core, repository)
+        repository_registry = build_repository_coding_registry(
+            workspace,
+            allowed_executables=allowed_executables,
+            repository_service=repository,
+            semantic_provider=semantic_provider,
+        )
+        wrapped_core = RepositoryContextReasoningCore(
+            core,
+            repository,
+            tool_specs=repository_registry.specs(),
+        )
         super().__init__(
-            workspace_root,
+            workspace,
             wrapped_core,
             output_root,
             max_reasoning_steps=max_reasoning_steps,
@@ -193,10 +271,5 @@ class RepositoryAwareAutonomousCodingTaskRuntime(AutonomousCodingTaskRuntime):
         )
         self.repository = repository
         self.semantic_provider = semantic_provider
-        self.registry = build_repository_coding_registry(
-            self.workspace_root,
-            allowed_executables=allowed_executables,
-            repository_service=repository,
-            semantic_provider=semantic_provider,
-        )
+        self.registry = repository_registry
         self.allowed_tools = tuple(spec.name for spec in self.registry.specs())
