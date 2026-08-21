@@ -21,6 +21,16 @@ from .contracts import (
 )
 
 
+def _effective_port(parsed) -> int | None:
+    if parsed.port is not None:
+        return parsed.port
+    if parsed.scheme in {"http", "ws"}:
+        return 80
+    if parsed.scheme in {"https", "wss"}:
+        return 443
+    return None
+
+
 class PlaywrightBrowserProvider:
     def __init__(
         self,
@@ -40,7 +50,12 @@ class PlaywrightBrowserProvider:
             raise ValueError("Playwright browser base_url must be loopback http(s)")
         if parsed.username or parsed.password:
             raise ValueError("Playwright browser base_url cannot contain credentials")
+        if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+            raise ValueError("Playwright browser base_url must be a pure origin")
         self.base_url = base_url.rstrip("/")
+        self._base_scheme = parsed.scheme.casefold()
+        self._base_host = (parsed.hostname or "").rstrip(".").casefold()
+        self._base_port = _effective_port(parsed)
         self.artifact_root = Path(artifact_root).resolve()
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         self.headless = headless
@@ -53,13 +68,15 @@ class PlaywrightBrowserProvider:
         self._context = None
         self._page = None
         self._console: list[BrowserConsoleMessage] = []
+        self._console_seen = 0
         self._page_errors: list[str] = []
+        self._page_errors_seen = 0
 
     @property
     def info(self) -> BrowserProviderInfo:
         return BrowserProviderInfo(
             name="playwright-browser",
-            version="playwright-browser-v1",
+            version="playwright-browser-v2-same-origin",
             engine="chromium",
             live_browser=True,
         )
@@ -91,14 +108,20 @@ class PlaywrightBrowserProvider:
             self.close()
             raise
 
-    @staticmethod
-    def _network_url_allowed(url: str) -> bool:
+    def _network_url_allowed(self, url: str) -> bool:
         parsed = urlparse(url)
         if parsed.scheme in {"data", "blob", "about"}:
             return True
-        if parsed.scheme in {"http", "https", "ws", "wss"}:
-            return is_loopback_hostname(parsed.hostname)
-        return False
+        if parsed.scheme not in {"http", "https", "ws", "wss"}:
+            return False
+        host = (parsed.hostname or "").rstrip(".").casefold()
+        if not is_loopback_hostname(host):
+            return False
+        if host != self._base_host or _effective_port(parsed) != self._base_port:
+            return False
+        if self._base_scheme == "http":
+            return parsed.scheme in {"http", "ws"}
+        return parsed.scheme in {"https", "wss"}
 
     def _route_http(self, route, request) -> None:
         if self._network_url_allowed(request.url):
@@ -110,18 +133,25 @@ class PlaywrightBrowserProvider:
         if self._network_url_allowed(websocket_route.url):
             websocket_route.connect_to_server()
         else:
-            websocket_route.close(code=1008, reason="Harness X blocks non-loopback WebSockets")
+            websocket_route.close(
+                code=1008,
+                reason="Harness X blocks browser sockets outside the declared app origin",
+            )
 
     def _on_console(self, message) -> None:
+        self._console_seen += 1
         self._console.append(
             BrowserConsoleMessage(level=str(message.type), text=str(message.text)[:4000])
         )
-        del self._console[:-100]
+        if len(self._console) > 100:
+            del self._console[:-100]
 
     def _on_page_error(self, error) -> None:
+        self._page_errors_seen += 1
         text = str(getattr(error, "message", error))[:4000]
         self._page_errors.append(text)
-        del self._page_errors[:-100]
+        if len(self._page_errors) > 100:
+            del self._page_errors[:-100]
 
     @staticmethod
     def _validate_path(path: str) -> str:
@@ -167,7 +197,9 @@ class PlaywrightBrowserProvider:
             aria_snapshot=snapshot[: self.max_snapshot_chars],
             aria_truncated=truncated,
             console_messages=tuple(self._console),
+            console_truncated=self._console_seen > len(self._console),
             page_errors=tuple(self._page_errors),
+            page_errors_truncated=self._page_errors_seen > len(self._page_errors),
         )
 
     def open(self, path: str = "/") -> BrowserObservation:
