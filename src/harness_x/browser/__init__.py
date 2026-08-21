@@ -15,14 +15,17 @@ from .contracts import (
 from .fake import FakeBrowserProvider
 from .playwright_provider import PlaywrightBrowserProvider
 from .provider import BrowserProvider
+from .session import ApplicationBrowserSession, BrowserProviderFactory
 
 __all__ = [
+    "ApplicationBrowserSession",
     "ApplicationProcessManager",
     "ApplicationProcessState",
     "ApplicationServerSpec",
     "BrowserConsoleMessage",
     "BrowserObservation",
     "BrowserProvider",
+    "BrowserProviderFactory",
     "BrowserProviderInfo",
     "BrowserScreenshot",
     "BrowserSelector",
