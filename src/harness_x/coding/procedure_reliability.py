@@ -155,29 +155,39 @@ class ProcedureReliabilityStore:
     ) -> ProcedureReliabilityRecord:
         if procedure.kind != ProjectMemoryEntryKind.PROCEDURE:
             raise ValueError("procedure reliability accepts only procedure entries")
-        if not self.is_eligible(procedure.entry_id):
+        current = self._get(procedure.entry_id)
+        existing = self._find_usage(procedure.entry_id, episode.episode_id)
+        if existing is None and not self.is_eligible(procedure.entry_id):
             raise ValueError("suspended procedure cannot record a new automatic reuse")
+        if existing is not None and existing.success != success:
+            raise ValueError("existing procedure usage evidence disagrees with retry outcome")
+        if current is not None and current.last_episode_id == episode.episode_id:
+            return current
+
         failure = failure_mode.strip()[:1600] if failure_mode else None
         if not success and not failure:
             failure = "verified_task_failed_after_declared_procedure_reuse"
-        evidence = ProcedureUsageEvidence(
-            usage_id=f"pusage_{uuid.uuid4().hex}",
-            project_id=self.state.project_id,
-            procedure_id=procedure.entry_id,
-            episode_id=episode.episode_id,
-            success=success,
-            failure_mode=failure,
-            created_at=datetime.now(timezone.utc),
-        )
-        self._append_usage(evidence)
+        if existing is not None:
+            failure = existing.failure_mode
+        else:
+            existing = ProcedureUsageEvidence(
+                usage_id=f"pusage_{uuid.uuid4().hex}",
+                project_id=self.state.project_id,
+                procedure_id=procedure.entry_id,
+                episode_id=episode.episode_id,
+                success=success,
+                failure_mode=failure,
+                created_at=datetime.now(timezone.utc),
+            )
+            self._append_usage(existing)
 
         records = list(self.state.records)
         index, current = self._record_or_default(records, procedure.entry_id)
         next_revision = self.state.revision + 1
         usage_count = current.usage_count + 1
-        success_count = current.success_count + int(success)
-        failure_count = current.failure_count + int(not success)
-        consecutive = 0 if success else current.consecutive_failures + 1
+        success_count = current.success_count + int(existing.success)
+        failure_count = current.failure_count + int(not existing.success)
+        consecutive = 0 if existing.success else current.consecutive_failures + 1
         status = ProcedureReliabilityStatus.ELIGIBLE
         reason = None
         suspended_support_count = None
@@ -207,7 +217,11 @@ class ProcedureReliabilityStore:
             }
         )
         records[index] = updated
-        self._replace(records, revision=next_revision, usage_total=self.state.usage_total + 1)
+        self._replace(
+            records,
+            revision=next_revision,
+            usage_total=self.state.usage_total + int(existing.usage_id.startswith("pusage_") and self._count_usage_matches(procedure.entry_id, episode.episode_id) == 1 and self.state.usage_total < self._usage_ledger_count()),
+        )
         return updated
 
     def observe_verified_support(
@@ -319,6 +333,44 @@ class ProcedureReliabilityStore:
             handle.flush()
             os.fsync(handle.fileno())
 
+    def _usage_rows(self) -> tuple[ProcedureUsageEvidence, ...]:
+        if not self.usage_path.exists():
+            return ()
+        rows: list[ProcedureUsageEvidence] = []
+        with self.usage_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                raw = json.loads(line)
+                stored = str(raw.get("fingerprint", ""))
+                evidence = ProcedureUsageEvidence.model_validate(raw)
+                if stored != evidence.fingerprint:
+                    raise ValueError("procedure reliability usage fingerprint mismatch")
+                if evidence.project_id != self.state.project_id:
+                    raise ValueError("procedure reliability usage belongs to a different project")
+                rows.append(evidence)
+        return tuple(rows)
+
+    def _find_usage(self, procedure_id: str, episode_id: str) -> ProcedureUsageEvidence | None:
+        matches = [
+            item
+            for item in self._usage_rows()
+            if item.procedure_id == procedure_id and item.episode_id == episode_id
+        ]
+        if len(matches) > 1:
+            raise ValueError("duplicate procedure reliability usage evidence for one task episode")
+        return matches[0] if matches else None
+
+    def _count_usage_matches(self, procedure_id: str, episode_id: str) -> int:
+        return sum(
+            1
+            for item in self._usage_rows()
+            if item.procedure_id == procedure_id and item.episode_id == episode_id
+        )
+
+    def _usage_ledger_count(self) -> int:
+        return len(self._usage_rows())
+
     def _replace(
         self,
         records: list[ProcedureReliabilityRecord],
@@ -351,29 +403,18 @@ class ProcedureReliabilityStore:
         return state
 
     def _reconcile_usage_total(self) -> None:
-        if not self.usage_path.exists():
+        count = self._usage_ledger_count()
+        if count == 0 and not self.usage_path.exists():
             if self.state.usage_total != 0:
                 raise ValueError("procedure reliability usage ledger is missing")
             return
-        count = 0
-        with self.usage_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                if not line.strip():
-                    continue
-                raw = json.loads(line)
-                stored = str(raw.get("fingerprint", ""))
-                evidence = ProcedureUsageEvidence.model_validate(raw)
-                if stored != evidence.fingerprint:
-                    raise ValueError("procedure reliability usage fingerprint mismatch")
-                if evidence.project_id != self.state.project_id:
-                    raise ValueError("procedure reliability usage belongs to a different project")
-                count += 1
         if count < self.state.usage_total:
             raise ValueError("procedure reliability usage ledger is shorter than committed state")
         if count == self.state.usage_total:
             return
-        # Append-first crash recovery is conservative: preserve the usage evidence count but do
-        # not invent lifecycle transitions whose active-state replacement did not complete.
+        # Append-first crash recovery: expose the durable evidence count immediately. A caller
+        # retry of record_usage for the same procedure/episode finds that existing evidence and
+        # applies the missing lifecycle transition without appending a duplicate row.
         self.state = ProcedureReliabilityState.model_validate(
             {
                 **self.state.model_dump(
