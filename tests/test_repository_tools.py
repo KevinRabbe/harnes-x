@@ -101,6 +101,7 @@ def test_repository_registry_extends_coding_tools_and_upgrades_patch(tmp_path: P
     assert "workspace_patch_range" not in names
     assert len(names) == 13
     assert registry.require("workspace_patch").spec.version == "workspace-patch-v2"
+    assert registry.require("git_status").spec.version == "git-status-v2"
 
     search_def = registry.require("symbol_search")
     answer = search_def.handler(SymbolSearchInput(query="semantic"))
