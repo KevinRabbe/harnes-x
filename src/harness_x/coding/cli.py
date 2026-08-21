@@ -21,11 +21,11 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
 
 from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
-from .procedure_reliability_runtime import (
-    ProcedureReliabilityBrowserIsolatedRepositoryCodingTaskRuntime,
-    ProcedureReliabilityBrowserRepositoryCodingTaskRuntime,
-    ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime,
-    ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime,
+from .procedure_revision_runtime import (
+    ProcedureRevisionBrowserIsolatedRepositoryCodingTaskRuntime,
+    ProcedureRevisionBrowserRepositoryCodingTaskRuntime,
+    ProcedureRevisionIsolatedRepositoryCodingTaskRuntime,
+    ProcedureRevisionVerifiedRepositoryCodingTaskRuntime,
 )
 from .verification import (
     CommandVerificationCheck,
@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="harness-x-code",
         description=(
             "Run a bounded repository-aware Harness X coding task with durable task/project "
-            "memory and verified procedure reliability."
+            "memory, verified procedure reliability, and isolated procedure revision."
         ),
     )
     parser.add_argument("workspace", type=Path)
@@ -113,9 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "Persistent M28/M29 project-memory directory. Defaults to .harness-x/project-memory "
-            "under the source project; isolated tasks share that source-scoped memory and "
-            "procedure-reliability ledger."
+            "Persistent M28/M29/M30 project-memory directory. Defaults to "
+            ".harness-x/project-memory under the source project; isolated tasks share that "
+            "source-scoped memory, procedure-reliability ledger, and revision lineage."
         ),
     )
     parser.add_argument(
@@ -201,7 +201,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Operate directly on the supplied workspace instead of creating an M24 isolated "
-            "workspace. Required when resuming a retained M27 checkpointed workspace."
+            "workspace. Required when resuming a retained M27 checkpointed workspace. M30 "
+            "revision candidates may be proposed in-place, but validation trials count only "
+            "in isolated task workspaces."
         ),
     )
     parser.add_argument(
@@ -416,15 +418,15 @@ def _runtime(
             browser_provider_factory=provider_factory,
         )
         runtime_type = (
-            ProcedureReliabilityBrowserRepositoryCodingTaskRuntime
+            ProcedureRevisionBrowserRepositoryCodingTaskRuntime
             if args.in_place
-            else ProcedureReliabilityBrowserIsolatedRepositoryCodingTaskRuntime
+            else ProcedureRevisionBrowserIsolatedRepositoryCodingTaskRuntime
         )
     else:
         runtime_type = (
-            ProcedureReliabilityVerifiedRepositoryCodingTaskRuntime
+            ProcedureRevisionVerifiedRepositoryCodingTaskRuntime
             if args.in_place
-            else ProcedureReliabilityIsolatedRepositoryCodingTaskRuntime
+            else ProcedureRevisionIsolatedRepositoryCodingTaskRuntime
         )
 
     if args.in_place:
