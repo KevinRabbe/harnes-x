@@ -15,7 +15,7 @@ from harness_x.reasoning import (
     TransformersLocalSettings,
 )
 
-from .runtime import CodingTaskRuntime
+from .autonomous_runtime import AutonomousCodingTaskRuntime
 
 
 _DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
@@ -72,6 +72,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tool-actions", type=int, default=48)
     parser.add_argument("--max-output-tokens", type=int, default=65536)
     parser.add_argument(
+        "--no-baseline-verify",
+        action="store_true",
+        help="Skip the controller-owned baseline verification before the first model turn.",
+    )
+    parser.add_argument(
+        "--max-idle-turns",
+        type=int,
+        default=3,
+        help="Fail after this many consecutive no-action continue turns.",
+    )
+    parser.add_argument(
         "--output", type=Path, default=Path(".harness-x/coding-run")
     )
     return parser
@@ -114,13 +125,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
 
     core = _build_core(args)
-    runtime = CodingTaskRuntime(
+    runtime = AutonomousCodingTaskRuntime(
         args.workspace,
         core,
         args.output,
         max_reasoning_steps=args.max_reasoning_steps,
         max_tool_actions=args.max_tool_actions,
         max_output_tokens=args.max_output_tokens,
+        baseline_verification=not args.no_baseline_verify,
+        max_idle_turns=args.max_idle_turns,
     )
     try:
         report = runtime.run(
