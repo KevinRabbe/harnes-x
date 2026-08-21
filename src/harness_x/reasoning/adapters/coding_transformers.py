@@ -32,57 +32,59 @@ Do not emit markdown fences, XML/tool_call tags, prose outside the JSON object, 
 """
 
 
-def _common_properties(*, status: str, min_actions: int, max_actions: int) -> dict[str, Any]:
-    return {
-        "status": {"type": "string", "enum": [status]},
-        "proposals": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "summary": {"type": "string", "maxLength": 1200},
-                    "payload": {"type": "object"},
-                },
-                "required": ["summary", "payload"],
-                "additionalProperties": False,
-            },
-        },
-        "actions": {
-            "type": "array",
-            "minItems": min_actions,
-            "maxItems": max_actions,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "tool_name": {"type": "string", "maxLength": 128},
-                    "arguments": {"type": "object"},
-                },
-                "required": ["tool_name", "arguments"],
-                "additionalProperties": False,
-            },
-        },
-        "observations": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {"type": "string", "maxLength": 1200},
-        },
-        "requested_additional_steps": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 64,
-        },
-    }
+def coding_reasoning_output_json_schema() -> dict[str, Any]:
+    """Finite syntactic schema for one coding turn.
 
+    LMFE 0.11.3 reliably constrains JSON structure but does not enforce every
+    cross-field/cardinality condition. Harness X therefore owns the semantic control
+    invariant in :func:`coding_protocol_violation` and performs one bounded repair
+    generation when needed.
+    """
 
-def _turn_branch(*, status: str, min_actions: int, max_actions: int) -> dict[str, Any]:
     return {
         "type": "object",
-        "properties": _common_properties(
-            status=status,
-            min_actions=min_actions,
-            max_actions=max_actions,
-        ),
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["complete", "continue", "blocked"],
+            },
+            "proposals": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string", "maxLength": 1200},
+                        "payload": {"type": "object"},
+                    },
+                    "required": ["summary", "payload"],
+                    "additionalProperties": False,
+                },
+            },
+            "actions": {
+                "type": "array",
+                "maxItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {"type": "string", "maxLength": 128},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["tool_name", "arguments"],
+                    "additionalProperties": False,
+                },
+            },
+            "observations": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {"type": "string", "maxLength": 1200},
+            },
+            "requested_additional_steps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 64,
+            },
+        },
         "required": [
             "status",
             "proposals",
@@ -94,32 +96,57 @@ def _turn_branch(*, status: str, min_actions: int, max_actions: int) -> dict[str
     }
 
 
-def coding_reasoning_output_json_schema() -> dict[str, Any]:
-    """Finite schema that excludes no-op ``continue`` turns."""
+def coding_protocol_violation(output: RawReasoningOutput) -> str | None:
+    """Return the software-owned coding protocol violation, if any."""
 
-    return {
-        "oneOf": [
-            _turn_branch(status="continue", min_actions=1, max_actions=1),
-            _turn_branch(status="complete", min_actions=0, max_actions=0),
-            _turn_branch(status="blocked", min_actions=0, max_actions=0),
-        ]
-    }
+    action_count = len(output.actions)
+    if output.status == "continue" and action_count != 1:
+        return "status=continue requires exactly one tool action"
+    if output.status in {"complete", "blocked"} and action_count != 0:
+        return f"status={output.status} requires zero tool actions"
+    return None
 
 
 class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
-    """Direct local core whose decoder can only emit actionable coding states."""
+    """Direct local core with one bounded semantic-protocol repair attempt."""
 
     def __init__(self, settings) -> None:
         super().__init__(settings)
         self._info = self._info.model_copy(
             update={
                 "name": "transformers_local_coding",
-                "version": "transformers-local-coding-v1",
+                "version": "transformers-local-coding-v2",
             }
         )
 
     def generate(self, context: ContextBuildResult) -> RawReasoningOutput:
         self._ensure_loaded()
+        violation: str | None = None
+        for attempt in range(2):
+            repair_instruction = None
+            if attempt:
+                assert violation is not None
+                repair_instruction = (
+                    "PROTOCOL REPAIR REQUIRED. Your previous JSON was syntactically valid "
+                    f"but violated this Harness X control invariant: {violation}. "
+                    "Return a corrected JSON object now. If more work is needed, use "
+                    "status=continue with exactly one concrete action. If the task is done, "
+                    "use status=complete with zero actions."
+                )
+            output = self._generate_once(context, repair_instruction=repair_instruction)
+            violation = coding_protocol_violation(output)
+            if violation is None:
+                return output
+        raise ReasoningCoreError(
+            f"local coding model violated the control protocol after bounded repair: {violation}"
+        )
+
+    def _generate_once(
+        self,
+        context: ContextBuildResult,
+        *,
+        repair_instruction: str | None,
+    ) -> RawReasoningOutput:
         assert self._tokenizer is not None
         assert self._model is not None
 
@@ -134,9 +161,12 @@ class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
                 "constrained local coding requires lm-format-enforcer==0.11.3"
             ) from exc
 
+        user_content = context.serialized
+        if repair_instruction is not None:
+            user_content = f"{user_content}\n\n{repair_instruction}"
         messages = [
             {"role": "system", "content": _CODING_SYSTEM_PROMPT},
-            {"role": "user", "content": context.serialized},
+            {"role": "user", "content": user_content},
         ]
         try:
             inputs = self._tokenizer.apply_chat_template(
