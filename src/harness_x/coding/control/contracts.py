@@ -170,6 +170,7 @@ class ProgressSnapshot(BaseModel):
     duplicate_actions: int = Field(default=0, ge=0)
     repeat_streak: int = Field(default=0, ge=0)
     inspection_streak: int = Field(default=0, ge=0)
+    no_action_streak: int = Field(default=0, ge=0)
     no_progress_streak: int = Field(default=0, ge=0)
     new_evidence_count: int = Field(default=0, ge=0)
     verification_attempts: int = Field(default=0, ge=0)
