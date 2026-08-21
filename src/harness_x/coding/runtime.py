@@ -170,6 +170,9 @@ class CodingTaskRuntime:
                 failure_reason = f"reasoning_budget_exhausted: {exc}"
                 break
 
+            recent_working = sorted(
+                working.items(), key=lambda item: item.created_step
+            )[-16:]
             request = ReasoningRequest(
                 task_id=task_id,
                 goal_id=goal.goal_id,
@@ -177,7 +180,7 @@ class CodingTaskRuntime:
                 instruction=self._instruction(normalized_task, commands),
                 active_goal=goals.get(goal.goal_id).model_dump(mode="json"),
                 working_state=[
-                    item.model_dump(mode="json") for item in working.items()[-16:]
+                    item.model_dump(mode="json") for item in recent_working
                 ],
                 available_actions=[
                     spec.model_dump(mode="json") for spec in self.registry.specs()
