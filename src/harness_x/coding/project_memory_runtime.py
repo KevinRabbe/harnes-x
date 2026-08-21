@@ -102,6 +102,15 @@ class ProjectMemoryContextReasoningCore:
             changed_files=changed_files,
             verification_refs=verification_refs,
         )
+        # Usage was validated while the procedure was active during the task. Record that
+        # historical fact before admitting newly learned candidates, which may conflict with
+        # and suspend the procedure at closeout.
+        for entry_id in sorted(self._used_procedure_ids):
+            self.store.record_procedure_usage(
+                entry_id,
+                success=succeeded,
+                failure_mode=failure_mode,
+            )
         admitted_ids: tuple[str, ...] = ()
         if succeeded and self._pending_candidates:
             admitted = self.store.support_candidates(
@@ -109,12 +118,6 @@ class ProjectMemoryContextReasoningCore:
                 tuple(self._pending_candidates.values()),
             )
             admitted_ids = tuple(item.entry_id for item in admitted)
-        for entry_id in sorted(self._used_procedure_ids):
-            self.store.record_procedure_usage(
-                entry_id,
-                success=succeeded,
-                failure_mode=failure_mode,
-            )
         self._pending_candidates.clear()
         self._used_procedure_ids.clear()
         return episode, admitted_ids
