@@ -116,13 +116,6 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
-def _unique_append(values: tuple[str, ...], value: str) -> tuple[str, ...]:
-    normalized = value.strip()
-    if not normalized or normalized in values:
-        return values
-    return (*values, normalized)
-
-
 class CodingControlController:
     """Authoritative deterministic control plane around a coding reasoner.
 
@@ -188,6 +181,7 @@ class CodingControlController:
         self._duplicate_actions = 0
         self._repeat_streak = 0
         self._inspection_streak = 0
+        self._no_action_streak = 0
         self._no_progress_streak = 0
         self._new_evidence_count = 0
         self._verification_attempts = 0
@@ -235,8 +229,8 @@ class CodingControlController:
             )
         previous = current
         self._revise_plan(phase=phase, step=step, reason=reason)
-        # A phase transition is meaningful progress and breaks an inspection/no-op streak.
         self._no_progress_streak = 0
+        self._no_action_streak = 0
         if phase not in {CodingPhase.DIAGNOSE, CodingPhase.IMPLEMENT}:
             self._inspection_streak = 0
         if self._recorder is not None:
@@ -400,6 +394,7 @@ class CodingControlController:
             {"tool_name": tool_name, "arguments": arguments}
         )
         self._total_actions += 1
+        self._no_action_streak = 0
 
         if action_fingerprint in self._seen_action_fingerprints:
             self._duplicate_actions += 1
@@ -432,6 +427,17 @@ class CodingControlController:
                     step=step,
                     reason="workspace_mutated",
                 )
+            if self._plan.phase in {
+                CodingPhase.ORIENT,
+                CodingPhase.DIAGNOSE,
+                CodingPhase.PLAN,
+                CodingPhase.REVIEW,
+            }:
+                self.transition_phase(
+                    CodingPhase.IMPLEMENT,
+                    reason="successful_workspace_mutation",
+                    step=step,
+                )
         else:
             evidence_fingerprint = _fingerprint(
                 {
@@ -462,12 +468,24 @@ class CodingControlController:
 
         return self.progress_snapshot()
 
+    def record_no_action(self) -> ProgressSnapshot:
+        """Record a reasoning turn that proposed no executable action."""
+
+        self._no_action_streak += 1
+        self._no_progress_streak += 1
+        self._repeat_streak = 0
+        return self.progress_snapshot()
+
     def begin_verification(self, *, step: int, reason: str) -> CodingPlan:
         if self._plan.phase in {
             CodingPhase.COMPLETE,
             CodingPhase.BLOCKED,
             CodingPhase.VERIFY,
         }:
+            return self._plan
+        if self._plan.phase == CodingPhase.REVIEW:
+            # REVIEW already represents a fresh passed verifier. A later mutation moves
+            # the phase back to IMPLEMENT in record_tool_result before this can happen.
             return self._plan
         return self.transition_phase(CodingPhase.VERIFY, reason=reason, step=step)
 
@@ -480,6 +498,7 @@ class CodingControlController:
         baseline: bool = False,
     ) -> ProgressSnapshot:
         self._verification_attempts += 1
+        self._no_action_streak = 0
         if passed:
             self._verification_passes += 1
             self._same_failure_count = 0
@@ -523,6 +542,7 @@ class CodingControlController:
             duplicate_actions=self._duplicate_actions,
             repeat_streak=self._repeat_streak,
             inspection_streak=self._inspection_streak,
+            no_action_streak=self._no_action_streak,
             no_progress_streak=self._no_progress_streak,
             new_evidence_count=self._new_evidence_count,
             verification_attempts=self._verification_attempts,
@@ -646,10 +666,10 @@ class CodingControlController:
         elif progress.no_progress_streak >= self.max_no_progress_streak:
             intervention = ControlIntervention(
                 kind=InterventionKind.CHANGE_APPROACH,
-                reason="recent actions produced no new evidence or state change",
+                reason="recent actions or no-action turns produced no new evidence or state change",
                 directive=(
-                    "Recent actions are not changing the information or workspace state. Change "
-                    "approach instead of spending another equivalent action."
+                    "Recent steps are not changing the information or workspace state. Change "
+                    "approach instead of spending another equivalent step."
                 ),
             )
         elif horizon.mode == HorizonMode.ENDGAME and phase in {
