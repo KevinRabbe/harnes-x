@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -71,12 +72,31 @@ def test_repository_orientation_reaches_first_reasoning_turn_without_tool_spend(
     assert report.reasoning_steps == 1
     assert len(core.contexts) == 1
     first = core.contexts[0]
-    assert "repository_intelligence" in first
+    assert len(first) <= 40_000
+    payload = json.loads(first)
+    repository = payload["sections"]["repository_intelligence"]["data"]
     assert "Keep public behavior stable" in first
-    assert "app.py" in first
-    assert "repository_map" in first
-    assert "symbol_definition" in first
-    assert "workspace-patch-v2" in first
+    assert "app.py" in repository["compact_map"]
+    manifest = repository["aci_manifest"]
+    manifest_names = {item["name"] for item in manifest}
+    assert manifest_names == {
+        "repository_map",
+        "file_outline",
+        "symbol_search",
+        "symbol_definition",
+        "symbol_references",
+        "git_status",
+        "git_diff",
+        "workspace_list",
+        "workspace_read",
+        "workspace_search",
+        "workspace_write",
+        "workspace_patch",
+        "process_run",
+    }
+    patch = next(item for item in manifest if item["name"] == "workspace_patch")
+    assert patch["version"] == "workspace-patch-v2"
+    assert patch["properties"]["mode"]["enum"] == ["exact", "range"]
 
 
 def test_guarded_range_mode_keeps_m22_mutation_and_verification_semantics(tmp_path: Path) -> None:
