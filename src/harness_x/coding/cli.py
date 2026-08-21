@@ -21,11 +21,11 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
 
 from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
-from .long_horizon_runtime import (
-    LongHorizonBrowserIsolatedRepositoryCodingTaskRuntime,
-    LongHorizonBrowserRepositoryCodingTaskRuntime,
-    LongHorizonIsolatedRepositoryCodingTaskRuntime,
-    LongHorizonVerifiedRepositoryCodingTaskRuntime,
+from .project_memory_runtime import (
+    ProjectMemoryBrowserIsolatedRepositoryCodingTaskRuntime,
+    ProjectMemoryBrowserRepositoryCodingTaskRuntime,
+    ProjectMemoryIsolatedRepositoryCodingTaskRuntime,
+    ProjectMemoryVerifiedRepositoryCodingTaskRuntime,
 )
 from .verification import (
     CommandVerificationCheck,
@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-code",
         description=(
-            "Run a bounded repository-aware Harness X coding task with durable long-horizon state."
+            "Run a bounded repository-aware Harness X coding task with durable task and project memory."
         ),
     )
     parser.add_argument("workspace", type=Path)
@@ -105,6 +105,24 @@ def build_parser() -> argparse.ArgumentParser:
             "Explicitly allow resume when the workspace no longer matches the latest exact "
             "M27 checkpoint. Requires --resume-long-horizon-state; use only when the drift is "
             "operator-understood."
+        ),
+    )
+    parser.add_argument(
+        "--project-memory-root",
+        type=Path,
+        default=None,
+        help=(
+            "Persistent M28 project-memory directory. Defaults to .harness-x/project-memory "
+            "under the source project; isolated tasks share that source-scoped memory."
+        ),
+    )
+    parser.add_argument(
+        "--project-memory-key",
+        default=None,
+        help=(
+            "Optional stable logical project identity. Defaults to the resolved source workspace "
+            "path. Use an explicit value when intentionally reusing the same memory after moving "
+            "a project checkout."
         ),
     )
     parser.add_argument(
@@ -371,6 +389,8 @@ def _runtime(
 ):
     common = dict(
         verification_plan=verification_plan,
+        project_memory_root=args.project_memory_root,
+        project_key=args.project_memory_key,
         max_reasoning_steps=args.max_reasoning_steps,
         max_tool_actions=args.max_tool_actions,
         max_output_tokens=args.max_output_tokens,
@@ -394,15 +414,15 @@ def _runtime(
             browser_provider_factory=provider_factory,
         )
         runtime_type = (
-            LongHorizonBrowserRepositoryCodingTaskRuntime
+            ProjectMemoryBrowserRepositoryCodingTaskRuntime
             if args.in_place
-            else LongHorizonBrowserIsolatedRepositoryCodingTaskRuntime
+            else ProjectMemoryBrowserIsolatedRepositoryCodingTaskRuntime
         )
     else:
         runtime_type = (
-            LongHorizonVerifiedRepositoryCodingTaskRuntime
+            ProjectMemoryVerifiedRepositoryCodingTaskRuntime
             if args.in_place
-            else LongHorizonIsolatedRepositoryCodingTaskRuntime
+            else ProjectMemoryIsolatedRepositoryCodingTaskRuntime
         )
 
     if args.in_place:
