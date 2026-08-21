@@ -47,6 +47,11 @@ from .patch_v2 import (
     WorkspacePatchV2Output,
     workspace_patch_v2_definition,
 )
+from .project_memory import (
+    ProjectMemoryRecallInput,
+    ProjectMemoryRecallOutput,
+    project_memory_recall_definition,
+)
 from .repository import (
     FileOutlineInput,
     FileOutlineOutput,
@@ -78,6 +83,8 @@ __all__ = [
     "PermissionDecision",
     "ProcessRunInput",
     "ProcessRunOutput",
+    "ProjectMemoryRecallInput",
+    "ProjectMemoryRecallOutput",
     "RepositoryMapInput",
     "RepositoryMapOutput",
     "SideEffectLevel",
@@ -115,6 +122,7 @@ __all__ = [
     "calculator_definition",
     "key_value_read_definition",
     "process_run_definition",
+    "project_memory_recall_definition",
     "repository_tool_definitions",
     "sandbox_write_definition",
     "unreliable_definition",
