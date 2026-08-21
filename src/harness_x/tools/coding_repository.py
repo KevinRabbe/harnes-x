@@ -8,6 +8,7 @@ from harness_x.repository import RepositoryIntelligenceService, RepositorySemant
 
 from .base import ToolRegistry
 from .coding import build_coding_registry
+from .git_v2 import git_status_v2_definition
 from .patch_v2 import workspace_patch_v2_definition
 from .repository import repository_tool_definitions
 
@@ -49,8 +50,10 @@ def build_repository_coding_registry(
         semantic_provider=semantic_provider,
     ):
         # Range mode is exposed through workspace_patch-v2 so M22's mutation authority
-        # remains correct without modifying the qualified M22 runtime.
-        if definition.spec.name == "workspace_patch_range":
+        # remains correct. Git status is replaced with a direct Git-only implementation
+        # so a status check never triggers a full repository rescan/re-index.
+        if definition.spec.name in {"workspace_patch_range", "git_status"}:
             continue
         registry.register(definition)
+    registry.register(git_status_v2_definition(workspace_root))
     return registry
