@@ -11,7 +11,12 @@ from .base import (
 from .context_builder import BoundedContextBuilder, ContextBudget, ContextBuildResult
 from .service import ReasoningService
 from .stub import StubReasoningCore
-from .adapters import OpenAICompatibleReasoningCore, OpenAICompatibleSettings
+from .adapters import (
+    OpenAICompatibleReasoningCore,
+    OpenAICompatibleSettings,
+    TransformersLocalReasoningCore,
+    TransformersLocalSettings,
+)
 from .recurrent_depth import (
     DEFAULT_DEPTHS,
     DEPTH_SELECTOR_VERSION,
@@ -71,6 +76,8 @@ __all__ = [
     "RecurrentDepthResearchError",
     "RecurrentDepthResearchReport",
     "StubReasoningCore",
+    "TransformersLocalReasoningCore",
+    "TransformersLocalSettings",
     "benchmark_fixed_depth_curve",
     "build_reference_recurrent_depth_fixture",
     "load_recurrent_depth_cases",
