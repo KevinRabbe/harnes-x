@@ -44,6 +44,12 @@ def _tokens(value: str) -> frozenset[str]:
     return frozenset(item.casefold() for item in _TOKEN_RE.findall(value) if len(item) > 1)
 
 
+def _identity_text(value: str) -> str:
+    """Canonicalize presentation-only whitespace/case for candidate identity."""
+
+    return " ".join(value.split()).casefold()
+
+
 def _normalized_unique(values: tuple[str, ...], *, max_chars: int = 1200) -> tuple[str, ...]:
     result: list[str] = []
     seen: set[str] = set()
@@ -519,14 +525,17 @@ class ProjectMemoryStore:
         steps: tuple[str, ...],
         task_categories: tuple[str, ...],
     ) -> str:
+        # task_categories are retrieval metadata, not semantic identity. Otherwise the same
+        # verified procedure proposed under slightly different task labels would falsely
+        # conflict with itself. Whitespace/case presentation differences are also normalized.
+        del task_categories
         return _sha256(
             _canonical(
                 {
                     "kind": kind.value,
-                    "key": key.casefold().strip(),
-                    "statement": statement.strip(),
-                    "steps": steps,
-                    "task_categories": tuple(sorted(item.casefold() for item in task_categories)),
+                    "key": _identity_text(key),
+                    "statement": _identity_text(statement),
+                    "steps": tuple(_identity_text(item) for item in steps),
                 }
             )
         )
