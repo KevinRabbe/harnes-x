@@ -11,8 +11,10 @@ from typing import Sequence
 from harness_x.reasoning import (
     OpenAICompatibleReasoningCore,
     OpenAICompatibleSettings,
-    TransformersLocalReasoningCore,
     TransformersLocalSettings,
+)
+from harness_x.reasoning.adapters.coding_transformers import (
+    CodingTransformersReasoningCore,
 )
 
 from .autonomous_runtime import AutonomousCodingTaskRuntime
@@ -97,7 +99,7 @@ def _split_command(command: str) -> tuple[str, ...]:
 
 def _build_core(args: argparse.Namespace):
     if args.backend == "transformers":
-        return TransformersLocalReasoningCore(
+        return CodingTransformersReasoningCore(
             TransformersLocalSettings(
                 model=args.model,
                 revision=args.revision,
