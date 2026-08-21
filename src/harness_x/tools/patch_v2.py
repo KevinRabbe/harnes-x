@@ -33,7 +33,7 @@ class WorkspacePatchV2Input(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    mode: Literal["exact", "range"] = "exact"
+    mode: Literal["exact", "range"]
     path: str = Field(min_length=1)
 
     # exact mode
