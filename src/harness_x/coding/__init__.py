@@ -18,6 +18,7 @@ from .repository_runtime import (
     RepositoryContextReasoningCore,
 )
 from .runtime import CodingTaskReport, CodingTaskRuntime, CodingVerificationResult
+from .strict_verification import StrictVerificationPlatform
 from .verification import (
     CommandVerificationCheck,
     FileContainsVerificationCheck,
@@ -56,6 +57,7 @@ __all__ = [
     "RepositoryAwareAutonomousCodingTaskRuntime",
     "RepositoryContextReasoningCore",
     "SourceWorkspaceIdentity",
+    "StrictVerificationPlatform",
     "TaskWorkspaceChange",
     "TaskWorkspaceIsolationManager",
     "VerificationCheckResult",
