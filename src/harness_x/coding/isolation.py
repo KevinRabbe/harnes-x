@@ -193,14 +193,22 @@ def _inside(root: Path, relative: str) -> Path:
     return target
 
 
+def _safe_support_relative(source_root: Path, relative: str) -> Path:
+    target = _inside(source_root, relative)
+    resolved_relative = target.relative_to(source_root)
+    if not resolved_relative.parts:
+        raise ValueError("support paths cannot name the entire source workspace")
+    if any(part in _COPY_IGNORED_NAMES for part in resolved_relative.parts):
+        raise ValueError("support paths cannot include Harness X or Git metadata")
+    return resolved_relative
+
+
 def _copy_path(source_root: Path, workspace_root: Path, relative: str) -> None:
-    source = _inside(source_root, relative)
+    resolved_relative = _safe_support_relative(source_root, relative)
+    source = source_root / resolved_relative
     if not source.exists():
         raise FileNotFoundError(f"support path does not exist: {relative}")
-    parts = Path(relative).parts
-    if any(part in _COPY_IGNORED_NAMES for part in parts):
-        raise ValueError("support paths cannot include Harness X or Git metadata")
-    destination = workspace_root / Path(relative)
+    destination = workspace_root / resolved_relative
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
         shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=False)
@@ -279,20 +287,29 @@ def _untracked_fingerprint(root: Path, paths: tuple[str, ...]) -> str:
 def _support_fingerprint(root: Path, support_paths: tuple[str, ...]) -> str:
     material: list[tuple[str, str, int]] = []
     for relative in support_paths:
-        target = _inside(root, relative)
+        resolved_relative = _safe_support_relative(root, relative)
+        target = root / resolved_relative
         if target.is_dir():
             for path, state in _iter_content_files(target):
-                material.append((f"{relative.rstrip('/')}/{path}", state.sha256, state.size_bytes))
+                material.append(
+                    (
+                        f"{resolved_relative.as_posix().rstrip('/')}/{path}",
+                        state.sha256,
+                        state.size_bytes,
+                    )
+                )
         elif target.is_symlink():
             payload = os.readlink(target).encode("utf-8", errors="surrogateescape")
-            material.append((relative, _sha256_bytes(payload), len(payload)))
+            material.append((resolved_relative.as_posix(), _sha256_bytes(payload), len(payload)))
         elif target.is_file():
             payload = target.read_bytes()
-            material.append((relative, _sha256_bytes(payload), len(payload)))
+            material.append((resolved_relative.as_posix(), _sha256_bytes(payload), len(payload)))
     return _sha256_bytes(_canonical(sorted(material)))
 
 
-def _git_source_identity(root: Path, support_paths: tuple[str, ...]) -> tuple[SourceWorkspaceIdentity, bytes, tuple[str, ...]]:
+def _git_source_identity(
+    root: Path, support_paths: tuple[str, ...]
+) -> tuple[SourceWorkspaceIdentity, bytes, tuple[str, ...]]:
     inside = _git_text(root, "rev-parse", "--is-inside-work-tree")
     if inside.casefold() != "true":
         raise ValueError("source is not a Git worktree")
@@ -335,6 +352,14 @@ def _is_git_repository(root: Path) -> bool:
         return _git_text(root, "rev-parse", "--is-inside-work-tree").casefold() == "true"
     except RuntimeError:
         return False
+
+
+def _has_git_head(root: Path) -> bool:
+    try:
+        _git_text(root, "rev-parse", "--verify", "HEAD")
+    except RuntimeError:
+        return False
+    return True
 
 
 def _changes(
@@ -404,7 +429,7 @@ class TaskWorkspaceIsolationManager:
             )
         )
         for item in normalized:
-            _inside(self.source_root, item)
+            _safe_support_relative(self.source_root, item)
         self.support_paths = normalized
         self._prepared: PreparedTaskWorkspace | None = None
 
@@ -417,7 +442,7 @@ class TaskWorkspaceIsolationManager:
         session_root.mkdir(parents=True, exist_ok=False)
 
         try:
-            if _is_git_repository(self.source_root):
+            if _is_git_repository(self.source_root) and _has_git_head(self.source_root):
                 prepared = self._prepare_git(session_id, session_root, workspace_root)
             else:
                 prepared = self._prepare_snapshot(session_id, session_root, workspace_root)
@@ -566,7 +591,7 @@ class TaskWorkspaceIsolationManager:
 
         initial_patch_path: Path | None = None
         final_patch_path: Path | None = None
-        if prepared.source.is_git_repository:
+        if prepared.strategy == IsolationStrategy.GIT_CLONE:
             initial_patch_path = self.artifact_root / "source-initial.patch"
             initial_patch_path.write_bytes(prepared.initial_git_patch)
             final_patch_path = self.artifact_root / "isolated-final.patch"
