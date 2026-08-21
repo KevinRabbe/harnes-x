@@ -5,6 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from harness_x.tools.coding import (
+    ProcessRunInput,
+    WorkspaceListInput,
+    WorkspacePatchInput,
+    WorkspaceReadInput,
+    WorkspaceSearchInput,
+    WorkspaceWriteInput,
+)
+
 from ..base import RawReasoningOutput, ReasoningCoreError
 from ..context_builder import ContextBuildResult
 from .transformers_local import TransformersLocalReasoningCore
@@ -12,7 +21,7 @@ from .transformers_local import TransformersLocalReasoningCore
 
 _CODING_SYSTEM_PROMPT = """You are a replaceable coding reasoning core inside Harness X.
 You do not own system state, memory, tools, permissions, budgets, verification, or filesystem/process authority.
-Return ONLY one JSON object matching the declared constrained schema.
+Return ONLY one compact JSON object matching the declared constrained schema.
 
 Control protocol:
 - status=continue MUST propose exactly one concrete tool action.
@@ -20,25 +29,62 @@ Control protocol:
 - status=blocked MUST propose zero actions and means no safe/progress-making action is available.
 - Harness X independently schedules and owns verification; passing verification evidence may appear in working state.
 
-The JSON fields are:
-- status: complete | continue | blocked
-- proposals: optional non-authoritative suggestions
-- actions: tool actions proposed for software validation/execution
-- observations: short observations for the software-owned working state
-- requested_additional_steps: non-negative integer
+Coding behavior:
+- Inspect before editing.
+- Prefer workspace_patch for an existing file and use the smallest unique old_text/new_text snippets that make the change.
+- Use workspace_write mainly for new files; do not rewrite a whole existing file when a small patch is sufficient.
+- Keep observations short and omit them unless they add important state.
+- Do not narrate analysis inside tool arguments.
 
 Do not invent candidate IDs, provenance, permissions, verification state, or state mutations.
 Do not emit markdown fences, XML/tool_call tags, prose outside the JSON object, or private chain-of-thought.
 """
 
+_CODING_TOOL_INPUT_MODELS = (
+    ("workspace_list", WorkspaceListInput),
+    ("workspace_read", WorkspaceReadInput),
+    ("workspace_search", WorkspaceSearchInput),
+    ("workspace_write", WorkspaceWriteInput),
+    ("workspace_patch", WorkspacePatchInput),
+    ("process_run", ProcessRunInput),
+)
+
+
+class _CodingOutputTruncated(RuntimeError):
+    """One constrained generation exhausted its token bound before JSON completion."""
+
+
+def _closed_input_schema(model: type[Any]) -> dict[str, Any]:
+    schema = model.model_json_schema()
+    schema.pop("title", None)
+    schema["additionalProperties"] = False
+    return schema
+
+
+def _coding_action_schema() -> dict[str, Any]:
+    branches: list[dict[str, Any]] = []
+    for tool_name, input_model in _CODING_TOOL_INPUT_MODELS:
+        branches.append(
+            {
+                "type": "object",
+                "properties": {
+                    "tool_name": {"type": "string", "enum": [tool_name]},
+                    "arguments": _closed_input_schema(input_model),
+                },
+                "required": ["tool_name", "arguments"],
+                "additionalProperties": False,
+            }
+        )
+    return {"anyOf": branches}
+
 
 def coding_reasoning_output_json_schema() -> dict[str, Any]:
-    """Finite syntactic schema for one coding turn.
+    """Finite syntactic schema for one compact coding turn.
 
-    LMFE 0.11.3 reliably constrains JSON structure but does not enforce every
-    cross-field/cardinality condition. Harness X therefore owns the semantic control
-    invariant in :func:`coding_protocol_violation` and performs one bounded repair
-    generation when needed.
+    The action branch is generated from the exact Pydantic input contracts used by the
+    coding tools. LMFE owns syntactic structure; Harness X still owns the semantic
+    cross-field invariant in :func:`coding_protocol_violation` because LMFE 0.11.3 does
+    not enforce every array-cardinality relationship.
     """
 
     return {
@@ -48,50 +94,23 @@ def coding_reasoning_output_json_schema() -> dict[str, Any]:
                 "type": "string",
                 "enum": ["complete", "continue", "blocked"],
             },
-            "proposals": {
-                "type": "array",
-                "maxItems": 4,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "summary": {"type": "string", "maxLength": 1200},
-                        "payload": {"type": "object"},
-                    },
-                    "required": ["summary", "payload"],
-                    "additionalProperties": False,
-                },
-            },
             "actions": {
                 "type": "array",
                 "maxItems": 1,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "tool_name": {"type": "string", "maxLength": 128},
-                        "arguments": {"type": "object"},
-                    },
-                    "required": ["tool_name", "arguments"],
-                    "additionalProperties": False,
-                },
+                "items": _coding_action_schema(),
             },
             "observations": {
                 "type": "array",
-                "maxItems": 4,
-                "items": {"type": "string", "maxLength": 1200},
+                "maxItems": 1,
+                "items": {"type": "string", "maxLength": 320},
             },
             "requested_additional_steps": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 64,
+                "maximum": 8,
             },
         },
-        "required": [
-            "status",
-            "proposals",
-            "actions",
-            "observations",
-            "requested_additional_steps",
-        ],
+        "required": ["status", "actions"],
         "additionalProperties": False,
     }
 
@@ -107,38 +126,98 @@ def coding_protocol_violation(output: RawReasoningOutput) -> str | None:
     return None
 
 
+def top_level_json_object_end(text: str) -> int | None:
+    """Return the exclusive end of the first complete top-level JSON object."""
+
+    start = 0
+    while start < len(text) and text[start].isspace():
+        start += 1
+    if start >= len(text) or text[start] != "{":
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+            if depth < 0:
+                return None
+    return None
+
+
 class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
-    """Direct local core with one bounded semantic-protocol repair attempt."""
+    """Direct local core with bounded syntax/control repair and JSON completion stop."""
 
     def __init__(self, settings) -> None:
         super().__init__(settings)
         self._info = self._info.model_copy(
             update={
                 "name": "transformers_local_coding",
-                "version": "transformers-local-coding-v2",
+                "version": "transformers-local-coding-v3",
             }
         )
 
     def generate(self, context: ContextBuildResult) -> RawReasoningOutput:
         self._ensure_loaded()
-        violation: str | None = None
+        repair_instruction: str | None = None
+        last_violation: str | None = None
+        last_truncation: str | None = None
+
         for attempt in range(2):
-            repair_instruction = None
-            if attempt:
-                assert violation is not None
-                repair_instruction = (
-                    "PROTOCOL REPAIR REQUIRED. Your previous JSON was syntactically valid "
-                    f"but violated this Harness X control invariant: {violation}. "
-                    "Return a corrected JSON object now. If more work is needed, use "
-                    "status=continue with exactly one concrete action. If the task is done, "
-                    "use status=complete with zero actions."
+            try:
+                output = self._generate_once(
+                    context,
+                    repair_instruction=repair_instruction,
                 )
-            output = self._generate_once(context, repair_instruction=repair_instruction)
+            except _CodingOutputTruncated as exc:
+                last_truncation = str(exc)
+                if attempt == 0:
+                    repair_instruction = (
+                        "OUTPUT-LIMIT REPAIR REQUIRED. Your previous response reached the "
+                        "generation token limit before the JSON object closed. Return a much "
+                        "smaller object. Use observations=[] and requested_additional_steps=0. "
+                        "If work remains, choose exactly one concise tool action. For an "
+                        "existing file prefer workspace_patch with only the smallest unique "
+                        "old_text/new_text snippets needed for this step."
+                    )
+                    continue
+                raise ReasoningCoreError(
+                    "local coding generation exhausted max_new_tokens before completing "
+                    f"JSON after bounded repair: {last_truncation}"
+                ) from exc
+
             violation = coding_protocol_violation(output)
             if violation is None:
                 return output
+            last_violation = violation
+            if attempt == 0:
+                repair_instruction = (
+                    "PROTOCOL REPAIR REQUIRED. Your previous JSON was syntactically valid "
+                    f"but violated this Harness X control invariant: {violation}. "
+                    "Return a corrected compact JSON object now. If more work is needed, use "
+                    "status=continue with exactly one concrete action. If the task is done, "
+                    "use status=complete with zero actions."
+                )
+
         raise ReasoningCoreError(
-            f"local coding model violated the control protocol after bounded repair: {violation}"
+            "local coding model violated the control protocol after bounded repair: "
+            f"{last_violation}"
         )
 
     def _generate_once(
@@ -153,6 +232,7 @@ class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
         try:
             import torch
             from lmformatenforcer import CharacterLevelParserConfig, JsonSchemaParser
+            from transformers import StoppingCriteria, StoppingCriteriaList
             from harness_x.training.lmfe_compat import (
                 build_lmfe_prefix_allowed_tokens_fn,
             )
@@ -196,6 +276,27 @@ class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
                     tokenizer_data=self._tokenizer_data,
                 )
             )
+
+            tokenizer = self._tokenizer
+
+            class _JsonObjectComplete(StoppingCriteria):
+                def __call__(self, input_ids, scores, **kwargs):  # type: ignore[override]
+                    generated_ids = input_ids[0, prompt_tokens:]
+                    if generated_ids.numel() == 0:
+                        done = False
+                    else:
+                        partial = tokenizer.decode(
+                            generated_ids,
+                            skip_special_tokens=True,
+                            clean_up_tokenization_spaces=False,
+                        )
+                        done = top_level_json_object_end(partial) is not None
+                    return torch.tensor(
+                        [done],
+                        dtype=torch.bool,
+                        device=input_ids.device,
+                    )
+
             with torch.inference_mode():
                 outputs = self._model.generate(
                     **inputs,
@@ -203,9 +304,11 @@ class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
                     do_sample=False,
                     use_cache=True,
                     prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                    stopping_criteria=StoppingCriteriaList([_JsonObjectComplete()]),
                     pad_token_id=self._tokenizer.eos_token_id,
                 )
             generated = outputs[0][prompt_tokens:]
+            generated_token_count = int(generated.shape[-1])
             text = self._tokenizer.decode(
                 generated,
                 skip_special_tokens=True,
@@ -216,11 +319,20 @@ class CodingTransformersReasoningCore(TransformersLocalReasoningCore):
                 f"local constrained coding generation failed: {type(exc).__name__}: {exc}"
             ) from exc
 
+        object_end = top_level_json_object_end(text)
+        if object_end is not None:
+            text = text[:object_end]
+        elif generated_token_count >= self.settings.max_new_tokens:
+            raise _CodingOutputTruncated(
+                f"generated_tokens={generated_token_count}, limit={self.settings.max_new_tokens}"
+            )
+
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ReasoningCoreError(
-                f"local coding model violated constrained JSON output: {exc}"
+                "local coding model produced malformed constrained JSON before the token "
+                f"limit: {exc}"
             ) from exc
         try:
             return RawReasoningOutput.model_validate(payload)
