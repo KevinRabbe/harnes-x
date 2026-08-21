@@ -8,11 +8,11 @@ from typing import Any
 from harness_x.tools.coding import (
     ProcessRunInput,
     WorkspaceListInput,
-    WorkspacePatchInput,
     WorkspaceReadInput,
     WorkspaceSearchInput,
     WorkspaceWriteInput,
 )
+from harness_x.tools.patch_v2 import WorkspacePatchV2Input
 from harness_x.tools.repository import (
     FileOutlineInput,
     GitDiffInput,
@@ -21,7 +21,6 @@ from harness_x.tools.repository import (
     SymbolDefinitionInput,
     SymbolReferencesInput,
     SymbolSearchInput,
-    WorkspacePatchRangeInput,
 )
 
 from ..base import RawReasoningOutput, ReasoningCoreError
@@ -59,8 +58,8 @@ Repository/navigation behavior:
 
 Editing behavior:
 - Prefer the smallest verifiable edit.
-- workspace_patch remains appropriate when you know a small unique exact old_text snippet.
-- workspace_patch_range is appropriate for line-bounded edits after file_outline or symbol_definition supplied the current full-file SHA-256. It will refuse stale hashes.
+- workspace_patch mode=exact is appropriate when you know a small unique old_text snippet.
+- workspace_patch mode=range is appropriate for line-bounded edits after file_outline or symbol_definition supplied the current full-file SHA-256. Range mode refuses stale hashes.
 - Use workspace_write mainly for new files; do not rewrite a whole existing file when a bounded patch is sufficient.
 - After structural edits, refresh repository intelligence only when needed; do not rescan reflexively after every small edit.
 
@@ -80,8 +79,7 @@ _REPOSITORY_CODING_TOOL_INPUT_MODELS = (
     ("workspace_read", WorkspaceReadInput),
     ("workspace_search", WorkspaceSearchInput),
     ("workspace_write", WorkspaceWriteInput),
-    ("workspace_patch", WorkspacePatchInput),
-    ("workspace_patch_range", WorkspacePatchRangeInput),
+    ("workspace_patch", WorkspacePatchV2Input),
     ("process_run", ProcessRunInput),
 )
 
@@ -135,7 +133,7 @@ def repository_coding_reasoning_output_json_schema() -> dict[str, Any]:
 
 
 class RepositoryCodingTransformersReasoningCore(CodingTransformersReasoningCore):
-    """M23 local Qwen core constrained to the 14-tool repository-aware protocol."""
+    """M23 local Qwen core constrained to the 13-tool repository-aware protocol."""
 
     def __init__(self, settings) -> None:
         super().__init__(settings)
