@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -21,6 +22,7 @@ from .autonomous_runtime import AutonomousCodingTaskRuntime
 
 
 _DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+_PYTHON_ALIASES = frozenset({"python", "python.exe", "python3", "python3.exe"})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,6 +96,13 @@ def _split_command(command: str) -> tuple[str, ...]:
     parts = tuple(shlex.split(command, posix=os.name != "nt"))
     if not parts:
         raise ValueError("verification command cannot be empty")
+    # A verifier belongs to the Harness X runtime environment. On Windows,
+    # CreateProcess can otherwise resolve a bare `python` to the system install even
+    # when harness-x-code itself is running from an activated virtual environment.
+    # Preserve explicit interpreter paths, but bind ordinary aliases to the exact
+    # interpreter executing Harness X so installed pytest/lint dependencies match.
+    if parts[0].casefold() in _PYTHON_ALIASES:
+        return (sys.executable, *parts[1:])
     return parts
 
 
