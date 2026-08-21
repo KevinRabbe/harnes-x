@@ -8,9 +8,17 @@ import shlex
 from pathlib import Path
 from typing import Sequence
 
-from harness_x.reasoning import OpenAICompatibleReasoningCore, OpenAICompatibleSettings
+from harness_x.reasoning import (
+    OpenAICompatibleReasoningCore,
+    OpenAICompatibleSettings,
+    TransformersLocalReasoningCore,
+    TransformersLocalSettings,
+)
 
 from .runtime import CodingTaskRuntime
+
+
+_DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,11 +34,38 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help=(
             "Verification command; repeat for multiple commands "
-            "(for example: --verify \"npm run build\")"
+            '(for example: --verify "npm run build")'
         ),
     )
+    parser.add_argument(
+        "--backend",
+        choices=("transformers", "openai"),
+        default="transformers",
+        help="Reasoning backend; transformers runs the model in this process.",
+    )
+    parser.add_argument("--model", default=_DEFAULT_QWEN_MODEL)
+    parser.add_argument(
+        "--revision",
+        default=None,
+        help="Optional exact Hugging Face model revision for the transformers backend.",
+    )
+    parser.add_argument(
+        "--generation-max-new-tokens",
+        type=int,
+        default=4096,
+        help="Maximum generated tokens for one local Transformers reasoning turn.",
+    )
+    parser.add_argument(
+        "--no-4bit",
+        action="store_true",
+        help="Disable bitsandbytes 4-bit loading for the transformers backend.",
+    )
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Require the transformers backend to use the existing local HF cache.",
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
-    parser.add_argument("--model", default="local-model")
     parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--max-reasoning-steps", type=int, default=32)
@@ -49,6 +84,27 @@ def _split_command(command: str) -> tuple[str, ...]:
     return parts
 
 
+def _build_core(args: argparse.Namespace):
+    if args.backend == "transformers":
+        return TransformersLocalReasoningCore(
+            TransformersLocalSettings(
+                model=args.model,
+                revision=args.revision,
+                max_new_tokens=args.generation_max_new_tokens,
+                load_in_4bit=not args.no_4bit,
+                local_files_only=args.local_files_only,
+            )
+        )
+    return OpenAICompatibleReasoningCore(
+        OpenAICompatibleSettings(
+            base_url=args.base_url,
+            model=args.model,
+            api_key_env=args.api_key_env,
+            allow_remote_endpoint=args.allow_remote,
+        )
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -57,14 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    core = OpenAICompatibleReasoningCore(
-        OpenAICompatibleSettings(
-            base_url=args.base_url,
-            model=args.model,
-            api_key_env=args.api_key_env,
-            allow_remote_endpoint=args.allow_remote,
-        )
-    )
+    core = _build_core(args)
     runtime = CodingTaskRuntime(
         args.workspace,
         core,
@@ -73,7 +122,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_tool_actions=args.max_tool_actions,
         max_output_tokens=args.max_output_tokens,
     )
-    report = runtime.run(args.task, verification_commands=verification_commands)
+    try:
+        report = runtime.run(
+            args.task,
+            verification_commands=verification_commands,
+        )
+    finally:
+        close = getattr(core, "close", None)
+        if callable(close):
+            close()
     print(report.model_dump_json(indent=2))
     return 0 if report.succeeded else 1
 
