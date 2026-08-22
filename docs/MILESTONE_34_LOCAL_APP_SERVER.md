@@ -49,7 +49,7 @@ The service therefore has one coding worker. Additional sessions may be created 
 
 It may also specify project-memory location/identity, normal coding budgets, baseline-verification policy, and the paired M26 application/browser plan inputs.
 
-Paths are normalized to absolute paths in the durable request. Live-path existence is checked only when a new session is scheduled. Historical snapshots therefore remain readable after the original repository or verification file is later moved or deleted.
+Paths are normalized to absolute paths in the durable request. Live-path existence is checked only when a new session is scheduled. Historical snapshots therefore remain readable after the original repository or verification file is later moved or deleted. A restarted service will not requeue a `CREATED` session whose launch paths have disappeared; it records an explicit launch-validation failure instead.
 
 ## Durable session state
 
@@ -95,7 +95,7 @@ Queued work can be cancelled before execution and becomes `CANCELLED` immediatel
 
 The existing coding runtime does not yet expose a safe cancellation hook inside a running reasoning/tool loop. M34 therefore does not falsely claim preemption. A running cancel request is durably recorded. If the underlying run subsequently succeeds, the session may still finish `SUCCEEDED`; if it returns unsuccessfully after the request, M34 records `CANCELLED` with the runtime evidence retained.
 
-A process restart cannot resume an in-memory M34 worker. Sessions found `RUNNING` or `CANCEL_REQUESTED` on App Server startup are explicitly failed with `app_server_restart_interrupted_running_session`. A session still in `CREATED` may be requeued if its launch inputs still exist.
+A process restart cannot resume an in-memory M34 worker. Sessions found `RUNNING` or `CANCEL_REQUESTED` on App Server startup are explicitly failed with `app_server_restart_interrupted_running_session`. A session still in `CREATED` may be requeued only if its launch inputs still exist.
 
 ## Existing coding runtime integration
 
@@ -153,9 +153,11 @@ Returns a minimal health object. It is the only endpoint that does not require t
 ### Session list
 
 ```text
-GET /v1/sessions
+GET /v1/sessions?limit=<1..500>
 Authorization: Bearer <local token>
 ```
+
+The default limit is 100. The response includes `total`, `limit`, and `truncated`; when truncated it returns the newest sessions rather than an unbounded history dump.
 
 ### Session snapshot
 
@@ -167,9 +169,11 @@ Authorization: Bearer <local token>
 ### Event page
 
 ```text
-GET /v1/sessions/{session_id}/events?after=<sequence>
+GET /v1/sessions/{session_id}/events?after=<sequence>&limit=<1..1000>
 Authorization: Bearer <local token>
 ```
+
+The default event-page limit is 200. The response includes `has_more` and `next_after`, so a GUI can page deterministically without requesting an unbounded event ledger.
 
 ### Event stream
 
@@ -191,7 +195,7 @@ Authorization: Bearer <local token>
 Content-Type: application/json
 ```
 
-The body is `CodingSessionRequest`. Accepted sessions return HTTP 202.
+The body is `CodingSessionRequest`. Accepted sessions return HTTP 202. Launch-time path validation happens before the request is queued.
 
 ### Request cancellation
 
@@ -212,9 +216,11 @@ The transport additionally:
 - requires a bearer token for all session data/mutations;
 - rejects Host headers other than `127.0.0.1` or `localhost`, reducing DNS-rebinding exposure;
 - bounds JSON request bodies to 2 MiB;
+- bounds session and event-page responses;
 - requires JSON content type for session creation;
 - does not emit permissive CORS headers;
 - sends `no-store`, `nosniff`, and no-referrer headers on JSON responses;
+- explicitly closes JSON/OPTIONS/SSE HTTP connections, so an intentionally unconsumed body on a mutation endpoint cannot poison a later HTTP/1.1 request parser;
 - never serves arbitrary filesystem paths through a generic HTTP file endpoint.
 
 A future browser UI should preferably be served from the same loopback origin. Cross-origin access should not be enabled by wildcard CORS.
