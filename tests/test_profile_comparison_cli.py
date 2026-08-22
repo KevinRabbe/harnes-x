@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -50,6 +51,63 @@ def test_memory_seed_requires_explicit_target_root(tmp_path: Path) -> None:
         str(seed),
     )
     with pytest.raises(ValueError, match="explicit fresh --project-memory-root"):
+        _validate_profile_run_args(args)
+
+
+def test_memory_seed_requires_and_preserves_exact_m28_project_key(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    seed.joinpath("project-memory.json").write_text(
+        json.dumps({"project_key": "original-project"}) + "\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "memory"
+
+    missing_key = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+    )
+    with pytest.raises(ValueError, match="requires explicit --project-memory-key"):
+        _validate_profile_run_args(missing_key)
+
+    wrong_key = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+        "--project-memory-key",
+        "different-project",
+    )
+    with pytest.raises(ValueError, match="must exactly match"):
+        _validate_profile_run_args(wrong_key)
+
+    matching = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+        "--project-memory-key",
+        "original-project",
+    )
+    _validate_profile_run_args(matching)
+
+
+def test_profile_run_rejects_output_file_path(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    output.write_text("not a directory\n", encoding="utf-8")
+    args = _profile_args(tmp_path, "--model-profile", "main")
+    with pytest.raises(ValueError, match="must be a directory path"):
         _validate_profile_run_args(args)
 
 
