@@ -2,7 +2,8 @@
 
 The service schedules existing coding runtimes but does not acquire any of their authority.
 Model output, tool execution, verification, memory, and completion remain owned by the coding
-stack. M34 only persists session lifecycle and exposes it to local clients.
+stack. M35 additionally discovers the one authoritative TraceStore ledger created inside a
+session output root so HTTP clients can project it read-only.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from harness_x.coding.model_selection import (
     resolve_model_selection,
     write_model_selection_artifact,
 )
+from harness_x.core import TraceId
 
 from .protocol import (
     AppEventKind,
@@ -111,7 +113,7 @@ class AppServerService:
         root: str | Path,
         *,
         runner: CodingRunner | None = None,
-        server_version: str = "0.1.0a0+app-server34",
+        server_version: str = "0.1.0a0+app-server35-trace-projection",
     ) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -173,6 +175,39 @@ class AppServerService:
     def sessions(self) -> tuple[AppSessionSnapshot, ...]:
         return self.store.sessions
 
+    def discover_trace(self, session_id: str) -> AppSessionSnapshot:
+        """Attach the unique TraceStore file if the runtime has created it yet.
+
+        Discovery is idempotent and does not parse or copy trace records. Integrity validation
+        happens when M35 projects the source ledger.
+        """
+
+        snapshot = self.store.session(session_id)
+        if snapshot.trace_id is not None:
+            return snapshot
+        output_root = Path(snapshot.output_root).resolve()
+        if not output_root.is_dir():
+            return snapshot
+        matches = sorted(
+            path.resolve()
+            for path in output_root.glob("trace_*.jsonl")
+            if path.is_file()
+        )
+        if not matches:
+            return snapshot
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"app session has ambiguous causal traces: {len(matches)} files"
+            )
+        trace_path = matches[0]
+        trace_id = trace_path.stem
+        TraceId(value=trace_id)
+        return self.store.attach_trace(
+            session_id,
+            trace_id=trace_id,
+            path=trace_path,
+        )
+
     def cancel(self, session_id: str) -> AppSessionSnapshot:
         snapshot = self.store.request_cancel(session_id)
         with self._condition:
@@ -216,9 +251,6 @@ class AppServerService:
     def _recover_sessions(self) -> None:
         for snapshot in self.store.sessions:
             if snapshot.status == AppSessionStatus.CREATED:
-                # CREATED means the run never crossed the runtime-start boundary. It is safe to
-                # queue again; launch-time path validation will happen inside the runner/service
-                # on the original persisted request if the operator resumes the server.
                 try:
                     self._validate_launch_request(snapshot.request)
                 except ValueError as exc:
@@ -234,6 +266,8 @@ class AppServerService:
                 AppSessionStatus.RUNNING,
                 AppSessionStatus.CANCEL_REQUESTED,
             }:
+                # Preserve the durable trace pointer if it was already attached; running-task
+                # instruction state is still not resumed.
                 self.store.transition(
                     snapshot.session_id,
                     status=AppSessionStatus.FAILED,
@@ -257,6 +291,14 @@ class AppServerService:
                     self._active_session_id = None
                     self._condition.notify_all()
 
+    def _discover_trace_without_affecting_outcome(self, session_id: str) -> None:
+        try:
+            self.discover_trace(session_id)
+        except (OSError, RuntimeError, ValueError):
+            # Trace projection is observability only. A discovery/projection issue must not
+            # rewrite the coding runtime's independently established success/failure outcome.
+            return
+
     def _run_one(self, session_id: str) -> None:
         current = self.store.session(session_id)
         if current.status == AppSessionStatus.CANCEL_REQUESTED:
@@ -277,6 +319,7 @@ class AppServerService:
         try:
             report = self.runner(self.store.session(session_id))
         except BaseException as exc:
+            self._discover_trace_without_affecting_outcome(session_id)
             self.store.transition(
                 session_id,
                 status=AppSessionStatus.FAILED,
@@ -285,6 +328,7 @@ class AppServerService:
             )
             return
 
+        self._discover_trace_without_affecting_outcome(session_id)
         report_path = Path(self.store.session(session_id).output_root) / "coding-task-report.json"
         if report_path.exists():
             self.store.add_artifact(
