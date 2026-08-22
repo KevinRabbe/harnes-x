@@ -140,3 +140,46 @@ def test_store_rejects_partial_attestation_before_appending_event(tmp_path: Path
         )
 
     assert store.events(snapshot.session_id) == before
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"source_bytes": True, "source_sha256": "0" * 64}, "non-negative integer"),
+        ({"source_bytes": 1, "source_sha256": "A" * 64}, "lowercase SHA-256"),
+        (
+            {
+                "source_bytes": 1,
+                "source_sha256": "0" * 64,
+                "attestation_error": "also failed",
+            },
+            "both captured and unavailable",
+        ),
+        ({"attestation_error": "   "}, "cannot be blank"),
+    ],
+)
+def test_store_rejects_malformed_attestation_before_event_append(
+    tmp_path: Path,
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output = tmp_path / "run"
+    output.mkdir()
+    report_path = output / "coding-task-report.json"
+    report_path.write_text('{"succeeded":true}\n', encoding="utf-8")
+
+    store = AppSessionStore(tmp_path / "sessions")
+    snapshot = store.create_session(_request(workspace), output_root=output)
+    before = store.events(snapshot.session_id)
+
+    with pytest.raises(ValueError, match=message):
+        store.add_artifact(
+            snapshot.session_id,
+            artifact_kind="coding_task_report",
+            path=report_path,
+            **kwargs,
+        )
+
+    assert store.events(snapshot.session_id) == before
