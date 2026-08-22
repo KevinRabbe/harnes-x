@@ -8,6 +8,13 @@ from urllib.parse import urlsplit
 from harness_x.core.errors import TraceCorruptionError
 
 from .bootstrap import OneTimeBootstrapTickets
+from .evidence_manifest import (
+    EvidenceManifestCorruptionError,
+    EvidenceManifestNotTerminalError,
+    RenderedEvidenceManifest,
+    build_terminal_evidence_manifest,
+    render_terminal_evidence_manifest,
+)
 from .http_server import LocalAppHTTPServer
 from .report_projection import (
     ReportCorruptionError,
@@ -46,6 +53,8 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
     short-lived one-time local bootstrap exchange for explicitly launched operator browsers.
     M41 adds one authenticated raw-byte export for the canonical validated coding report.
     M42 adds one terminal-only exact-byte export for the attached verified causal trace.
+    M43 adds one terminal-only generated evidence manifest correlating those identities with the
+    validated App Server lifecycle head.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -66,7 +75,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
         bootstrap_tickets = self.bootstrap_tickets
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/42"
+            server_version = "HarnessXAppServer/43"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -83,6 +92,46 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     return
 
                 pieces = self._session_path(parsed.path)
+                if pieces is not None and pieces[1] == "/evidence/manifest":
+                    if not self._authorized(token):
+                        self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                        return
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "evidence manifest endpoint does not accept query parameters",
+                        )
+                        return
+                    session_id, _ = pieces
+                    try:
+                        snapshot = service.session(session_id)
+                        events = service.store.events(session_id)
+                        manifest = build_terminal_evidence_manifest(
+                            snapshot=snapshot,
+                            events=events,
+                        )
+                        rendered_manifest = render_terminal_evidence_manifest(manifest)
+                    except KeyError:
+                        self._error(HTTPStatus.NOT_FOUND, "unknown_session")
+                        return
+                    except EvidenceManifestNotTerminalError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "evidence_manifest_not_terminal",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except EvidenceManifestCorruptionError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "evidence_corruption",
+                            str(exc)[:4000],
+                        )
+                        return
+                    self._evidence_manifest(rendered_manifest)
+                    return
+
                 if pieces is not None and pieces[1] == "/trace/export":
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
@@ -338,5 +387,25 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(body)
+
+            def _evidence_manifest(self, rendered: RenderedEvidenceManifest) -> None:
+                self.close_connection = True
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="session-evidence-manifest.json"',
+                )
+                self.send_header("Content-Length", str(rendered.source_bytes))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header(
+                    "X-Harness-X-Evidence-Manifest-SHA256",
+                    rendered.source_sha256,
+                )
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(rendered.payload)
 
         return Handler
