@@ -21,6 +21,7 @@ from .model_selection import (
 from .run_manifest import (
     build_coding_run_manifest,
     clone_comparison_memory_seed,
+    object_fingerprint,
     write_coding_run_manifest,
 )
 
@@ -50,10 +51,14 @@ def _validate_profile_run_args(args: argparse.Namespace) -> None:
     if not args.model_profile:
         raise ValueError("harness-x-profile-run requires explicit --model-profile")
     if args.in_place:
-        raise ValueError("harness-x-profile-run requires isolated execution; --in-place is forbidden")
+        raise ValueError(
+            "harness-x-profile-run requires isolated execution; --in-place is forbidden"
+        )
     if args.resume_long_horizon_state is not None or args.resume_allow_workspace_drift:
         raise ValueError("comparison profile runs cannot resume an earlier task state")
     output = Path(args.output).resolve()
+    if output.exists() and not output.is_dir():
+        raise ValueError(f"comparison profile output must be a directory path: {output}")
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"comparison profile output must be absent or empty: {output}")
     if args.comparison_memory_seed is not None and args.project_memory_root is None:
@@ -83,6 +88,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         browser_fingerprint = (
             browser_inputs[1].fingerprint if browser_inputs is not None else None
         )
+        application_fingerprint = (
+            object_fingerprint(browser_inputs[0].model_dump(mode="json"))
+            if browser_inputs is not None
+            else None
+        )
         manifest = build_coding_run_manifest(
             task=args.task,
             workspace_root=args.workspace,
@@ -90,6 +100,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             isolated=True,
             verification_plan_fingerprint=verification_plan.fingerprint,
             browser_verification_plan_fingerprint=browser_fingerprint,
+            application_spec_fingerprint=application_fingerprint,
+            browser_headed=bool(args.browser_headed),
             project_memory_root=args.project_memory_root,
             project_memory_key=args.project_memory_key,
             model_selection=selection,
