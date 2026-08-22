@@ -57,6 +57,7 @@ async function downloadExactCodingReport() {
           Accept: "application/json",
         },
         cache: "no-store",
+        credentials: "omit",
       },
     );
     if (response.status === 401) {
