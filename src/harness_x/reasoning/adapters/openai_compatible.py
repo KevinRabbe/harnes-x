@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -15,8 +16,11 @@ from ..base import RawReasoningOutput, ReasoningCoreError, ReasoningCoreInfo
 from ..context_builder import ContextBuildResult
 
 
+_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+
+
 class OpenAICompatibleSettings(BaseModel):
-    """Connection settings for llama.cpp/vLLM/Ollama-style compatible servers."""
+    """Connection settings for llama.cpp/vLLM/SGLang/hosted compatible servers."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -27,6 +31,10 @@ class OpenAICompatibleSettings(BaseModel):
     api_key_env: str | None = None
     allow_remote_endpoint: bool = False
     use_response_format: bool = True
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, gt=0.0, le=1.0)
+    reasoning_effort: str | None = None
+    prompt_mode: Literal["system", "user_prefix"] = "system"
 
     @field_validator("base_url", "model")
     @classmethod
@@ -34,6 +42,23 @@ class OpenAICompatibleSettings(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("reasoning adapter fields cannot be blank")
+        return value
+
+    @field_validator("api_key_env", "reasoning_effort")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, value: str | None) -> str | None:
+        if value is not None and value not in _REASONING_EFFORTS:
+            raise ValueError(
+                "reasoning_effort must be one of none, low, medium, high, xhigh, max"
+            )
         return value
 
     @model_validator(mode="after")
@@ -81,7 +106,7 @@ class OpenAICompatibleReasoningCore:
         self.settings = settings
         self._info = ReasoningCoreInfo(
             name="openai_compatible",
-            version="openai-compatible-v1",
+            version="openai-compatible-v2-profile-tunable",
             model=settings.model,
             transport="http_chat_completions",
             model_inference=True,
@@ -92,15 +117,29 @@ class OpenAICompatibleReasoningCore:
         return self._info
 
     def generate(self, context: ContextBuildResult) -> RawReasoningOutput:
-        body: dict[str, object] = {
-            "model": self.settings.model,
-            "messages": [
+        if self.settings.prompt_mode == "user_prefix":
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"{_SYSTEM_PROMPT}\n\nHARNESS X TASK CONTEXT:\n{context.serialized}",
+                }
+            ]
+        else:
+            messages = [
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": context.serialized},
-            ],
-            "temperature": 0,
+            ]
+
+        body: dict[str, object] = {
+            "model": self.settings.model,
+            "messages": messages,
+            "temperature": self.settings.temperature,
             "max_tokens": self.settings.max_output_tokens,
         }
+        if self.settings.top_p is not None:
+            body["top_p"] = self.settings.top_p
+        if self.settings.reasoning_effort is not None:
+            body["reasoning_effort"] = self.settings.reasoning_effort
         if self.settings.use_response_format:
             body["response_format"] = {"type": "json_object"}
 
