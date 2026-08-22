@@ -1,4 +1,4 @@
-"""Bounded static assets for the local M36 operator UI.
+"""Bounded static assets for the local operator UI.
 
 The UI is presentation-only. Assets are packaged with Harness X and are served from an exact
 allowlist; callers cannot turn this helper into arbitrary package or filesystem reads.
@@ -12,6 +12,7 @@ _UI_ROOT = files("harness_x.app_server").joinpath("ui")
 _MAX_UI_ASSET_BYTES = 512 * 1024
 _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/": ("index.html", "text/html; charset=utf-8"),
+    "/ui/stream_policy.js": ("stream_policy.js", "text/javascript; charset=utf-8"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8"),
 }

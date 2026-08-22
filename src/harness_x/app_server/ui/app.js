@@ -1,11 +1,15 @@
 "use strict";
 
+const streamPolicy = globalThis.HarnessXStreamPolicy;
+if (!streamPolicy) throw new Error("Harness X stream policy did not load");
+
 const state = {
   token: null,
   selectedSessionId: null,
   selectionGeneration: 0,
   sessions: new Map(),
-  streamControllers: [],
+  streamControllers: new Set(),
+  streamReconnectTimers: new Set(),
   lifecycleSequences: new Set(),
   traceSteps: new Set(),
 };
@@ -84,7 +88,9 @@ async function api(path, options = {}) {
 
 function abortStreams() {
   for (const controller of state.streamControllers) controller.abort();
-  state.streamControllers = [];
+  state.streamControllers.clear();
+  for (const timer of state.streamReconnectTimers) clearTimeout(timer);
+  state.streamReconnectTimers.clear();
   setPill("trace-state", "Idle");
   setPill("lifecycle-state", "Idle");
 }
@@ -221,8 +227,7 @@ function renderSnapshot(snapshot) {
 }
 
 function timelineEmpty(root, text) {
-  const element = paragraph(text, "timeline-empty");
-  root.append(element);
+  root.append(paragraph(text, "timeline-empty"));
 }
 
 function appendTraceEvent(event) {
@@ -304,6 +309,21 @@ function selectionIsCurrent(sessionId, generation) {
   return state.selectedSessionId === sessionId && state.selectionGeneration === generation;
 }
 
+function projectPageCursor(rows, cursorField, declaredNextAfter, append) {
+  let cursor = 0;
+  for (const row of rows) {
+    const sourceCursor = row[cursorField];
+    cursor = streamPolicy.advanceCursor(String(sourceCursor), sourceCursor, cursor);
+    append(row);
+  }
+  if (declaredNextAfter !== cursor) {
+    throw new Error(
+      `page cursor mismatch: rendered through ${cursor}, API declared ${declaredNextAfter}`,
+    );
+  }
+  return cursor;
+}
+
 async function loadSessionEvidence(sessionId, generation) {
   if (!selectionIsCurrent(sessionId, generation)) return null;
   state.lifecycleSequences.clear();
@@ -319,12 +339,20 @@ async function loadSessionEvidence(sessionId, generation) {
     api(`/v1/sessions/${encoded}/trace?after=0&limit=1000`),
   ]);
   if (!selectionIsCurrent(sessionId, generation)) return null;
-  for (const event of eventPage.events || []) appendLifecycleEvent(event);
-  for (const event of tracePage.events || []) appendTraceEvent(event);
-  return {
-    eventAfter: eventPage.next_after || 0,
-    traceAfter: tracePage.next_after || 0,
-  };
+
+  const eventAfter = projectPageCursor(
+    eventPage.events || [],
+    "sequence",
+    eventPage.next_after || 0,
+    appendLifecycleEvent,
+  );
+  const traceAfter = projectPageCursor(
+    tracePage.events || [],
+    "step",
+    tracePage.next_after || 0,
+    appendTraceEvent,
+  );
+  return { eventAfter, traceAfter };
 }
 
 function parseSseBlock(block) {
@@ -364,7 +392,9 @@ async function streamSse(path, controller, onEvent) {
     } catch (_error) {
       // Keep the status fallback.
     }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
   if (!response.body) throw new Error("stream response has no readable body");
 
@@ -386,59 +416,177 @@ async function streamSse(path, controller, onEvent) {
   if (buffer.trim()) onEvent(parseSseBlock(buffer));
 }
 
+function streamPillId(kind) {
+  return kind === "lifecycle" ? "lifecycle-state" : "trace-state";
+}
+
+function nonRetriableStreamError(error) {
+  return [400, 401, 403, 404].includes(error && error.status);
+}
+
+function releaseStreamController(controller) {
+  state.streamControllers.delete(controller);
+}
+
+async function selectedSessionIsTerminal(sessionId, generation) {
+  const snapshot = await api(`/v1/sessions/${encodeURIComponent(sessionId)}`);
+  if (!selectionIsCurrent(sessionId, generation)) return null;
+  renderSnapshot(snapshot);
+  renderSessions([...state.sessions.values()]);
+  return streamPolicy.isTerminalStatus(snapshot.status);
+}
+
+function scheduleReconnect(kind, sessionId, cursor, generation, consecutiveFailures, restart) {
+  if (!selectionIsCurrent(sessionId, generation)) return;
+  const delay = streamPolicy.reconnectDelayMs(consecutiveFailures - 1);
+  if (delay == null) {
+    setPill(streamPillId(kind), "Disconnected", "failed");
+    return;
+  }
+  setPill(
+    streamPillId(kind),
+    `Reconnect ${consecutiveFailures}/${streamPolicy.maxReconnectAttempts}`,
+    "running",
+  );
+  const timer = setTimeout(() => {
+    state.streamReconnectTimers.delete(timer);
+    if (!selectionIsCurrent(sessionId, generation)) return;
+    restart(sessionId, cursor, generation, consecutiveFailures);
+  }, delay);
+  state.streamReconnectTimers.add(timer);
+}
+
+async function runLifecycleStream(sessionId, cursor, generation, consecutiveFailures = 0) {
+  if (!selectionIsCurrent(sessionId, generation)) return;
+  const controller = new AbortController();
+  state.streamControllers.add(controller);
+  setPill("lifecycle-state", "Live", "running");
+  let currentCursor = cursor;
+  let failures = consecutiveFailures;
+  try {
+    await streamSse(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/events/stream?after=${currentCursor}`,
+      controller,
+      (message) => {
+        if (!selectionIsCurrent(sessionId, generation)) return;
+        if (!message.data) throw new Error("lifecycle SSE event is missing data");
+        const payload = JSON.parse(message.data);
+        if (message.type !== payload.kind) {
+          throw new Error("lifecycle SSE event type does not match payload kind");
+        }
+        currentCursor = streamPolicy.advanceCursor(message.id, payload.sequence, currentCursor);
+        appendLifecycleEvent(payload);
+        failures = 0;
+      },
+    );
+    if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
+    const terminal = await selectedSessionIsTerminal(sessionId, generation);
+    if (!selectionIsCurrent(sessionId, generation)) return;
+    if (terminal === true) {
+      setPill("lifecycle-state", "Closed", "muted");
+      return;
+    }
+    scheduleReconnect(
+      "lifecycle",
+      sessionId,
+      currentCursor,
+      generation,
+      failures + 1,
+      runLifecycleStream,
+    );
+  } catch (error) {
+    if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
+    if (nonRetriableStreamError(error)) {
+      setPill("lifecycle-state", "Error", "failed");
+      console.warn("lifecycle stream rejected reconnect", error);
+      return;
+    }
+    scheduleReconnect(
+      "lifecycle",
+      sessionId,
+      currentCursor,
+      generation,
+      failures + 1,
+      runLifecycleStream,
+    );
+    console.warn("lifecycle stream interrupted; reconnect scheduled", error);
+  } finally {
+    releaseStreamController(controller);
+  }
+}
+
+async function runTraceStream(sessionId, cursor, generation, consecutiveFailures = 0) {
+  if (!selectionIsCurrent(sessionId, generation)) return;
+  const controller = new AbortController();
+  state.streamControllers.add(controller);
+  setPill("trace-state", "Live", "running");
+  let currentCursor = cursor;
+  let failures = consecutiveFailures;
+  let traceCorrupt = false;
+  try {
+    await streamSse(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/trace/stream?after=${currentCursor}`,
+      controller,
+      (message) => {
+        if (!selectionIsCurrent(sessionId, generation)) return;
+        if (!message.data) throw new Error("trace SSE event is missing data");
+        const payload = JSON.parse(message.data);
+        if (message.type === "trace_error") {
+          appendTraceError(payload);
+          traceCorrupt = true;
+          return;
+        }
+        if (message.type !== "trace_event") {
+          throw new Error(`unexpected trace SSE event type: ${message.type}`);
+        }
+        currentCursor = streamPolicy.advanceCursor(message.id, payload.step, currentCursor);
+        appendTraceEvent(payload);
+        failures = 0;
+      },
+    );
+    if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
+    if (traceCorrupt) return;
+    const terminal = await selectedSessionIsTerminal(sessionId, generation);
+    if (!selectionIsCurrent(sessionId, generation)) return;
+    if (terminal === true) {
+      setPill("trace-state", "Closed", "muted");
+      return;
+    }
+    scheduleReconnect(
+      "trace",
+      sessionId,
+      currentCursor,
+      generation,
+      failures + 1,
+      runTraceStream,
+    );
+  } catch (error) {
+    if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
+    if (traceCorrupt) return;
+    if (nonRetriableStreamError(error)) {
+      setPill("trace-state", "Error", "failed");
+      console.warn("trace stream rejected reconnect", error);
+      return;
+    }
+    scheduleReconnect(
+      "trace",
+      sessionId,
+      currentCursor,
+      generation,
+      failures + 1,
+      runTraceStream,
+    );
+    console.warn("trace stream interrupted; reconnect scheduled", error);
+  } finally {
+    releaseStreamController(controller);
+  }
+}
+
 function startStreams(sessionId, eventAfter, traceAfter, generation) {
   if (!selectionIsCurrent(sessionId, generation)) return;
   abortStreams();
-  const encoded = encodeURIComponent(sessionId);
-
-  const lifecycleController = new AbortController();
-  const traceController = new AbortController();
-  state.streamControllers.push(lifecycleController, traceController);
-  setPill("lifecycle-state", "Live", "running");
-  setPill("trace-state", "Live", "running");
-
-  streamSse(
-    `/v1/sessions/${encoded}/events/stream?after=${eventAfter}`,
-    lifecycleController,
-    (message) => {
-      if (!selectionIsCurrent(sessionId, generation) || !message.data) return;
-      try {
-        appendLifecycleEvent(JSON.parse(message.data));
-      } catch (error) {
-        console.warn("invalid lifecycle SSE payload", error);
-      }
-    },
-  ).then(async () => {
-    if (!selectionIsCurrent(sessionId, generation) || lifecycleController.signal.aborted) return;
-    setPill("lifecycle-state", "Closed", "muted");
-    await refreshSelectedSnapshot();
-  }).catch((error) => {
-    if (!selectionIsCurrent(sessionId, generation) || lifecycleController.signal.aborted) return;
-    setPill("lifecycle-state", "Error", "failed");
-    console.warn("lifecycle stream failed", error);
-  });
-
-  streamSse(
-    `/v1/sessions/${encoded}/trace/stream?after=${traceAfter}`,
-    traceController,
-    (message) => {
-      if (!selectionIsCurrent(sessionId, generation) || !message.data) return;
-      try {
-        const payload = JSON.parse(message.data);
-        if (message.type === "trace_error") appendTraceError(payload);
-        else appendTraceEvent(payload);
-      } catch (error) {
-        console.warn("invalid trace SSE payload", error);
-      }
-    },
-  ).then(() => {
-    if (!selectionIsCurrent(sessionId, generation) || traceController.signal.aborted) return;
-    if (!byId("trace-state").textContent.includes("Corrupt")) setPill("trace-state", "Closed", "muted");
-  }).catch((error) => {
-    if (!selectionIsCurrent(sessionId, generation) || traceController.signal.aborted) return;
-    setPill("trace-state", "Error", "failed");
-    console.warn("trace stream failed", error);
-  });
+  void runLifecycleStream(sessionId, eventAfter, generation);
+  void runTraceStream(sessionId, traceAfter, generation);
 }
 
 async function refreshSelectedSnapshot() {
