@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from harness_x.coding.profile_comparison_cli import build_parser as build_compare_parser
+from harness_x.coding.profile_run_cli import _validate_profile_run_args, build_parser
+
+
+def _profile_args(tmp_path: Path, *extra: str):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    return build_parser().parse_args(
+        [
+            str(workspace),
+            "--task",
+            "Implement feature",
+            "--verify",
+            "python -m pytest",
+            "--output",
+            str(tmp_path / "run"),
+            *extra,
+        ]
+    )
+
+
+def test_profile_run_requires_explicit_profile(tmp_path: Path) -> None:
+    args = _profile_args(tmp_path)
+    with pytest.raises(ValueError, match="requires explicit --model-profile"):
+        _validate_profile_run_args(args)
+
+
+def test_profile_run_forbids_in_place_execution(tmp_path: Path) -> None:
+    args = _profile_args(tmp_path, "--model-profile", "main", "--in-place")
+    with pytest.raises(ValueError, match="isolated execution"):
+        _validate_profile_run_args(args)
+
+
+def test_memory_seed_requires_explicit_target_root(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    args = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+    )
+    with pytest.raises(ValueError, match="explicit fresh --project-memory-root"):
+        _validate_profile_run_args(args)
+
+
+def test_memory_seed_requires_and_preserves_exact_m28_project_key(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    seed.joinpath("project-memory.json").write_text(
+        json.dumps({"project_key": "original-project"}) + "\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "memory"
+
+    missing_key = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+    )
+    with pytest.raises(ValueError, match="requires explicit --project-memory-key"):
+        _validate_profile_run_args(missing_key)
+
+    wrong_key = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+        "--project-memory-key",
+        "different-project",
+    )
+    with pytest.raises(ValueError, match="must exactly match"):
+        _validate_profile_run_args(wrong_key)
+
+    matching = _profile_args(
+        tmp_path,
+        "--model-profile",
+        "main",
+        "--comparison-memory-seed",
+        str(seed),
+        "--project-memory-root",
+        str(target),
+        "--project-memory-key",
+        "original-project",
+    )
+    _validate_profile_run_args(matching)
+
+
+def test_profile_run_rejects_output_file_path(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    output.write_text("not a directory\n", encoding="utf-8")
+    args = _profile_args(tmp_path, "--model-profile", "main")
+    with pytest.raises(ValueError, match="must be a directory path"):
+        _validate_profile_run_args(args)
+
+
+def test_compare_parser_is_two_run_offline_surface() -> None:
+    args = build_compare_parser().parse_args(["left", "right"])
+    assert args.left == Path("left")
+    assert args.right == Path("right")
+    assert args.allow_incomparable is False
+
+
+def test_installed_m33_commands_expose_help() -> None:
+    for command in ("harness-x-profile-run", "harness-x-compare-runs"):
+        executable = shutil.which(command)
+        assert executable is not None, f"installed command missing: {command}"
+        completed = subprocess.run(
+            [executable, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "usage:" in completed.stdout

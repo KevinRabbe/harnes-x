@@ -1,0 +1,311 @@
+"""Pre-run provenance required for strict offline profile comparison.
+
+The final coding report proves what happened. This manifest records the operator-controlled
+starting conditions that are otherwise lost after project memory mutates during a run.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .model_selection import ResolvedModelSelection
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+
+
+def object_fingerprint(value: object) -> str:
+    return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def harness_package_fingerprint() -> str:
+    """Hash the installed Harness X Python implementation used by this run."""
+
+    package_root = Path(__file__).resolve().parents[1]
+    rows: list[tuple[str, str, int]] = []
+    for path in sorted(package_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        payload = path.read_bytes()
+        rows.append(
+            (
+                path.relative_to(package_root).as_posix(),
+                hashlib.sha256(payload).hexdigest(),
+                len(payload),
+            )
+        )
+    return object_fingerprint(rows)
+
+
+def harness_distribution_version() -> str:
+    try:
+        return version("harness-x")
+    except PackageNotFoundError:
+        return "uninstalled"
+
+
+def directory_fingerprint(path: str | Path) -> str:
+    """Return an exact hash of one persistent directory without following symlinks.
+
+    A missing directory is a meaningful empty starting state. Symlinks are rejected because
+    comparison provenance must not depend on mutable files outside the declared memory root.
+    """
+
+    root = Path(path).resolve()
+    if not root.exists():
+        return object_fingerprint([])
+    if not root.is_dir():
+        raise ValueError(f"comparison fingerprint target is not a directory: {root}")
+
+    rows: list[tuple[str, str, int]] = []
+    for current, dirs, names in os.walk(root, followlinks=False):
+        base = Path(current)
+        for name in tuple(dirs):
+            child = base / name
+            if child.is_symlink():
+                raise ValueError(
+                    f"comparison memory fingerprint rejects directory symlink: {child}"
+                )
+        for name in sorted(names):
+            target = base / name
+            if target.is_symlink():
+                raise ValueError(
+                    f"comparison memory fingerprint rejects file symlink: {target}"
+                )
+            if not target.is_file():
+                continue
+            digest = hashlib.sha256()
+            size = 0
+            with target.open("rb") as handle:
+                while True:
+                    block = handle.read(1024 * 1024)
+                    if not block:
+                        break
+                    size += len(block)
+                    digest.update(block)
+            rows.append((target.relative_to(root).as_posix(), digest.hexdigest(), size))
+    rows.sort()
+    return object_fingerprint(rows)
+
+
+def comparison_memory_seed_project_key(seed_root: str | Path) -> str | None:
+    """Read the M28 logical project key from a seed without mutating it.
+
+    Empty seed directories have no established identity yet. Once `project-memory.json` exists,
+    a copied seed must be reopened under that exact key or M28 correctly rejects it.
+    """
+
+    seed = Path(seed_root).resolve()
+    if not seed.is_dir():
+        raise ValueError(f"comparison memory seed must be an existing directory: {seed}")
+    state_path = seed / "project-memory.json"
+    if not state_path.exists():
+        return None
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read comparison memory seed identity {state_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"comparison memory seed state must be a JSON object: {state_path}")
+    key = raw.get("project_key")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError(f"comparison memory seed state has no valid project_key: {state_path}")
+    return key.strip()
+
+
+def clone_comparison_memory_seed(seed_root: str | Path, target_root: str | Path) -> str:
+    """Copy one exact project-memory seed into a fresh comparison-owned root.
+
+    The target must not already contain state. This prevents an evaluation run from silently
+    combining a baseline snapshot with evidence from an earlier profile run.
+    """
+
+    seed = Path(seed_root).resolve()
+    target = Path(target_root).resolve()
+    if not seed.is_dir():
+        raise ValueError(f"comparison memory seed must be an existing directory: {seed}")
+    seed_fingerprint = directory_fingerprint(seed)
+    if target.exists():
+        if not target.is_dir():
+            raise ValueError(f"comparison memory target is not a directory: {target}")
+        if any(target.iterdir()):
+            raise ValueError(
+                f"comparison memory target must be absent or empty before seeding: {target}"
+            )
+    else:
+        target.mkdir(parents=True, exist_ok=False)
+
+    for current, dirs, names in os.walk(seed, followlinks=False):
+        base = Path(current)
+        relative = base.relative_to(seed)
+        destination = target / relative
+        destination.mkdir(parents=True, exist_ok=True)
+        for name in tuple(dirs):
+            child = base / name
+            if child.is_symlink():
+                raise ValueError(
+                    f"comparison memory seed rejects directory symlink: {child}"
+                )
+        for name in sorted(names):
+            source = base / name
+            if source.is_symlink():
+                raise ValueError(f"comparison memory seed rejects file symlink: {source}")
+            if source.is_file():
+                shutil.copy2(source, destination / name)
+
+    copied_fingerprint = directory_fingerprint(target)
+    if copied_fingerprint != seed_fingerprint:
+        raise RuntimeError("comparison memory seed copy fingerprint mismatch")
+    return copied_fingerprint
+
+
+class CodingRunManifest(BaseModel):
+    """Secret-free immutable starting conditions for one coding run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["coding-run-manifest-v1"] = "coding-run-manifest-v1"
+    task: str = Field(min_length=1)
+    workspace_root: str
+    output_root: str
+    isolated: bool
+    harness_version: str
+    harness_package_fingerprint: str = Field(min_length=64, max_length=64)
+    verification_plan_fingerprint: str = Field(min_length=64, max_length=64)
+    browser_verification_plan_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    application_spec_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    browser_headed: bool = False
+    project_memory_root: str
+    project_memory_key: str
+    starting_project_memory_fingerprint: str = Field(min_length=64, max_length=64)
+    model_selection: ResolvedModelSelection
+    max_reasoning_steps: int = Field(ge=1)
+    max_tool_actions: int = Field(ge=1)
+    max_output_tokens: int = Field(ge=1)
+    baseline_verification: bool
+    max_idle_turns: int = Field(ge=1)
+    max_inspection_streak: int = Field(ge=1)
+    max_no_progress_streak: int = Field(ge=1)
+    max_same_failure_count: int = Field(ge=1)
+    isolation_retention: str | None = None
+    isolation_support_paths: tuple[str, ...] = ()
+    fingerprint: str = ""
+
+    @model_validator(mode="after")
+    def derive_fingerprint(self) -> "CodingRunManifest":
+        if (self.browser_verification_plan_fingerprint is None) != (
+            self.application_spec_fingerprint is None
+        ):
+            raise ValueError(
+                "browser verification and application spec fingerprints must be present together"
+            )
+        if self.browser_verification_plan_fingerprint is None and self.browser_headed:
+            raise ValueError("browser_headed cannot be true for a non-browser coding run")
+        material = self.model_dump(mode="json", exclude={"fingerprint"})
+        object.__setattr__(self, "fingerprint", object_fingerprint(material))
+        return self
+
+
+def build_coding_run_manifest(
+    *,
+    task: str,
+    workspace_root: str | Path,
+    output_root: str | Path,
+    isolated: bool,
+    verification_plan_fingerprint: str,
+    browser_verification_plan_fingerprint: str | None,
+    application_spec_fingerprint: str | None,
+    browser_headed: bool,
+    project_memory_root: str | Path | None,
+    project_memory_key: str | None,
+    model_selection: ResolvedModelSelection,
+    max_reasoning_steps: int,
+    max_tool_actions: int,
+    max_output_tokens: int,
+    baseline_verification: bool,
+    max_idle_turns: int,
+    max_inspection_streak: int,
+    max_no_progress_streak: int,
+    max_same_failure_count: int,
+    isolation_retention: str | None,
+    isolation_support_paths: tuple[str, ...] = (),
+) -> CodingRunManifest:
+    workspace = Path(workspace_root).resolve()
+    output = Path(output_root).resolve()
+    memory_root = (
+        Path(project_memory_root).resolve()
+        if project_memory_root is not None
+        else workspace / ".harness-x" / "project-memory"
+    )
+    key = (project_memory_key or str(workspace)).strip()
+    if not key:
+        raise ValueError("project memory key cannot be blank")
+    normalized_task = task.strip()
+    if not normalized_task:
+        raise ValueError("coding run manifest task cannot be blank")
+    return CodingRunManifest(
+        task=normalized_task,
+        workspace_root=str(workspace),
+        output_root=str(output),
+        isolated=isolated,
+        harness_version=harness_distribution_version(),
+        harness_package_fingerprint=harness_package_fingerprint(),
+        verification_plan_fingerprint=verification_plan_fingerprint,
+        browser_verification_plan_fingerprint=browser_verification_plan_fingerprint,
+        application_spec_fingerprint=application_spec_fingerprint,
+        browser_headed=browser_headed,
+        project_memory_root=str(memory_root),
+        project_memory_key=key,
+        starting_project_memory_fingerprint=directory_fingerprint(memory_root),
+        model_selection=model_selection,
+        max_reasoning_steps=max_reasoning_steps,
+        max_tool_actions=max_tool_actions,
+        max_output_tokens=max_output_tokens,
+        baseline_verification=baseline_verification,
+        max_idle_turns=max_idle_turns,
+        max_inspection_streak=max_inspection_streak,
+        max_no_progress_streak=max_no_progress_streak,
+        max_same_failure_count=max_same_failure_count,
+        isolation_retention=isolation_retention,
+        isolation_support_paths=tuple(isolation_support_paths),
+    )
+
+
+def write_coding_run_manifest(manifest: CodingRunManifest, output_root: str | Path) -> Path:
+    root = Path(output_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "coding-run-manifest.json"
+    path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def load_coding_run_manifest(path: str | Path) -> CodingRunManifest:
+    target = Path(path)
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot load coding run manifest {target}: {exc}") from exc
+    stored = str(raw.get("fingerprint", ""))
+    manifest = CodingRunManifest.model_validate(raw)
+    if stored != manifest.fingerprint:
+        raise ValueError(f"coding run manifest fingerprint mismatch: {target}")
+    return manifest
