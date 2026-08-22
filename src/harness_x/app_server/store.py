@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -189,11 +190,15 @@ class AppSessionStore:
                 if not snapshot_path.is_file():
                     raise RuntimeError(f"app session missing snapshot: {directory}")
                 try:
-                    snapshot = AppSessionSnapshot.model_validate_json(
-                        snapshot_path.read_text(encoding="utf-8")
-                    )
+                    raw = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                    stored_fingerprint = str(raw.get("fingerprint", ""))
+                    snapshot = AppSessionSnapshot.model_validate(raw)
                 except Exception as exc:
                     raise RuntimeError(f"invalid app session snapshot {snapshot_path}: {exc}") from exc
+                if stored_fingerprint != snapshot.fingerprint:
+                    raise RuntimeError(
+                        f"app session snapshot fingerprint mismatch: {snapshot.session_id}"
+                    )
                 if snapshot.session_id != directory.name:
                     raise RuntimeError(f"app session directory/snapshot ID mismatch: {directory}")
                 events = self._read_events(snapshot.session_id)
