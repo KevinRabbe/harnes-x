@@ -18,7 +18,7 @@ The long-lived App Server bearer token never appears in a URL. Instead, the oper
 http://127.0.0.1:<port>/ui/#bootstrap=<one-time-ticket>
 ```
 
-The fragment is not transmitted in the initial HTTP request. A packaged bootstrap script reads the ticket, immediately removes the fragment with `history.replaceState`, exchanges the ticket through one loopback same-origin POST, then passes the returned existing bearer to the already-authenticated UI clients in page memory.
+The fragment is not transmitted in the initial HTTP request. A packaged bootstrap script reads the ticket, immediately removes the fragment with `history.replaceState`, exchanges the ticket through one loopback same-origin POST, then routes the returned existing bearer through the already-qualified manual-auth form listeners. The report viewer captures it first; the main client captures it and synchronously clears the password field before its asynchronous authenticated session load. Both clients then retain their bearer copy only in page memory.
 
 Manual bearer-token unlock remains supported as a fallback and compatibility surface.
 
@@ -58,19 +58,20 @@ The bootstrap browser client:
 1. accepts only the exact `#bootstrap=<ticket>` fragment shape;
 2. copies the ticket into a local JavaScript variable;
 3. immediately replaces the current history entry with `/ui/` before network exchange;
-4. POSTs the ticket as JSON to `/v1/operator/bootstrap`;
-5. receives the persistent bearer only in the response body;
-6. dispatches that bearer only to the packaged same-origin operator clients;
-7. retains no ticket or bearer in the URL, query string, cookies, `localStorage`, or `sessionStorage`;
-8. leaves the normal manual unlock UI available if exchange fails.
+4. POSTs the ticket as JSON to `/v1/operator/bootstrap` with browser credentials omitted;
+5. receives the persistent bearer only in the no-store response body;
+6. places the bearer into the existing password field only long enough to synchronously call `requestSubmit()`; the already-loaded report listener captures it, then the main listener captures and clears the field immediately;
+7. clears its response-object bearer property and the DOM field, while the existing clients retain only their page-memory copies;
+8. retains no ticket or bearer in the URL, query string, cookies, `localStorage`, or `sessionStorage`;
+9. leaves the normal manual unlock UI available if exchange fails.
 
-The existing CSP continues to allow scripts and connections only from the same origin. No third-party script receives the capability or bearer.
+The bootstrap script is loaded after `report.js` and `app.js`, preserving the existing M38 requirement that the report auth listener is registered before the main listener clears the password field. The existing CSP continues to allow scripts and connections only from the same origin. No third-party script receives the capability or bearer.
 
 ## CLI boundary
 
 `--open-ui` is explicit rather than the default so headless/operator scripting behavior is not changed unexpectedly.
 
-The CLI must never print the bootstrap URL or raw ticket. Startup JSON may state whether automatic UI opening was requested/succeeded, but may contain only the normal public `ui_url` and existing token-file path. If the platform browser opener reports failure, the server continues running and manual bearer unlock remains available.
+The CLI must never print the bootstrap URL or raw ticket. Startup JSON may state whether automatic UI opening was requested/succeeded, but may contain only the normal public `ui_url` and existing token-file path. If the platform browser opener reports failure or raises, the outstanding bootstrap ticket is immediately invalidated, the server continues running, and manual bearer unlock remains available.
 
 ## Authority
 
@@ -89,7 +90,7 @@ M40 changes only local credential bootstrap ergonomics. It cannot:
 
 M40 does not add OAuth, cookies, refresh tokens, remote login, TLS, remote bind, multiple users, desktop-shell packaging, clipboard token copying, generic deep links, or filesystem permissions beyond existing App Server behavior.
 
-A local process capable of observing/controling the launched browser process or reading its memory is outside this single-user loopback threat boundary. The bootstrap ticket minimizes exposure by being short-lived and single-use; the long-lived bearer still never enters the URL.
+A local process capable of observing or controlling the launched browser process or reading its memory is outside this single-user loopback threat boundary. The bootstrap ticket minimizes exposure by being short-lived and single-use; the long-lived bearer still never enters the URL.
 
 ## Deterministic acceptance
 
@@ -98,12 +99,14 @@ Before freeze, M40 must prove:
 - tickets are cryptographically random, digest-only in server memory, short-lived, single-use, and replacement-invalidating;
 - expired/used/unknown tickets fail identically;
 - `/v1/operator/bootstrap` rejects invalid Host, missing/cross-origin Origin, query parameters, malformed JSON, extra fields, and bad tickets;
+- rejected origin/request-shape attempts do not consume a valid ticket;
 - normal stateful routes still reject unauthenticated requests;
 - successful exchange returns the existing bearer and immediately consumes the ticket;
 - server-info/startup metadata never persist or print the ticket/bootstrap URL;
+- a failed browser open immediately invalidates the outstanding ticket;
 - the browser fragment is scrubbed before exchange;
 - no bearer is placed in URL/query/fragment/cookie/localStorage/sessionStorage;
-- bootstrap success unlocks both the main operator client and report viewer in memory;
+- bootstrap success reuses the main operator and report-viewer manual auth listeners;
 - manual token unlock still works;
 - packaged bootstrap JavaScript has valid syntax when Node is available;
 - exact M39→M40 diff remains confined to operator bootstrap/UI/CLI/tests/docs;
