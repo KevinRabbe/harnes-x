@@ -1,5 +1,6 @@
 """Local single-user Harness X App Server foundation."""
 
+from .http_server import LocalAppHTTPServer
 from .protocol import (
     AppEvent,
     AppEventKind,
@@ -23,4 +24,5 @@ __all__ = [
     "AppSessionStore",
     "CodingSessionRequest",
     "HarnessCodingRunner",
+    "LocalAppHTTPServer",
 ]
