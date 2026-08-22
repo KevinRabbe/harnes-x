@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import webbrowser
 from pathlib import Path
 from typing import Sequence
 
@@ -37,7 +38,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=8765,
         help="Loopback TCP port. Use 0 to ask the OS for an ephemeral port.",
     )
+    parser.add_argument(
+        "--open-ui",
+        action="store_true",
+        help=(
+            "Open the operator UI with a short-lived single-use local bootstrap ticket; "
+            "the persistent bearer is never placed in the URL."
+        ),
+    )
     return parser
+
+
+def _open_operator_ui(server: LocalOperatorHTTPServer) -> bool:
+    """Open one disposable bootstrap URL without ever printing or persisting it."""
+
+    bootstrap_url = server.issue_ui_bootstrap_url()
+    try:
+        opened = bool(webbrowser.open(bootstrap_url, new=2))
+    except Exception:
+        server.bootstrap_tickets.invalidate()
+        return False
+    if not opened:
+        server.bootstrap_tickets.invalidate()
+    return opened
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -45,9 +68,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     service = AppServerService(
         root / "data",
-        server_version="0.1.0a0+app-server36-local-operator-ui",
+        server_version="0.1.0a0+app-server40-one-time-ui-bootstrap",
     )
     server = LocalOperatorHTTPServer(service, root, host=args.host, port=args.port)
+    ui_opened = _open_operator_ui(server) if args.open_ui else False
     print(
         json.dumps(
             {
@@ -56,6 +80,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "ui_url": server.ui_url,
                 "token_path": str(server.token_path),
                 "server_info_path": str(server.info_path),
+                "ui_open_requested": bool(args.open_ui),
+                "ui_opened": ui_opened,
                 "pid": os.getpid(),
             },
             sort_keys=True,
