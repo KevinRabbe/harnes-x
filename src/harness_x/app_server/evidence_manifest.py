@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -86,7 +86,6 @@ class CodingReportEvidenceAvailable(BaseModel):
     attested_source_sha256: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
-    attestation_error: str | None = Field(default=None, max_length=1000)
     artifact_event_sequence: int = Field(ge=1)
     artifact_event_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -240,7 +239,6 @@ def _report_evidence(
         attestation_status=validated.attestation_status,
         attested_source_bytes=validated.attested_source_bytes,
         attested_source_sha256=validated.attested_source_sha256,
-        attestation_error=validated.attestation_error,
         artifact_event_sequence=validated.artifact_event_sequence,
         artifact_event_hash=validated.artifact_event_hash,
     )
@@ -250,7 +248,9 @@ def _trace_evidence(
     snapshot: AppSessionSnapshot,
     events: tuple[AppEvent, ...],
 ) -> TraceEvidence:
-    attachment_events = tuple(event for event in events if event.kind == AppEventKind.TRACE_ATTACHED)
+    attachment_events = tuple(
+        event for event in events if event.kind == AppEventKind.TRACE_ATTACHED
+    )
     if snapshot.trace_id is None or snapshot.trace_path is None:
         if attachment_events:
             raise EvidenceManifestCorruptionError(
