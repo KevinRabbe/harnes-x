@@ -10,6 +10,7 @@ from harness_x.coding.run_manifest import (
     build_coding_run_manifest,
     clone_comparison_memory_seed,
     directory_fingerprint,
+    harness_package_fingerprint,
     load_coding_run_manifest,
     write_coding_run_manifest,
 )
@@ -63,7 +64,9 @@ def test_memory_seed_rejects_symlink_when_supported(tmp_path: Path) -> None:
         clone_comparison_memory_seed(seed, tmp_path / "target")
 
 
-def test_run_manifest_records_starting_memory_and_round_trips(tmp_path: Path) -> None:
+def test_run_manifest_records_starting_memory_harness_and_round_trips(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     memory = tmp_path / "memory"
@@ -78,6 +81,8 @@ def test_run_manifest_records_starting_memory_and_round_trips(tmp_path: Path) ->
         isolated=True,
         verification_plan_fingerprint="a" * 64,
         browser_verification_plan_fingerprint=None,
+        application_spec_fingerprint=None,
+        browser_headed=False,
         project_memory_root=memory,
         project_memory_key="logical-project",
         model_selection=_selection(),
@@ -99,3 +104,33 @@ def test_run_manifest_records_starting_memory_and_round_trips(tmp_path: Path) ->
     assert loaded.starting_project_memory_fingerprint == directory_fingerprint(memory)
     assert loaded.project_memory_root == str(memory.resolve())
     assert loaded.model_selection.profile_id == "main"
+    assert loaded.harness_package_fingerprint == harness_package_fingerprint()
+    assert len(loaded.harness_package_fingerprint) == 64
+
+
+def test_manifest_rejects_incomplete_browser_condition_binding(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with pytest.raises(ValueError, match="present together"):
+        build_coding_run_manifest(
+            task="Browser task",
+            workspace_root=workspace,
+            output_root=tmp_path / "output",
+            isolated=True,
+            verification_plan_fingerprint="a" * 64,
+            browser_verification_plan_fingerprint="b" * 64,
+            application_spec_fingerprint=None,
+            browser_headed=False,
+            project_memory_root=tmp_path / "memory",
+            project_memory_key="logical-project",
+            model_selection=_selection(),
+            max_reasoning_steps=32,
+            max_tool_actions=48,
+            max_output_tokens=65536,
+            baseline_verification=True,
+            max_idle_turns=3,
+            max_inspection_streak=6,
+            max_no_progress_streak=4,
+            max_same_failure_count=3,
+            isolation_retention="always",
+        )
