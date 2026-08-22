@@ -430,7 +430,7 @@ function releaseStreamController(controller) {
 
 async function selectedSessionIsTerminal(sessionId, generation) {
   const snapshot = await api(`/v1/sessions/${encodeURIComponent(sessionId)}`);
-  if (!selectionIsCurrent(sessionId, generation)) return true;
+  if (!selectionIsCurrent(sessionId, generation)) return null;
   renderSnapshot(snapshot);
   renderSessions([...state.sessions.values()]);
   return streamPolicy.isTerminalStatus(snapshot.status);
@@ -480,7 +480,9 @@ async function runLifecycleStream(sessionId, cursor, generation, consecutiveFail
       },
     );
     if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
-    if (await selectedSessionIsTerminal(sessionId, generation)) {
+    const terminal = await selectedSessionIsTerminal(sessionId, generation);
+    if (!selectionIsCurrent(sessionId, generation)) return;
+    if (terminal === true) {
       setPill("lifecycle-state", "Closed", "muted");
       return;
     }
@@ -544,7 +546,9 @@ async function runTraceStream(sessionId, cursor, generation, consecutiveFailures
     );
     if (!selectionIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     if (traceCorrupt) return;
-    if (await selectedSessionIsTerminal(sessionId, generation)) {
+    const terminal = await selectedSessionIsTerminal(sessionId, generation);
+    if (!selectionIsCurrent(sessionId, generation)) return;
+    if (terminal === true) {
       setPill("trace-state", "Closed", "muted");
       return;
     }
