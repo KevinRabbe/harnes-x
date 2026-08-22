@@ -103,6 +103,31 @@ def directory_fingerprint(path: str | Path) -> str:
     return object_fingerprint(rows)
 
 
+def comparison_memory_seed_project_key(seed_root: str | Path) -> str | None:
+    """Read the M28 logical project key from a seed without mutating it.
+
+    Empty seed directories have no established identity yet. Once `project-memory.json` exists,
+    a copied seed must be reopened under that exact key or M28 correctly rejects it.
+    """
+
+    seed = Path(seed_root).resolve()
+    if not seed.is_dir():
+        raise ValueError(f"comparison memory seed must be an existing directory: {seed}")
+    state_path = seed / "project-memory.json"
+    if not state_path.exists():
+        return None
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read comparison memory seed identity {state_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"comparison memory seed state must be a JSON object: {state_path}")
+    key = raw.get("project_key")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError(f"comparison memory seed state has no valid project_key: {state_path}")
+    return key.strip()
+
+
 def clone_comparison_memory_seed(seed_root: str | Path, target_root: str | Path) -> str:
     """Copy one exact project-memory seed into a fresh comparison-owned root.
 
