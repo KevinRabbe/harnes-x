@@ -15,6 +15,7 @@ _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/stream_policy.js": ("stream_policy.js", "text/javascript; charset=utf-8"),
     "/ui/report.js": ("report.js", "text/javascript; charset=utf-8"),
     "/ui/report_export.js": ("report_export.js", "text/javascript; charset=utf-8"),
+    "/ui/trace_export.js": ("trace_export.js", "text/javascript; charset=utf-8"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/ui/bootstrap.js": ("bootstrap.js", "text/javascript; charset=utf-8"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8"),
