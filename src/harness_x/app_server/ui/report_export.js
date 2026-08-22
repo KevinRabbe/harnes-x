@@ -2,6 +2,8 @@
 
 const reportExportState = {
   token: null,
+  generation: 0,
+  controller: null,
 };
 
 const reportExportById = (id) => document.getElementById(id);
@@ -16,6 +18,18 @@ const reportExportAttestationStates = new Set([
 
 function reportExportSessionId() {
   return reportExportById("session-id").textContent.trim();
+}
+
+function reportExportIsCurrent(sessionId, generation) {
+  return (
+    reportExportState.generation === generation
+    && reportExportSessionId() === sessionId
+  );
+}
+
+function cancelReportExport() {
+  if (reportExportState.controller) reportExportState.controller.abort();
+  reportExportState.controller = null;
 }
 
 function updateReportExportAvailability() {
@@ -44,6 +58,10 @@ async function sha256Hex(bytes) {
 async function downloadExactCodingReport() {
   const sessionId = reportExportSessionId();
   if (!reportExportState.token || !sessionId) return;
+  const generation = reportExportState.generation;
+  cancelReportExport();
+  const controller = new AbortController();
+  reportExportState.controller = controller;
 
   reportExportButton.disabled = true;
   reportExportStatus.textContent = "Preparing authenticated report export…";
@@ -58,13 +76,16 @@ async function downloadExactCodingReport() {
         },
         cache: "no-store",
         credentials: "omit",
+        signal: controller.signal,
       },
     );
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     if (response.status === 401) {
       reportExportState.token = null;
       throw new Error("operator token was rejected; unlock the operator view again");
     }
     if (!response.ok) throw new Error(await responseError(response));
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
 
     const contentType = response.headers.get("Content-Type") || "";
     if (contentType.toLowerCase() !== "application/json; charset=utf-8") {
@@ -95,11 +116,13 @@ async function downloadExactCodingReport() {
     }
 
     const bytes = await response.arrayBuffer();
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     const declaredLength = Number.parseInt(rawLength, 10);
     if (!Number.isSafeInteger(declaredLength) || bytes.byteLength !== declaredLength) {
       throw new Error("report export byte count does not match Content-Length");
     }
     const observedSha256 = await sha256Hex(bytes);
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     if (observedSha256 !== sourceSha256) {
       throw new Error("report export bytes do not match the declared SHA-256");
     }
@@ -107,6 +130,7 @@ async function downloadExactCodingReport() {
     const blob = new Blob([bytes], { type: "application/json;charset=utf-8" });
     const objectUrl = URL.createObjectURL(blob);
     try {
+      if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
       const link = document.createElement("a");
       link.href = objectUrl;
       link.download = "coding-task-report.json";
@@ -116,10 +140,13 @@ async function downloadExactCodingReport() {
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     reportExportStatus.textContent = `Downloaded ${declaredLength} bytes · ${attestation} · sha256 ${sourceSha256}`;
   } catch (error) {
+    if (!reportExportIsCurrent(sessionId, generation) || controller.signal.aborted) return;
     reportExportStatus.textContent = `Report download failed: ${reportExportMessage(error)}`;
   } finally {
+    if (reportExportState.controller === controller) reportExportState.controller = null;
     updateReportExportAvailability();
   }
 }
@@ -131,12 +158,19 @@ reportExportById("auth-form").addEventListener("submit", () => {
 });
 
 reportExportById("lock-button").addEventListener("click", () => {
+  reportExportState.generation += 1;
+  cancelReportExport();
   reportExportState.token = null;
   reportExportStatus.textContent = "";
   updateReportExportAvailability();
 });
 
-new MutationObserver(updateReportExportAvailability).observe(reportExportById("session-id"), {
+new MutationObserver(() => {
+  reportExportState.generation += 1;
+  cancelReportExport();
+  reportExportStatus.textContent = "";
+  updateReportExportAvailability();
+}).observe(reportExportById("session-id"), {
   childList: true,
   characterData: true,
   subtree: true,
@@ -144,6 +178,8 @@ new MutationObserver(updateReportExportAvailability).observe(reportExportById("s
 
 new MutationObserver(() => {
   if (reportExportById("auth-state").textContent.trim() === "Locked") {
+    reportExportState.generation += 1;
+    cancelReportExport();
     reportExportState.token = null;
     reportExportStatus.textContent = "";
   }
@@ -158,4 +194,5 @@ reportExportButton.addEventListener("click", () => {
   void downloadExactCodingReport();
 });
 
+window.addEventListener("beforeunload", cancelReportExport);
 updateReportExportAvailability();
