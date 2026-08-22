@@ -182,8 +182,8 @@ class AppSessionStore:
             raise ValueError("artifact attestation requires source_bytes and source_sha256 together")
         if source_bytes is not None and attestation_error is not None:
             raise ValueError("artifact attestation cannot be both captured and unavailable")
-        if source_bytes is not None and source_bytes < 0:
-            raise ValueError("artifact source_bytes cannot be negative")
+        if source_bytes is not None and (type(source_bytes) is not int or source_bytes < 0):
+            raise ValueError("artifact source_bytes must be a non-negative integer")
         if source_sha256 is not None:
             digest = source_sha256.strip()
             if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
