@@ -217,6 +217,32 @@ def test_trace_export_rejects_symlink_substitution(tmp_path: Path) -> None:
         service.close()
 
 
+def test_trace_export_rejects_parent_directory_symlink_substitution(tmp_path: Path) -> None:
+    service = AppServerService(tmp_path / "service")
+    try:
+        snapshot, trace_path, _ = _stored_session(service, tmp_path, terminal=True)
+        assert trace_path is not None
+        payload = trace_path.read_bytes()
+        output = Path(snapshot.output_root)
+        moved = tmp_path / "moved-output"
+        replacement = tmp_path / "replacement-output"
+        output.rename(moved)
+        replacement.mkdir()
+        (replacement / trace_path.name).write_bytes(payload)
+        try:
+            os.symlink(replacement, output, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("directory symbolic links are not available")
+
+        with pytest.raises(TraceCorruptionError, match="symbolic-link path substitution"):
+            read_validated_trace_export(
+                snapshot=snapshot,
+                events=service.store.events(snapshot.session_id),
+            )
+    finally:
+        service.close()
+
+
 def test_trace_export_rejects_terminal_partial_line(tmp_path: Path) -> None:
     service = AppServerService(tmp_path / "service")
     try:
@@ -388,7 +414,7 @@ def test_http_trace_export_writes_validated_source_without_reopening_path(
     validated = ValidatedTraceExport(
         session_id=snapshot.session_id,
         trace_id="trace_" + "a" * 32,
-        trace_path="/path/that/must/not/be/reopened.jsonl",
+        trace_path="/path/that/must/not/be-reopened.jsonl",
         source=TraceExportSource(
             payload=synthetic,
             source_bytes=len(synthetic),
