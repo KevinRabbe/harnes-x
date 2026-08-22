@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from harness_x.coding.campaign_cli import _runner, build_parser
@@ -33,6 +34,19 @@ def _plan() -> VerificationPlan:
             ),
         )
     )
+
+
+def test_installed_campaign_cli_help_smoke() -> None:
+    result = subprocess.run(
+        ["harness-x-improve-procedure", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "bounded" in result.stdout.lower()
+    assert "--parent-procedure-id" in result.stdout
+    assert "--max-trial-tasks" in result.stdout
 
 
 def test_campaign_cli_requires_explicit_parent_and_validation_task() -> None:
