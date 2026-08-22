@@ -21,6 +21,7 @@ from .model_selection import (
 from .run_manifest import (
     build_coding_run_manifest,
     clone_comparison_memory_seed,
+    comparison_memory_seed_project_key,
     object_fingerprint,
     write_coding_run_manifest,
 )
@@ -39,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Optional existing project-memory snapshot copied into the fresh explicit "
-            "--project-memory-root before this run. Use the same seed for each profile to make "
-            "starting memory exactly comparable."
+            "--project-memory-root before this run. Use the same seed and its exact M28 "
+            "project key for each profile to make starting memory comparable."
         ),
     )
     return parser
@@ -61,10 +62,22 @@ def _validate_profile_run_args(args: argparse.Namespace) -> None:
         raise ValueError(f"comparison profile output must be a directory path: {output}")
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"comparison profile output must be absent or empty: {output}")
-    if args.comparison_memory_seed is not None and args.project_memory_root is None:
-        raise ValueError(
-            "--comparison-memory-seed requires an explicit fresh --project-memory-root"
-        )
+    if args.comparison_memory_seed is not None:
+        if args.project_memory_root is None:
+            raise ValueError(
+                "--comparison-memory-seed requires an explicit fresh --project-memory-root"
+            )
+        if args.project_memory_key is None or not args.project_memory_key.strip():
+            raise ValueError(
+                "--comparison-memory-seed requires explicit --project-memory-key so the "
+                "cloned M28 project identity cannot silently change"
+            )
+        seed_key = comparison_memory_seed_project_key(args.comparison_memory_seed)
+        if seed_key is not None and seed_key != args.project_memory_key.strip():
+            raise ValueError(
+                "--project-memory-key must exactly match the M28 project_key stored in "
+                f"--comparison-memory-seed: expected {seed_key!r}"
+            )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
