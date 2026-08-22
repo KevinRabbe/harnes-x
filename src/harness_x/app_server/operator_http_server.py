@@ -10,7 +10,9 @@ from .http_server import LocalAppHTTPServer
 from .report_projection import (
     ReportCorruptionError,
     ReportUnavailableError,
+    ValidatedCodingReport,
     build_coding_report_projection,
+    read_validated_coding_report,
 )
 from .ui_assets import load_ui_asset
 
@@ -34,6 +36,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
     Static UI assets contain no session data or credentials and remain public on the loopback
     origin. Stateful inherited APIs still use the M34 bearer-token boundary. M40 adds only a
     short-lived one-time local bootstrap exchange for explicitly launched operator browsers.
+    M41 adds one authenticated raw-byte export for the canonical validated coding report.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -54,7 +57,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
         bootstrap_tickets = self.bootstrap_tickets
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/40"
+            server_version = "HarnessXAppServer/41"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -71,21 +74,33 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     return
 
                 pieces = self._session_path(parsed.path)
-                if pieces is not None and pieces[1] == "/report":
+                if pieces is not None and pieces[1] in {"/report", "/report/export"}:
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
                         return
+                    session_id, suffix = pieces
                     if parsed.query:
+                        detail = (
+                            "report endpoint does not accept query parameters"
+                            if suffix == "/report"
+                            else "report export endpoint does not accept query parameters"
+                        )
                         self._error(
                             HTTPStatus.BAD_REQUEST,
                             "invalid_request",
-                            "report endpoint does not accept query parameters",
+                            detail,
                         )
                         return
-                    session_id = pieces[0]
                     try:
                         snapshot = service.session(session_id)
                         events = service.store.events(session_id)
+                        if suffix == "/report/export":
+                            validated = read_validated_coding_report(
+                                snapshot=snapshot,
+                                events=events,
+                            )
+                            self._report_export(validated)
+                            return
                         projection = build_coding_report_projection(
                             snapshot=snapshot,
                             events=events,
@@ -202,6 +217,35 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                 self.send_header("Referrer-Policy", "no-referrer")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _report_export(self, validated: ValidatedCodingReport) -> None:
+                body = validated.source.payload
+                self.close_connection = True
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="coding-task-report.json"',
+                )
+                self.send_header("Content-Length", str(validated.source.source_bytes))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header(
+                    "X-Harness-X-Report-SHA256",
+                    validated.source.source_sha256,
+                )
+                self.send_header(
+                    "X-Harness-X-Report-Attestation",
+                    validated.attestation_status,
+                )
+                self.send_header(
+                    "X-Harness-X-Artifact-Event-Hash",
+                    validated.artifact_event_hash,
+                )
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(body)

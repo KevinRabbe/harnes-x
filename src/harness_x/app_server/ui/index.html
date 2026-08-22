@@ -161,8 +161,10 @@
               <p class="eyebrow">Durable coding artifact</p>
               <h3 id="report-heading">Coding report</h3>
             </div>
+            <button id="download-report" type="button" class="secondary" disabled>Download exact report</button>
           </div>
           <p id="report-metadata" class="mono muted small">—</p>
+          <p id="report-export-status" class="mono muted small" aria-live="polite"></p>
           <pre id="report-content" class="task-text" aria-live="polite">No durable coding report loaded.</pre>
         </section>
 
@@ -195,6 +197,7 @@
 
   <script src="/ui/stream_policy.js" defer></script>
   <script src="/ui/report.js" defer></script>
+  <script src="/ui/report_export.js" defer></script>
   <script src="/ui/app.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>

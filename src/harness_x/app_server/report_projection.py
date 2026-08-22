@@ -1,8 +1,9 @@
-"""Read-only projection of the canonical coding-task report for one App Server session."""
+"""Read-only projection and export validation for one canonical coding-task report."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from .report_attestation import (
     MAX_REPORT_BYTES,
     REPORT_ATTESTATION_SCHEMA_VERSION,
     ReportAttestationCaptureError,
+    ReportSource,
     read_report_source,
 )
 
@@ -38,6 +40,22 @@ class ReportUnavailableError(RuntimeError):
 
 class ReportCorruptionError(RuntimeError):
     """Durable report metadata or source bytes violate the projection contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedCodingReport:
+    """One report validation result bound to the exact source bytes that were checked."""
+
+    session_id: str
+    artifact_event_sequence: int
+    artifact_event_hash: str
+    source_path: str
+    source: ReportSource
+    attestation_status: ReportAttestationStatus
+    attested_source_bytes: int | None
+    attested_source_sha256: str | None
+    attestation_error: str | None
+    report: dict[str, Any]
 
 
 class CodingReportProjection(BaseModel):
@@ -167,13 +185,13 @@ def _artifact_attestation(
     raise ReportCorruptionError("coding report artifact has an invalid attestation status")
 
 
-def build_coding_report_projection(
+def read_validated_coding_report(
     *,
     snapshot: AppSessionSnapshot,
     events: tuple[AppEvent, ...],
     maximum_bytes: int = MAX_REPORT_BYTES,
-) -> CodingReportProjection:
-    """Validate and project the one canonical durable coding report for ``snapshot``."""
+) -> ValidatedCodingReport:
+    """Validate one report and retain the exact source bytes that satisfied the checks."""
 
     if maximum_bytes < 1 or maximum_bytes > MAX_REPORT_BYTES:
         raise ValueError(f"maximum_bytes must be between 1 and {MAX_REPORT_BYTES}")
@@ -208,16 +226,43 @@ def build_coding_report_projection(
     if not isinstance(report, dict):
         raise ReportCorruptionError("coding report JSON root must be an object")
 
-    return CodingReportProjection(
+    return ValidatedCodingReport(
         session_id=snapshot.session_id,
         artifact_event_sequence=artifact.sequence,
         artifact_event_hash=artifact.event_hash,
         source_path=str(report_path),
-        source_bytes=source.source_bytes,
-        source_sha256=source.source_sha256,
+        source=source,
         attestation_status=attestation_status,
         attested_source_bytes=attested_bytes,
         attested_source_sha256=attested_sha,
         attestation_error=attestation_error,
         report=report,
+    )
+
+
+def build_coding_report_projection(
+    *,
+    snapshot: AppSessionSnapshot,
+    events: tuple[AppEvent, ...],
+    maximum_bytes: int = MAX_REPORT_BYTES,
+) -> CodingReportProjection:
+    """Validate and project the one canonical durable coding report for ``snapshot``."""
+
+    validated = read_validated_coding_report(
+        snapshot=snapshot,
+        events=events,
+        maximum_bytes=maximum_bytes,
+    )
+    return CodingReportProjection(
+        session_id=validated.session_id,
+        artifact_event_sequence=validated.artifact_event_sequence,
+        artifact_event_hash=validated.artifact_event_hash,
+        source_path=validated.source_path,
+        source_bytes=validated.source.source_bytes,
+        source_sha256=validated.source.source_sha256,
+        attestation_status=validated.attestation_status,
+        attested_source_bytes=validated.attested_source_bytes,
+        attested_source_sha256=validated.attested_source_sha256,
+        attestation_error=validated.attestation_error,
+        report=validated.report,
     )
