@@ -26,7 +26,7 @@ M42 must not:
 2. reopen the path;
 3. export a potentially different second read.
 
-The trace verifier therefore exposes one immutable verified-source result that retains both the exact source payload and parsed `TraceRecord` sequence. The HTTP handler writes that retained payload directly.
+The trace verifier therefore exposes payload-level verification, while the M42 export boundary retains one immutable source result containing both the exact source payload and parsed `TraceRecord` sequence. The HTTP handler writes that retained payload directly.
 
 ## Canonical trace boundary
 
@@ -39,11 +39,14 @@ Before reading bytes, M42 requires:
 - snapshot path exactly equal the canonical attached trace path;
 - exactly one durable `TRACE_ATTACHED` event for the session;
 - durable event trace ID/path exactly equal the snapshot identity/path;
-- source path not replaced by a symbolic link;
-- source is a regular file;
-- explicit bounded export size ceiling.
+- the persisted absolute trace path resolves strictly to itself, so neither the leaf file nor any resolved parent component may be replaced by a symbolic link;
+- final-component `O_NOFOLLOW` protection when supported by the platform;
+- source is a regular file according to `fstat` after open;
+- hard raw-export ceiling of 32 MiB (`32 * 1024 * 1024` bytes), checked both against file metadata and the bounded read.
 
 The endpoint never accepts an artifact name, directory, filename, path, glob, query selector, or arbitrary trace ID from the caller.
+
+The resolved-path equality check is intentionally stronger than checking only `trace_path.is_symlink()`: replacing the persisted session output directory with a symlink to another directory must also fail rather than allowing a self-consistent substitute trace to be exported under the original lexical path.
 
 ## Trace integrity
 
@@ -62,6 +65,8 @@ A malformed, partial, substituted, over-limit, or hash-chain-invalid source fail
 
 No complete corrupt record may be skipped or repaired.
 
+M42 verifies current source self-consistency and its attachment identity. It does not introduce a separately persisted historical final-trace digest or public-key signature. Consequently, its response headers are not proof that an attacker with sufficient local write authority could never replace the entire trace plus its current self-consistent contents; signatures, remote trust, and immutable final-trace attestation remain outside this milestone.
+
 ## Response contract
 
 A successful export uses:
@@ -79,7 +84,7 @@ X-Harness-X-Trace-Final-Event-Hash: <last source event hash or empty-trace senti
 X-Harness-X-Trace-Attachment-Event-Hash: <durable lifecycle event hash>
 ```
 
-These headers describe current verified source identity. They do not create a signature, remote trust root, task-success verdict, verification verdict, or new attestation authority.
+These headers describe current verified source identity. They do not create a signature, remote trust root, task-success verdict, verification verdict, historical immutable trace attestation, or new authority.
 
 ## Operator UI
 
@@ -88,6 +93,7 @@ M42 adds a `Download verified trace` action to the existing causal-trace panel.
 The packaged dependency-free client:
 
 - captures the existing page-memory bearer through qualified auth-form listener ordering;
+- enables raw export only for terminal selected-session states (`succeeded`, `failed`, or `cancelled`);
 - uses authenticated same-origin `fetch()` with `cache: "no-store"` and `credentials: "omit"`;
 - requires the expected content type and fixed attachment filename;
 - validates trace ID, content length, record-count header, final event hash, lifecycle attachment event hash, and source SHA-256 shape;
@@ -102,6 +108,12 @@ The packaged dependency-free client:
 
 The raw trace may contain structured metadata that the M35 UI projection would redact or truncate. Export is therefore an explicit authenticated evidence action, not a replacement for the bounded/redacted live UI projection.
 
+## M35 compatibility
+
+M42 extracts the existing record-validation algorithm into `verify_trace_payload()` but leaves `load_verified_trace_records()` as the M35 filesystem-reading wrapper. M35 page and SSE callers therefore retain their existing behavior, including the running-reader rule that only an incomplete final JSONL line may be ignored while the session is nonterminal.
+
+The M42 32 MiB source ceiling, no-symlink path-resolution checks, and terminal-only rule apply only to raw export. They do not alter M35 live projection/stream semantics.
+
 ## Authority boundary
 
 M42 exports already-existing verified trace bytes only. It cannot:
@@ -109,6 +121,7 @@ M42 exports already-existing verified trace bytes only. It cannot:
 - write, append, repair, redact, truncate, synthesize, or reorder trace records;
 - choose or enumerate arbitrary filesystem paths;
 - export arbitrary lifecycle artifacts;
+- expose a running raw-trace snapshot;
 - establish task or verification success;
 - execute tools or models;
 - bypass bearer authentication, budgets, permissions, or session transitions;
@@ -119,7 +132,7 @@ The existing `TraceStore` remains the sole causal execution ledger. Existing cod
 
 ## Non-goals / limitations
 
-M42 does not add generic artifact download/browsing, ZIP/session export, workspace file access, directory listing, filesystem picker integration, desktop-shell packaging, signatures/public-key authenticity, remote trust, trace immutability, or running raw-trace snapshots.
+M42 does not add generic artifact download/browsing, ZIP/session export, workspace file access, directory listing, filesystem picker integration, desktop-shell packaging, signatures/public-key authenticity, remote trust, trace immutability, a persisted final-trace content attestation, or running raw-trace snapshots.
 
 M35 live page/SSE projection continues to be the appropriate interface while a trace is being written.
 
@@ -132,10 +145,11 @@ Before freeze, M42 must prove:
 - exact content length and source SHA-256 headers;
 - complete trace hash-chain verification against the returned bytes;
 - durable `TRACE_ATTACHED` event identity/path agreement;
-- symlink/path substitution rejection;
+- leaf symbolic-link substitution rejection;
+- intermediate/parent-directory symbolic-link path substitution rejection;
 - terminal partial-line rejection;
 - invalid record/hash/step/timestamp rejection through the existing verifier;
-- explicit export size bound;
+- explicit 32 MiB export size bound;
 - mandatory bearer authentication;
 - query parameters and extra path segments rejected;
 - fixed filename with no caller-controlled file selection;
