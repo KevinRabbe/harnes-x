@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harness X Local Operator</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Harness X</p>
+      <h1>Local Operator</h1>
+    </div>
+    <div class="health" aria-live="polite">
+      <span id="health-dot" class="health-dot health-dot--unknown"></span>
+      <span id="health-text">Checking local server…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel" aria-labelledby="connection-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Connection</p>
+            <h2 id="connection-heading">Local access</h2>
+          </div>
+          <span id="auth-state" class="pill pill--muted">Locked</span>
+        </div>
+        <p class="muted small">Paste the token from the App Server <code>access-token</code> file. It is kept only in this browser tab's memory.</p>
+        <form id="auth-form" class="stack">
+          <label for="token">Bearer token</label>
+          <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+          <button type="submit">Unlock operator view</button>
+        </form>
+        <button id="lock-button" type="button" class="secondary hidden">Forget token</button>
+        <p id="auth-error" class="error-text" role="alert"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="sessions-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Sessions</p>
+            <h2 id="sessions-heading">Recent work</h2>
+          </div>
+          <button id="refresh-sessions" type="button" class="icon-button" disabled>Refresh</button>
+        </div>
+        <div id="session-list" class="session-list" aria-live="polite">
+          <p class="muted small">Unlock the operator view to load sessions.</p>
+        </div>
+      </section>
+
+      <details class="panel" id="new-session-panel">
+        <summary>Start a coding session</summary>
+        <form id="new-session-form" class="stack form-grid">
+          <fieldset id="new-session-fields" disabled>
+            <label for="workspace-root">Workspace root</label>
+            <input id="workspace-root" name="workspace_root" type="text" required spellcheck="false" placeholder="/absolute/path/to/repository">
+
+            <label for="task">Task</label>
+            <textarea id="task" name="task" rows="6" required placeholder="Describe the coding task and acceptance criteria."></textarea>
+
+            <label for="model-profile">Model profile</label>
+            <input id="model-profile" name="model_profile" type="text" value="main" required spellcheck="false">
+
+            <label for="verification-commands">Verification commands <span class="muted">(one per line)</span></label>
+            <textarea id="verification-commands" name="verification_commands" rows="3" spellcheck="false">python -m pytest</textarea>
+
+            <label for="verification-plan">Verification plan path <span class="muted">(optional alternative)</span></label>
+            <input id="verification-plan" name="verification_plan_path" type="text" spellcheck="false">
+
+            <details class="advanced">
+              <summary>Advanced session options</summary>
+              <div class="stack advanced-body">
+                <label for="project-memory-root">Project memory root</label>
+                <input id="project-memory-root" name="project_memory_root" type="text" spellcheck="false">
+
+                <label for="project-memory-key">Project memory key</label>
+                <input id="project-memory-key" name="project_memory_key" type="text" spellcheck="false">
+
+                <div class="number-grid">
+                  <label>Reasoning steps<input name="max_reasoning_steps" type="number" min="1" max="512" value="32"></label>
+                  <label>Tool actions<input name="max_tool_actions" type="number" min="1" max="2048" value="48"></label>
+                  <label>Output tokens<input name="max_output_tokens" type="number" min="1024" max="1048576" value="65536"></label>
+                </div>
+
+                <label class="check-row"><input name="baseline_verification" type="checkbox" checked> Run baseline verification</label>
+
+                <label for="browser-app-spec">Browser application spec path</label>
+                <input id="browser-app-spec" name="browser_application_spec_path" type="text" spellcheck="false">
+
+                <label for="browser-verification-plan">Browser verification plan path</label>
+                <input id="browser-verification-plan" name="browser_verification_plan_path" type="text" spellcheck="false">
+
+                <label class="check-row"><input name="browser_headed" type="checkbox"> Headed browser</label>
+              </div>
+            </details>
+
+            <button type="submit">Start isolated session</button>
+          </fieldset>
+        </form>
+        <p id="create-error" class="error-text" role="alert"></p>
+      </details>
+    </aside>
+
+    <section class="workspace" aria-labelledby="session-heading">
+      <div id="empty-state" class="empty-state">
+        <p class="eyebrow">Operator workspace</p>
+        <h2>Select a session</h2>
+        <p>Inspect software-owned lifecycle state and the verified causal trace produced by Harness X.</p>
+      </div>
+
+      <div id="session-view" class="hidden">
+        <section class="session-header panel">
+          <div>
+            <p class="eyebrow">Selected session</p>
+            <h2 id="session-heading">Session</h2>
+            <p id="session-id" class="mono muted"></p>
+          </div>
+          <div class="session-actions">
+            <span id="session-status" class="pill pill--muted">unknown</span>
+            <button id="cancel-session" type="button" class="danger" disabled>Request cancel</button>
+          </div>
+        </section>
+
+        <section class="summary-grid">
+          <article class="panel metric-card">
+            <p class="eyebrow">Model</p>
+            <strong id="summary-model">—</strong>
+          </article>
+          <article class="panel metric-card">
+            <p class="eyebrow">Workspace</p>
+            <strong id="summary-workspace" class="mono breakable">—</strong>
+          </article>
+          <article class="panel metric-card">
+            <p class="eyebrow">Trace</p>
+            <strong id="summary-trace" class="mono breakable">Not attached</strong>
+          </article>
+          <article class="panel metric-card">
+            <p class="eyebrow">Report</p>
+            <strong id="summary-report" class="mono breakable">Not available</strong>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Task</p>
+              <h3>Requested work</h3>
+            </div>
+          </div>
+          <pre id="task-text" class="task-text"></pre>
+          <dl id="session-times" class="metadata-grid"></dl>
+          <p id="failure-reason" class="failure-box hidden"></p>
+        </section>
+
+        <div class="stream-grid">
+          <section class="panel stream-panel" aria-labelledby="trace-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Authoritative causal trace</p>
+                <h3 id="trace-heading">Execution</h3>
+              </div>
+              <span id="trace-state" class="pill pill--muted">Idle</span>
+            </div>
+            <div id="trace-events" class="timeline" aria-live="polite"></div>
+          </section>
+
+          <section class="panel stream-panel" aria-labelledby="lifecycle-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">App Server ledger</p>
+                <h3 id="lifecycle-heading">Lifecycle</h3>
+              </div>
+              <span id="lifecycle-state" class="pill pill--muted">Idle</span>
+            </div>
+            <div id="lifecycle-events" class="timeline timeline--compact" aria-live="polite"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js" defer></script>
+</body>
+</html>
