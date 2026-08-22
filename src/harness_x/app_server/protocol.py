@@ -82,6 +82,43 @@ class CodingSessionRequest(BaseModel):
             raise ValueError("value cannot be blank")
         return stripped
 
+    @field_validator("project_memory_key")
+    @classmethod
+    def _strip_optional_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("project memory key cannot be blank")
+        return stripped
+
+    @field_validator("workspace_root")
+    @classmethod
+    def _resolve_workspace(cls, value: Path) -> Path:
+        resolved = value.expanduser().resolve()
+        if not resolved.is_dir():
+            raise ValueError(f"workspace_root must be an existing directory: {resolved}")
+        return resolved
+
+    @field_validator("project_memory_root")
+    @classmethod
+    def _resolve_memory_root(cls, value: Path | None) -> Path | None:
+        return value.expanduser().resolve() if value is not None else None
+
+    @field_validator(
+        "verification_plan_path",
+        "browser_application_spec_path",
+        "browser_verification_plan_path",
+    )
+    @classmethod
+    def _resolve_required_files(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        resolved = value.expanduser().resolve()
+        if not resolved.is_file():
+            raise ValueError(f"configured app-server file does not exist: {resolved}")
+        return resolved
+
     @field_validator("verification_commands")
     @classmethod
     def _validate_commands(cls, value: tuple[str, ...]) -> tuple[str, ...]:
