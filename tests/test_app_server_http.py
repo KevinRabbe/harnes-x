@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -12,6 +13,8 @@ from pydantic import BaseModel
 from harness_x.app_server.http_server import LocalAppHTTPServer
 from harness_x.app_server.protocol import AppSessionStatus
 from harness_x.app_server.service import AppServerService
+from harness_x.core import EventType, SystemClock, SystemVersion, TaskId, TraceId
+from harness_x.telemetry import TraceRecorder, TraceStore
 
 
 class _Report(BaseModel):
@@ -19,14 +22,65 @@ class _Report(BaseModel):
     failure_reason: str | None = None
 
 
-def _runner(snapshot):
-    output = Path(snapshot.output_root)
-    output.mkdir(parents=True, exist_ok=True)
+def _write_report(output: Path) -> _Report:
     report = _Report()
     (output / "coding-task-report.json").write_text(
         report.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )
     return report
+
+
+def _runner(snapshot):
+    output = Path(snapshot.output_root)
+    output.mkdir(parents=True, exist_ok=True)
+    return _write_report(output)
+
+
+def _trace_recorder(output: Path) -> TraceRecorder:
+    output.mkdir(parents=True, exist_ok=True)
+    trace_id = TraceId.new()
+    return TraceRecorder(
+        TraceStore(output / f"{trace_id.value}.jsonl"),
+        trace_id,
+        TaskId.new(),
+        SystemVersion(value="test-app-server-http"),
+        SystemClock(),
+    )
+
+
+def _trace_runner(snapshot):
+    output = Path(snapshot.output_root)
+    recorder = _trace_recorder(output)
+    recorder.emit(
+        EventType.REASONING_REQUESTED,
+        "test.http.trace",
+        metadata={"phase": "terminal"},
+    )
+    return _write_report(output)
+
+
+class _LiveTraceRunner:
+    def __init__(self) -> None:
+        self.first_emitted = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, snapshot):
+        output = Path(snapshot.output_root)
+        recorder = _trace_recorder(output)
+        recorder.emit(
+            EventType.REASONING_REQUESTED,
+            "test.http.live-trace",
+            metadata={"phase": "first"},
+        )
+        self.first_emitted.set()
+        if not self.release.wait(timeout=5.0):
+            raise RuntimeError("live trace test runner was not released")
+        recorder.emit(
+            EventType.REASONING_COMPLETED,
+            "test.http.live-trace",
+            metadata={"phase": "second"},
+        )
+        return _write_report(output)
 
 
 def _json_request(
@@ -57,6 +111,19 @@ def _wait_terminal(service: AppServerService, session_id: str):
             return snapshot
         time.sleep(0.01)
     raise AssertionError("session did not become terminal")
+
+
+def _read_sse_event(response) -> str:
+    lines: list[str] = []
+    while True:
+        raw = response.readline()
+        if not raw:
+            break
+        text = raw.decode("utf-8")
+        if text == "\n":
+            break
+        lines.append(text)
+    return "".join(lines)
 
 
 def test_http_health_is_local_public_but_session_state_requires_token(tmp_path: Path) -> None:
@@ -121,6 +188,99 @@ def test_http_create_observe_events_and_sse_terminal_stream(tmp_path: Path) -> N
         assert "event: session_created" in body
         assert "event: session_completed" in body
         assert "data: {" in body
+    finally:
+        server.close()
+        service.close()
+
+
+def test_http_trace_stream_tails_authoritative_trace_while_session_is_running(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = _LiveTraceRunner()
+    service = AppServerService(tmp_path / "service", runner=runner)
+    server = LocalAppHTTPServer(service, tmp_path / "transport", port=0)
+    server.start_in_thread()
+    try:
+        _, created = _json_request(
+            server,
+            "/v1/sessions",
+            method="POST",
+            payload={
+                "workspace_root": str(workspace),
+                "task": "stream live trace",
+                "model_profile": "main",
+                "verification_commands": ["python -m pytest"],
+            },
+        )
+        session_id = created["session_id"]
+        assert runner.first_emitted.wait(timeout=3.0)
+        assert service.session(session_id).status == AppSessionStatus.RUNNING
+
+        request = Request(
+            server.base_url + f"/v1/sessions/{session_id}/trace/stream?after=0",
+            headers={
+                "Authorization": f"Bearer {server.token}",
+                "Accept": "text/event-stream",
+            },
+            method="GET",
+        )
+        with urlopen(request, timeout=5.0) as response:
+            first = _read_sse_event(response)
+            assert response.status == 200
+            assert "id: 1\n" in first
+            assert "event: trace_event\n" in first
+            assert '"event_type":"reasoning_requested"' in first
+            assert service.session(session_id).status == AppSessionStatus.RUNNING
+            runner.release.set()
+            remainder = response.read().decode("utf-8")
+
+        terminal = _wait_terminal(service, session_id)
+        assert terminal.status == AppSessionStatus.SUCCEEDED
+        assert '"event_type":"reasoning_completed"' in remainder
+        assert "id: 2\n" in remainder
+        assert terminal.trace_id is not None
+        assert terminal.trace_path is not None
+    finally:
+        runner.release.set()
+        server.close()
+        service.close()
+
+
+def test_http_trace_page_rejects_complete_source_corruption(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = AppServerService(tmp_path / "service", runner=_trace_runner)
+    server = LocalAppHTTPServer(service, tmp_path / "transport", port=0)
+    server.start_in_thread()
+    try:
+        _, created = _json_request(
+            server,
+            "/v1/sessions",
+            method="POST",
+            payload={
+                "workspace_root": str(workspace),
+                "task": "project terminal trace",
+                "model_profile": "main",
+                "verification_commands": ["python -m pytest"],
+            },
+        )
+        terminal = _wait_terminal(service, created["session_id"])
+        assert terminal.trace_path is not None
+        trace_path = Path(terminal.trace_path)
+        rows = trace_path.read_text(encoding="utf-8").splitlines()
+        tampered = json.loads(rows[0])
+        tampered["event"]["metadata"]["tampered"] = True
+        rows[0] = json.dumps(tampered, separators=(",", ":"))
+        trace_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        with pytest.raises(HTTPError) as exc_info:
+            _json_request(server, f"/v1/sessions/{terminal.session_id}/trace")
+        assert exc_info.value.code == 409
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "trace_corruption"
+        assert "event hash mismatch" in payload["detail"]
     finally:
         server.close()
         service.close()
