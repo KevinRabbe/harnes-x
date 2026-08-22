@@ -92,8 +92,28 @@ reportById("lock-button").addEventListener("click", () => {
   clearReport();
 });
 
-new MutationObserver(() => {
+const reloadSelectedReport = () => {
   void loadCodingReport(currentSessionId());
-}).observe(reportById("session-id"), { childList: true, characterData: true, subtree: true });
+};
+
+new MutationObserver(reloadSelectedReport).observe(reportById("session-id"), {
+  childList: true,
+  characterData: true,
+  subtree: true,
+});
+
+new MutationObserver(reloadSelectedReport).observe(reportById("session-status"), {
+  childList: true,
+  characterData: true,
+  subtree: true,
+});
+
+new MutationObserver(() => {
+  if (reportById("auth-state").textContent.trim() === "Locked") {
+    reportState.token = null;
+    reportState.generation += 1;
+    clearReport();
+  }
+}).observe(reportById("auth-state"), { childList: true, characterData: true, subtree: true });
 
 clearReport();
