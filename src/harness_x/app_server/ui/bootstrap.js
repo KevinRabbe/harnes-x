@@ -47,7 +47,11 @@
     return;
   }
 
-  window.dispatchEvent(
-    new CustomEvent("harness-x-operator-token", { detail: payload.access_token }),
-  );
+  const tokenField = document.getElementById("token");
+  const authForm = document.getElementById("auth-form");
+  const accessToken = payload.access_token;
+  payload.access_token = "";
+  tokenField.value = accessToken;
+  authForm.requestSubmit();
+  tokenField.value = "";
 })();
