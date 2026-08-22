@@ -12,5 +12,6 @@ def test_installed_app_server_help_exposes_operator_ui_surface() -> None:
         timeout=10,
     )
     assert completed.returncode == 0, completed.stderr
-    assert "authenticated operator UI" in completed.stdout
-    assert "--host {127.0.0.1}" in completed.stdout
+    normalized = " ".join(completed.stdout.split())
+    assert "authenticated operator UI" in normalized
+    assert "--host {127.0.0.1}" in normalized
