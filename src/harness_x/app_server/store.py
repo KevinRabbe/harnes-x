@@ -44,6 +44,8 @@ _ALLOWED_TRANSITIONS: dict[AppSessionStatus, frozenset[AppSessionStatus]] = {
     AppSessionStatus.CANCELLED: frozenset(),
 }
 
+_ATTESTATION_SCHEMA_VERSION = "app-artifact-content-attestation-v1"
+
 
 class AppSessionStore:
     """File-backed snapshots plus hash-chained append-only event ledgers.
@@ -104,7 +106,7 @@ class AppSessionStore:
             )
             snapshot = self._apply_event(snapshot, event)
             self._write_snapshot(snapshot)
-            self._snapshots[session_id] = snapshot
+            self._snapshots[snapshot.session_id] = snapshot
             return snapshot
 
     def events(self, session_id: str, *, after_sequence: int = 0) -> tuple[AppEvent, ...]:
@@ -166,16 +168,60 @@ class AppSessionStore:
         *,
         artifact_kind: str,
         path: str | Path,
+        source_bytes: int | None = None,
+        source_sha256: str | None = None,
+        attestation_error: str | None = None,
     ) -> AppSessionSnapshot:
+        """Append one artifact event, optionally committing exact content identity.
+
+        Existing callers remain path-only. Attestation fields must be complete or explicitly
+        unavailable; incomplete metadata is rejected before anything is appended.
+        """
+
+        if (source_bytes is None) != (source_sha256 is None):
+            raise ValueError("artifact attestation requires source_bytes and source_sha256 together")
+        if source_bytes is not None and attestation_error is not None:
+            raise ValueError("artifact attestation cannot be both captured and unavailable")
+        if source_bytes is not None and source_bytes < 0:
+            raise ValueError("artifact source_bytes cannot be negative")
+        if source_sha256 is not None:
+            digest = source_sha256.strip()
+            if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+                raise ValueError("artifact source_sha256 must be lowercase SHA-256 hex")
+            source_sha256 = digest
+        if attestation_error is not None:
+            attestation_error = attestation_error.strip()
+            if not attestation_error:
+                raise ValueError("artifact attestation_error cannot be blank")
+
         with self._lock:
             current = self.session(session_id)
+            payload: dict[str, object] = {
+                "artifact_kind": artifact_kind[:120],
+                "path": str(Path(path).resolve()),
+            }
+            if source_bytes is not None and source_sha256 is not None:
+                payload.update(
+                    {
+                        "attestation_schema_version": _ATTESTATION_SCHEMA_VERSION,
+                        "attestation_status": "captured",
+                        "source_digest_algorithm": "sha256",
+                        "source_bytes": source_bytes,
+                        "source_sha256": source_sha256,
+                    }
+                )
+            elif attestation_error is not None:
+                payload.update(
+                    {
+                        "attestation_schema_version": _ATTESTATION_SCHEMA_VERSION,
+                        "attestation_status": "unavailable",
+                        "attestation_error": attestation_error[:1000],
+                    }
+                )
             event = self._append_event_locked(
                 current,
                 kind=AppEventKind.ARTIFACT_AVAILABLE,
-                payload={
-                    "artifact_kind": artifact_kind[:120],
-                    "path": str(Path(path).resolve()),
-                },
+                payload=payload,
             )
             updated = self._apply_event(current, event)
             self._write_snapshot(updated)
