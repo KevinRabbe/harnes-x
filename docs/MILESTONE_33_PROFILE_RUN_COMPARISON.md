@@ -45,16 +45,31 @@ M33 therefore separates execution from comparison:
 
 Use `harness-x-profile-run` rather than ordinary `harness-x-code` when the run is intended for a controlled comparison.
 
-It reuses the normal coding parser and full isolated M30 runtime stack, but adds three constraints:
+It reuses the normal coding parser and full isolated M30 runtime stack, but adds these constraints:
 
 - `--model-profile` is required;
 - `--in-place` and task-state resume are forbidden;
-- the output directory must be absent or empty.
+- the output path must be an absent or empty directory;
+- a seeded project-memory run must use an explicit logical project key matching the seed's stored M28 identity.
 
 Before model work begins it writes:
 
 - `model-selection.json` from M32;
 - `coding-run-manifest.json` from M33.
+
+The M33 manifest binds the run to:
+
+- exact Harness X installed distribution version;
+- SHA-256 fingerprint of the installed Harness X Python implementation;
+- task text;
+- M25 verification-plan fingerprint;
+- M26 browser-plan fingerprint when applicable;
+- normalized application-server-spec fingerprint when applicable;
+- headed/headless browser posture;
+- starting project-memory fingerprint and logical project key;
+- model selection;
+- reasoning/tool/output budgets and deterministic coding-control thresholds;
+- isolation support paths and retention posture.
 
 The final M30 runtime still writes the normal `coding-task-report.json` and all trace, verification, isolation, long-horizon, project-memory, reliability, and revision artifacts.
 
@@ -68,7 +83,7 @@ There are two straightforward ways to obtain matching starting-memory fingerprin
 
 ### Empty independent roots
 
-Give each profile a different project-memory directory that does not exist yet:
+Give each profile a different project-memory directory that does not exist yet, but the same logical project key:
 
 ```powershell
 harness-x-profile-run D:\harnes_x `
@@ -94,10 +109,13 @@ Both fresh roots have the same exact empty-directory fingerprint before executio
 
 ### Clone one existing memory snapshot
 
-If the evaluation should start with the project's existing reusable memory, use the same immutable seed directory for both runs and distinct fresh target roots:
+M28 binds persisted project memory to its `project_key`. If an existing project-memory directory is used as the seed, **do not invent a new evaluation key**. Read the exact `project_key` from the seed's `project-memory.json` and use that same value for both cloned targets.
+
+For a project whose stored key is `D:\harnes_x`:
 
 ```powershell
 $seed = "D:\harnes_x\.harness-x\project-memory"
+$projectKey = "D:\harnes_x"  # exact project_key stored in $seed\project-memory.json
 
 harness-x-profile-run D:\harnes_x `
   --task "<same task>" `
@@ -105,7 +123,7 @@ harness-x-profile-run D:\harnes_x `
   --model-profile main `
   --comparison-memory-seed $seed `
   --project-memory-root D:\eval\seeded-memory-main `
-  --project-memory-key harnes-x-eval `
+  --project-memory-key $projectKey `
   --output D:\eval\run-main
 
 # Switch the local server if needed.
@@ -116,11 +134,11 @@ harness-x-profile-run D:\harnes_x `
   --model-profile coder `
   --comparison-memory-seed $seed `
   --project-memory-root D:\eval\seeded-memory-coder `
-  --project-memory-key harnes-x-eval `
+  --project-memory-key $projectKey `
   --output D:\eval\run-coder
 ```
 
-The seed copy rejects file/directory symlinks, requires an absent or empty target, and verifies that the copied target has the same exact directory fingerprint as the seed before the model is allowed to run.
+The profile-run preflight reads the seed identity without mutating it and rejects a mismatched `--project-memory-key`. The seed copy also rejects file/directory symlinks, requires an absent or empty target, and verifies that the copied target has the same exact directory fingerprint as the seed before the model is allowed to run.
 
 Do not use a seed directory that another process is mutating while copies are being made.
 
@@ -134,14 +152,19 @@ A run is internally invalid if:
 - the report task disagrees with the pre-run manifest task;
 - the report verification-plan fingerprint disagrees with the pre-run manifest;
 - the browser-plan fingerprint disagrees with the pre-run manifest;
-- the expected isolation/source evidence is absent.
+- the expected isolation/source evidence is absent;
+- the manifest fingerprint is invalid or has been tampered with.
 
 Two valid runs are `strictly_comparable=true` only when all of these controlled conditions match:
 
+- Harness X distribution version;
+- exact Harness X Python implementation fingerprint;
 - task text;
 - exact isolated source-workspace fingerprint;
 - M25 verification-plan fingerprint;
 - M26 browser-verification-plan fingerprint or absence of browser mode;
+- application-server-spec fingerprint or absence of browser mode;
+- headed/headless browser posture;
 - starting project-memory fingerprint;
 - logical project-memory key;
 - max reasoning steps;
@@ -153,7 +176,7 @@ Two valid runs are `strictly_comparable=true` only when all of these controlled 
 
 The project-memory *directory path* may differ. Separate paths are expected. Their starting content fingerprint and logical key are what must match.
 
-The source fingerprint comes from M24 isolation. This means the two profile runs may happen hours apart, but a source change between them makes the pair non-comparable rather than silently contaminating the result.
+The source fingerprint comes from M24 isolation. This means the two profile runs may happen hours apart, but a source change between them makes the pair non-comparable rather than silently contaminating the result. The Harness X package fingerprint similarly prevents two different harness implementations from being labeled a controlled model comparison merely because both distributions report the same package version.
 
 ## Offline comparison
 
@@ -168,7 +191,9 @@ When strict conditions match, the command returns success and the report records
 
 - both model selections;
 - both manifest fingerprints;
-- exact source/verification/browser fingerprints;
+- Harness X version/package fingerprints;
+- exact source/code-verification/browser/application fingerprints;
+- browser headed/headless posture;
 - starting-memory fingerprint;
 - success/failure state;
 - latest code/browser verification evidence fingerprints and verdicts;
@@ -197,12 +222,14 @@ This supports forensic inspection without weakening the benchmark contract.
 
 ## Browser-backed runs
 
-Comparison-grade profile runs may use the normal M26 application/browser flags. The pre-run manifest records the browser-verification-plan fingerprint, and the offline comparator additionally records the latest browser verification run fingerprint and verdict.
+Comparison-grade profile runs may use the normal M26 application/browser flags. The pre-run manifest records the browser-verification-plan fingerprint, the normalized `ApplicationServerSpec` fingerprint, and headed/headless posture. The offline comparator additionally records the latest browser verification run fingerprint and verdict.
 
-A browser-backed run and a non-browser run are not strictly comparable. Two browser-backed runs with different M26 plans are not strictly comparable.
+A browser-backed run and a non-browser run are not strictly comparable. Two browser-backed runs with different M26 plans, app launch specs, or headed/headless modes are not strictly comparable.
 
 ## What M33 does not establish
 
-A single pair of runs does not establish a universal model ranking. Even a strictly controlled comparison is evidence about one task, source snapshot, Harness X configuration, project-memory snapshot, model serving configuration, and stochastic/runtime environment.
+A single pair of runs does not establish a universal model ranking. Even a strictly controlled comparison is evidence about one task, source snapshot, Harness X implementation, project-memory snapshot, model profile, and runtime environment.
+
+M33 does **not** fingerprint the external inference server binary, GPU driver/runtime, quantized weight files, or provider-side implementation behind a remote API. Operators should keep those fixed and record them externally for serious experiments. Repeated trials are still required to estimate stochastic variance.
 
 M33 deliberately stops at faithful experimental provenance and descriptive outcome comparison. Aggregation, repeated trials, statistical evaluation, MINIMAL-vs-FULL Harness X experiments, or automatic model policy are separate milestones and must preserve the same authority boundaries.
