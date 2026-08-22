@@ -45,7 +45,7 @@ def _terminal_report(service: AppServerService, tmp_path: Path, *, state: str):
             snapshot.session_id,
             artifact_kind="coding_task_report",
             path=report_path,
-            attestation_error="content attestation capture unavailable",
+            attestation_error="content attestation capture unavailable at /private/path",
         )
     else:
         raise AssertionError(state)
@@ -58,7 +58,10 @@ def _terminal_report(service: AppServerService, tmp_path: Path, *, state: str):
 
 
 @pytest.mark.parametrize("state", ["legacy_unattested", "unavailable"])
-def test_manifest_preserves_nonverified_report_provenance(tmp_path: Path, state: str) -> None:
+def test_manifest_preserves_nonverified_report_provenance_without_diagnostic_text(
+    tmp_path: Path,
+    state: str,
+) -> None:
     service = AppServerService(tmp_path / "service")
     try:
         snapshot = _terminal_report(service, tmp_path, state=state)
@@ -71,12 +74,9 @@ def test_manifest_preserves_nonverified_report_provenance(tmp_path: Path, state:
         assert manifest.coding_report.attestation_status == state
         assert manifest.coding_report.attested_source_bytes is None
         assert manifest.coding_report.attested_source_sha256 is None
-        if state == "unavailable":
-            assert manifest.coding_report.attestation_error == (
-                "content attestation capture unavailable"
-            )
-        else:
-            assert manifest.coding_report.attestation_error is None
+        serialized = manifest.model_dump_json()
+        assert "content attestation capture unavailable" not in serialized
+        assert "/private/path" not in serialized
         assert manifest.causal_trace.availability == "not_available"
     finally:
         service.close()
