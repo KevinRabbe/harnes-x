@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,36 @@ def _canonical(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def object_fingerprint(value: object) -> str:
+    return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def harness_package_fingerprint() -> str:
+    """Hash the installed Harness X Python implementation used by this run."""
+
+    package_root = Path(__file__).resolve().parents[1]
+    rows: list[tuple[str, str, int]] = []
+    for path in sorted(package_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        payload = path.read_bytes()
+        rows.append(
+            (
+                path.relative_to(package_root).as_posix(),
+                hashlib.sha256(payload).hexdigest(),
+                len(payload),
+            )
+        )
+    return object_fingerprint(rows)
+
+
+def harness_distribution_version() -> str:
+    try:
+        return version("harness-x")
+    except PackageNotFoundError:
+        return "uninstalled"
+
+
 def directory_fingerprint(path: str | Path) -> str:
     """Return an exact hash of one persistent directory without following symlinks.
 
@@ -37,7 +68,7 @@ def directory_fingerprint(path: str | Path) -> str:
 
     root = Path(path).resolve()
     if not root.exists():
-        return hashlib.sha256(_canonical([])).hexdigest()
+        return object_fingerprint([])
     if not root.is_dir():
         raise ValueError(f"comparison fingerprint target is not a directory: {root}")
 
@@ -69,7 +100,7 @@ def directory_fingerprint(path: str | Path) -> str:
                     digest.update(block)
             rows.append((target.relative_to(root).as_posix(), digest.hexdigest(), size))
     rows.sort()
-    return hashlib.sha256(_canonical(rows)).hexdigest()
+    return object_fingerprint(rows)
 
 
 def clone_comparison_memory_seed(seed_root: str | Path, target_root: str | Path) -> str:
@@ -128,10 +159,16 @@ class CodingRunManifest(BaseModel):
     workspace_root: str
     output_root: str
     isolated: bool
+    harness_version: str
+    harness_package_fingerprint: str = Field(min_length=64, max_length=64)
     verification_plan_fingerprint: str = Field(min_length=64, max_length=64)
     browser_verification_plan_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    application_spec_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    browser_headed: bool = False
     project_memory_root: str
     project_memory_key: str
     starting_project_memory_fingerprint: str = Field(min_length=64, max_length=64)
@@ -150,8 +187,16 @@ class CodingRunManifest(BaseModel):
 
     @model_validator(mode="after")
     def derive_fingerprint(self) -> "CodingRunManifest":
+        if (self.browser_verification_plan_fingerprint is None) != (
+            self.application_spec_fingerprint is None
+        ):
+            raise ValueError(
+                "browser verification and application spec fingerprints must be present together"
+            )
+        if self.browser_verification_plan_fingerprint is None and self.browser_headed:
+            raise ValueError("browser_headed cannot be true for a non-browser coding run")
         material = self.model_dump(mode="json", exclude={"fingerprint"})
-        object.__setattr__(self, "fingerprint", hashlib.sha256(_canonical(material)).hexdigest())
+        object.__setattr__(self, "fingerprint", object_fingerprint(material))
         return self
 
 
@@ -163,6 +208,8 @@ def build_coding_run_manifest(
     isolated: bool,
     verification_plan_fingerprint: str,
     browser_verification_plan_fingerprint: str | None,
+    application_spec_fingerprint: str | None,
+    browser_headed: bool,
     project_memory_root: str | Path | None,
     project_memory_key: str | None,
     model_selection: ResolvedModelSelection,
@@ -195,8 +242,12 @@ def build_coding_run_manifest(
         workspace_root=str(workspace),
         output_root=str(output),
         isolated=isolated,
+        harness_version=harness_distribution_version(),
+        harness_package_fingerprint=harness_package_fingerprint(),
         verification_plan_fingerprint=verification_plan_fingerprint,
         browser_verification_plan_fingerprint=browser_verification_plan_fingerprint,
+        application_spec_fingerprint=application_spec_fingerprint,
+        browser_headed=browser_headed,
         project_memory_root=str(memory_root),
         project_memory_key=key,
         starting_project_memory_fingerprint=directory_fingerprint(memory_root),
