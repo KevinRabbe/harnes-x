@@ -12,9 +12,18 @@ SOURCE_FP = "1" * 64
 CODE_PLAN_FP = "2" * 64
 BROWSER_PLAN_FP = "3" * 64
 MEMORY_FP = "4" * 64
+APP_FP = "8" * 64
+HARNESS_FP = "9" * 64
 
 
-def _write_browser_run(root: Path, profile_id: str, model: str) -> None:
+def _write_browser_run(
+    root: Path,
+    profile_id: str,
+    model: str,
+    *,
+    application_fingerprint: str = APP_FP,
+    browser_headed: bool = False,
+) -> None:
     root.mkdir(parents=True)
     selection = ResolvedModelSelection(
         source="profile",
@@ -30,8 +39,12 @@ def _write_browser_run(root: Path, profile_id: str, model: str) -> None:
         workspace_root="/source",
         output_root=str(root),
         isolated=True,
+        harness_version="0.1.0a0-test",
+        harness_package_fingerprint=HARNESS_FP,
         verification_plan_fingerprint=CODE_PLAN_FP,
         browser_verification_plan_fingerprint=BROWSER_PLAN_FP,
+        application_spec_fingerprint=application_fingerprint,
+        browser_headed=browser_headed,
         project_memory_root=f"/memory/{profile_id}",
         project_memory_key="browser-project",
         starting_project_memory_fingerprint=MEMORY_FP,
@@ -66,7 +79,10 @@ def _write_browser_run(root: Path, profile_id: str, model: str) -> None:
         "verification_runs": [{"run_fingerprint": "5" * 64, "verdict": "pass"}],
         "browser_verification_plan": {"fingerprint": BROWSER_PLAN_FP},
         "browser_verification_runs": [
-            {"run_fingerprint": ("6" if profile_id == "main" else "7") * 64, "verdict": "pass"}
+            {
+                "run_fingerprint": ("6" if profile_id == "main" else "7") * 64,
+                "verdict": "pass",
+            }
         ],
         "isolation": {
             "source": {"fingerprint": SOURCE_FP, "head_sha": "a" * 40},
@@ -78,7 +94,9 @@ def _write_browser_run(root: Path, profile_id: str, model: str) -> None:
     )
 
 
-def test_browser_runs_are_strictly_comparable_only_with_same_browser_plan(tmp_path: Path) -> None:
+def test_browser_runs_are_strictly_comparable_with_same_app_and_browser_conditions(
+    tmp_path: Path,
+) -> None:
     left = tmp_path / "main"
     right = tmp_path / "coder"
     _write_browser_run(left, "main", "main-model")
@@ -90,3 +108,24 @@ def test_browser_runs_are_strictly_comparable_only_with_same_browser_plan(tmp_pa
     assert report.left.latest_browser_verdict == "pass"
     assert report.right.latest_browser_verification_fingerprint == "7" * 64
     assert report.left.browser_verification_plan_fingerprint == BROWSER_PLAN_FP
+    assert report.left.application_spec_fingerprint == APP_FP
+    assert report.left.browser_headed is False
+
+
+def test_browser_app_or_headed_drift_is_not_strictly_comparable(tmp_path: Path) -> None:
+    left = tmp_path / "main"
+    right = tmp_path / "coder"
+    _write_browser_run(left, "main", "main-model")
+    _write_browser_run(
+        right,
+        "coder",
+        "coder-model",
+        application_fingerprint="7" * 64,
+        browser_headed=True,
+    )
+
+    report = compare_profile_run_roots(left, right)
+
+    assert report.strictly_comparable is False
+    assert "application_spec_fingerprint" in report.incompatibilities
+    assert "browser_headed" in report.incompatibilities
