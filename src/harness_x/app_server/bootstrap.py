@@ -44,6 +44,13 @@ class OneTimeBootstrapTickets:
             self._expires_at = expires_at
         return ticket
 
+    def invalidate(self) -> None:
+        """Discard any outstanding ticket, for example after a browser launch failure."""
+
+        with self._lock:
+            self._ticket_digest = None
+            self._expires_at = None
+
     def redeem(self, ticket: object) -> bool:
         """Consume the outstanding ticket on one valid, unexpired redemption."""
 
