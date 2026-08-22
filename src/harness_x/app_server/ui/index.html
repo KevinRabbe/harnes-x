@@ -175,8 +175,12 @@
                 <p class="eyebrow">Authoritative causal trace</p>
                 <h3 id="trace-heading">Execution</h3>
               </div>
-              <span id="trace-state" class="pill pill--muted">Idle</span>
+              <div class="session-actions">
+                <button id="download-trace" type="button" class="secondary" disabled>Download verified trace</button>
+                <span id="trace-state" class="pill pill--muted">Idle</span>
+              </div>
             </div>
+            <p id="trace-export-status" class="mono muted small" aria-live="polite"></p>
             <div id="trace-events" class="timeline" aria-live="polite"></div>
           </section>
 
@@ -198,6 +202,7 @@
   <script src="/ui/stream_policy.js" defer></script>
   <script src="/ui/report.js" defer></script>
   <script src="/ui/report_export.js" defer></script>
+  <script src="/ui/trace_export.js" defer></script>
   <script src="/ui/app.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>

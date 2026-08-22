@@ -3,6 +3,8 @@
 M35 never writes a second reasoning/tool/verification ledger. It verifies complete TraceRecord
 lines directly from the existing JSONL trace, tolerates only a currently-being-written final
 partial line, and emits a bounded UI-safe projection that retains the source chain hashes.
+M42 also exposes payload-level verification so a separately bounded source read can be exported
+without reopening the filesystem after integrity checks.
 """
 
 from __future__ import annotations
@@ -208,33 +210,30 @@ def _project_record(record: TraceRecord) -> TraceProjectionEvent:
     )
 
 
-def load_verified_trace_records(
-    path: str | Path,
+def verify_trace_payload(
+    payload: bytes,
     *,
     expected_trace_id: str,
     require_complete_final_line: bool,
+    source_label: str = "trace source",
 ) -> tuple[tuple[TraceRecord, ...], bool]:
-    """Verify all complete source records and report whether a final partial line was ignored."""
+    """Verify trace records from one already-captured source byte sequence."""
 
-    target = Path(path).resolve()
-    try:
-        payload = target.read_bytes()
-    except OSError as exc:
-        raise TraceCorruptionError(f"cannot read trace projection source {target}: {exc}") from exc
     partial_ignored = bool(payload) and not payload.endswith(b"\n")
+    verified_payload = payload
     if partial_ignored:
         if require_complete_final_line:
             raise TraceCorruptionError(
-                f"terminal trace has an incomplete final record: {target}"
+                f"terminal trace has an incomplete final record: {source_label}"
             )
         boundary = payload.rfind(b"\n")
-        payload = b"" if boundary < 0 else payload[: boundary + 1]
+        verified_payload = b"" if boundary < 0 else payload[: boundary + 1]
 
     records: list[TraceRecord] = []
     previous_hash: str | None = None
     previous_timestamp: datetime | None = None
     expected_step = 1
-    for line_number, raw in enumerate(payload.splitlines(), start=1):
+    for line_number, raw in enumerate(verified_payload.splitlines(), start=1):
         if not raw.strip():
             continue
         try:
@@ -272,6 +271,27 @@ def load_verified_trace_records(
         previous_hash = record.event_hash
         previous_timestamp = record.event.timestamp
     return tuple(records), partial_ignored
+
+
+def load_verified_trace_records(
+    path: str | Path,
+    *,
+    expected_trace_id: str,
+    require_complete_final_line: bool,
+) -> tuple[tuple[TraceRecord, ...], bool]:
+    """Verify all complete source records and report whether a final partial line was ignored."""
+
+    target = Path(path).resolve()
+    try:
+        payload = target.read_bytes()
+    except OSError as exc:
+        raise TraceCorruptionError(f"cannot read trace projection source {target}: {exc}") from exc
+    return verify_trace_payload(
+        payload,
+        expected_trace_id=expected_trace_id,
+        require_complete_final_line=require_complete_final_line,
+        source_label=str(target),
+    )
 
 
 def build_trace_projection_page(
