@@ -8,8 +8,9 @@ false pass/fail conclusion.
 
 from __future__ import annotations
 
-from harness_x.core import TaskId
+from harness_x.core import EventType, TaskId
 from harness_x.core.provenance import Provenance
+from harness_x.telemetry import TraceRecorder
 from harness_x.tools import ToolExecutor
 
 from .verification import (
@@ -18,11 +19,46 @@ from .verification import (
     VerificationCheckResult,
     VerificationCheckStatus,
     VerificationPlatform,
+    VerificationRun,
 )
 
 
 class StrictVerificationPlatform(VerificationPlatform):
     """VerificationPlatform with fail-closed bounded content evidence."""
+
+    def execute(
+        self,
+        *,
+        run_kind: str,
+        executor: ToolExecutor,
+        recorder: TraceRecorder,
+        task_id: TaskId,
+        routine_allowed_tools: tuple[str, ...],
+        granted_permissions: frozenset[str],
+    ) -> VerificationRun:
+        run = super().execute(
+            run_kind=run_kind,
+            executor=executor,
+            recorder=recorder,
+            task_id=task_id,
+            routine_allowed_tools=routine_allowed_tools,
+            granted_permissions=granted_permissions,
+        )
+        recorder.emit(
+            EventType.VERIFICATION_COMPLETED,
+            "coding.verification",
+            output_refs=(f"verification-run:{run.run_fingerprint}",),
+            metadata={
+                "run_id": run.run_id,
+                "run_kind": run.run_kind,
+                "verdict": run.verdict.value,
+                "plan_fingerprint": run.plan_fingerprint,
+                "workspace_stable": run.workspace_stable,
+                "required_failures": list(run.required_failures),
+                "advisory_failures": list(run.advisory_failures),
+            },
+        )
+        return run
 
     def _execute_check(
         self,
