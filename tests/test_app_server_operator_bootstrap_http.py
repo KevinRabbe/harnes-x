@@ -160,6 +160,23 @@ def test_bootstrap_exchange_fails_closed_without_consuming_ticket(tmp_path: Path
             assert exc_info.value.code == expected
             assert server.bootstrap_tickets.has_outstanding_ticket
 
+        malformed = Request(
+            server.base_url + "/v1/operator/bootstrap",
+            data=b'{"ticket":',
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": server.base_url,
+            },
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as malformed_error:
+            urlopen(malformed, timeout=3.0)
+        assert malformed_error.value.code == 400
+        malformed_payload = json.loads(malformed_error.value.read().decode("utf-8"))
+        assert malformed_payload["error"] == "invalid_bootstrap_request"
+        assert server.bootstrap_tickets.has_outstanding_ticket
+
         with urlopen(
             _post(
                 server,
