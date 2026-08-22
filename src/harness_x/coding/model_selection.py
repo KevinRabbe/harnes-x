@@ -22,6 +22,7 @@ from harness_x.reasoning.adapters.repository_coding_transformers import (
 
 DEFAULT_DEVELOPMENT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1"
+LEGACY_DIRECT_OPENAI_MAX_OUTPUT_TOKENS = 2048
 
 
 class ResolvedModelSelection(BaseModel):
@@ -115,6 +116,8 @@ def resolve_model_selection(args) -> ResolvedModelSelection:
             local_files_only=bool(getattr(args, "local_files_only", False)),
         )
 
+    # Preserve the exact pre-M32 direct OpenAI-compatible defaults. Larger output caps are an
+    # explicit property of named profiles, not a silent behavior change for existing CLI usage.
     return ResolvedModelSelection(
         source="direct_flags",
         backend=backend,
@@ -122,7 +125,7 @@ def resolve_model_selection(args) -> ResolvedModelSelection:
         base_url=getattr(args, "base_url", None) or DEFAULT_LOCAL_BASE_URL,
         api_key_env=getattr(args, "api_key_env", None),
         allow_remote_endpoint=bool(getattr(args, "allow_remote", False)),
-        max_output_tokens=32768,
+        max_output_tokens=LEGACY_DIRECT_OPENAI_MAX_OUTPUT_TOKENS,
         reasoning_effort=getattr(args, "reasoning_effort", None),
     )
 
