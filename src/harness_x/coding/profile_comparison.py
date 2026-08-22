@@ -67,6 +67,8 @@ class ComparableRunSummary(BaseModel):
     manifest_fingerprint: str = Field(min_length=64, max_length=64)
     selection: ResolvedModelSelection
     report_schema_version: str
+    harness_version: str
+    harness_package_fingerprint: str = Field(min_length=64, max_length=64)
     succeeded: bool
     status: str
     task: str
@@ -76,6 +78,10 @@ class ComparableRunSummary(BaseModel):
     browser_verification_plan_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    application_spec_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    browser_headed: bool = False
     starting_project_memory_fingerprint: str = Field(min_length=64, max_length=64)
     reasoning_steps: int = Field(ge=0)
     tool_actions: int = Field(ge=0)
@@ -140,8 +146,6 @@ def load_comparable_run(run_root: str | Path) -> tuple[ComparableRunSummary, Cod
     report = _load_json(report_path)
     selection = _selection_from_artifact(selection_path)
 
-    # A run root is internally inconsistent before it is compared to anything else if the
-    # independently persisted M32 selection artifact disagrees with the pre-run manifest.
     if selection != manifest.model_selection:
         raise ValueError(
             f"model selection artifact disagrees with coding run manifest: {root}"
@@ -200,6 +204,8 @@ def load_comparable_run(run_root: str | Path) -> tuple[ComparableRunSummary, Cod
         manifest_fingerprint=manifest.fingerprint,
         selection=selection,
         report_schema_version=str(report.get("schema_version", "unknown")),
+        harness_version=manifest.harness_version,
+        harness_package_fingerprint=manifest.harness_package_fingerprint,
         succeeded=bool(report.get("succeeded", False)),
         status=str(report.get("status", "unknown")),
         task=task,
@@ -207,6 +213,8 @@ def load_comparable_run(run_root: str | Path) -> tuple[ComparableRunSummary, Cod
         source_head_sha=(str(source["head_sha"]) if source.get("head_sha") else None),
         verification_plan_fingerprint=verification_fp,
         browser_verification_plan_fingerprint=browser_fp,
+        application_spec_fingerprint=manifest.application_spec_fingerprint,
+        browser_headed=manifest.browser_headed,
         starting_project_memory_fingerprint=manifest.starting_project_memory_fingerprint,
         reasoning_steps=int(report.get("reasoning_steps", 0)),
         tool_actions=int(report.get("tool_actions", 0)),
@@ -254,6 +262,12 @@ def _comparability_mismatches(
             mismatches.append(name)
 
     require_equal("task", left.task, right.task)
+    require_equal("harness_version", left.harness_version, right.harness_version)
+    require_equal(
+        "harness_package_fingerprint",
+        left.harness_package_fingerprint,
+        right.harness_package_fingerprint,
+    )
     require_equal("source_fingerprint", left.source_fingerprint, right.source_fingerprint)
     require_equal(
         "verification_plan_fingerprint",
@@ -266,6 +280,12 @@ def _comparability_mismatches(
         right.browser_verification_plan_fingerprint,
     )
     require_equal(
+        "application_spec_fingerprint",
+        left.application_spec_fingerprint,
+        right.application_spec_fingerprint,
+    )
+    require_equal("browser_headed", left.browser_headed, right.browser_headed)
+    require_equal(
         "starting_project_memory_fingerprint",
         left.starting_project_memory_fingerprint,
         right.starting_project_memory_fingerprint,
@@ -273,10 +293,16 @@ def _comparability_mismatches(
     require_equal(
         "project_memory_key", left_manifest.project_memory_key, right_manifest.project_memory_key
     )
-    require_equal("max_reasoning_steps", left_manifest.max_reasoning_steps, right_manifest.max_reasoning_steps)
+    require_equal(
+        "max_reasoning_steps", left_manifest.max_reasoning_steps, right_manifest.max_reasoning_steps
+    )
     require_equal("max_tool_actions", left_manifest.max_tool_actions, right_manifest.max_tool_actions)
     require_equal("max_output_tokens", left_manifest.max_output_tokens, right_manifest.max_output_tokens)
-    require_equal("baseline_verification", left_manifest.baseline_verification, right_manifest.baseline_verification)
+    require_equal(
+        "baseline_verification",
+        left_manifest.baseline_verification,
+        right_manifest.baseline_verification,
+    )
     require_equal("max_idle_turns", left_manifest.max_idle_turns, right_manifest.max_idle_turns)
     require_equal(
         "max_inspection_streak",
