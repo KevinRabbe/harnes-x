@@ -14,7 +14,7 @@ GET /v1/sessions/{session_id}/report/export
 
 The endpoint accepts no query parameters and no caller-supplied path. It derives the canonical report only from the authoritative session snapshot and durable `ARTIFACT_AVAILABLE(coding_task_report)` event.
 
-The response body is the exact bounded source byte sequence validated during that request. M41 must not parse a report, reopen the path, and then serve a second filesystem read: provenance checks and response bytes must refer to the same captured byte sequence.
+The response body is the exact bounded source byte sequence validated during that request. M41 does not parse a report, reopen the path, and then serve a second filesystem read: provenance checks and response bytes refer to the same captured `ReportSource` byte sequence.
 
 ## Validation and provenance
 
@@ -30,7 +30,7 @@ M41 reuses the M38/M39 report boundary:
 - complete M39 attestation metadata when any attestation key is present;
 - byte-count and SHA-256 equality against a captured durable attestation before a `verified` report can be exported.
 
-A verified report whose current bytes differ from the ledger attestation fails as `report_corruption` before any export body is sent, including same-length modifications that remain valid JSON.
+A verified report whose current bytes differ from the ledger attestation fails as `report_corruption` before any export headers/body are sent, including same-length modifications that remain valid JSON.
 
 M38-era `legacy_unattested` reports and explicit M39 `unavailable` reports remain exportable after current-source validation. They are never promoted to `verified`; their provenance state is exposed on the response so the operator can distinguish current-source export from ledger-attested export.
 
@@ -56,20 +56,23 @@ The custom headers are provenance metadata only. They do not establish task succ
 
 M41 adds a `Download exact report` action to the existing coding-report panel.
 
-Because stateful App Server routes remain bearer-authenticated, the browser must not use a plain unauthenticated anchor to the export route. A packaged dependency-free export client:
+Because stateful App Server routes remain bearer-authenticated, the browser does not use a plain unauthenticated anchor to the export route. A packaged dependency-free export client:
 
 - captures the bearer through the same already-qualified manual-auth form listener ordering used by the report viewer;
-- performs an authenticated same-origin `fetch()` with `cache: "no-store"`;
-- requires the expected content type, exact content length, SHA-256 provenance header, and recognized attestation status;
-- downloads the returned response bytes through a temporary same-page object URL;
+- performs an authenticated same-origin `fetch()` with `cache: "no-store"` and `credentials: "omit"`, so the operation is explicitly bearer-only rather than cookie-dependent;
+- requires the expected content type, exact content length, fixed attachment filename, SHA-256 provenance header, durable artifact event hash, and recognized attestation status;
+- reads the response into one `ArrayBuffer` and recomputes SHA-256 with Web Crypto before allowing download;
+- requires the received byte count and recomputed digest to match the server provenance headers;
+- downloads the verified response bytes through a temporary same-page object URL;
 - uses the fixed filename `coding-task-report.json` rather than trusting server/user-provided arbitrary filenames;
 - revokes the temporary object URL immediately after triggering the download;
+- holds an `AbortController` and selection generation so changing session, locking, or unloading cancels an in-flight export and prevents stale completion/error presentation under a different session;
 - clears in-memory bearer state on the existing lock action;
-- renders errors only through `textContent`.
+- renders status/errors only through `textContent`.
 
 The export client must not use cookies, `localStorage`, `sessionStorage`, `innerHTML`, caller-selected paths, or a persistent blob/object URL.
 
-M40 bootstrap ordering remains valid: report/export listeners are registered before `app.js` synchronously clears the password field, and `bootstrap.js` continues to run only after those listeners exist.
+M40 bootstrap ordering remains valid: `report.js` and `report_export.js` listeners are registered before `app.js` synchronously clears the password field, and `bootstrap.js` continues to run only after those listeners exist.
 
 ## Authority boundary
 
@@ -97,17 +100,18 @@ The browser download target is controlled by normal browser download behavior; M
 
 Before freeze, M41 must prove:
 
-- export returns the exact source bytes observed by the validation read;
+- export returns the exact source bytes observed by the validation read without a second filesystem reopen;
 - `Content-Length` and SHA-256 header exactly describe those returned bytes;
 - verified M39 reports export only when current bytes match the durable attestation;
-- same-length valid-JSON tampering fails before response body;
+- same-length valid-JSON tampering fails before successful export response;
 - legacy and unavailable reports remain explicitly labeled and are not promoted to verified;
-- nonterminal/no-report sessions fail without file access;
+- nonterminal/no-report sessions fail without export access;
 - bearer authentication remains mandatory;
 - query parameters, extra path segments, and arbitrary path selection are rejected;
 - response filename is fixed and cannot be caller-controlled;
 - existing `/report` JSON projection semantics remain unchanged;
-- browser export uses authenticated fetch, a temporary revoked object URL, safe DOM rendering, and no browser credential persistence;
+- browser export is cookie-independent, recomputes response SHA-256, uses a temporary revoked object URL, and uses safe DOM rendering with no credential persistence;
+- session/lock/unload changes cancel in-flight browser exports and suppress stale-session download/status presentation;
 - M40 bootstrap/manual-auth ordering still supplies the export client with page-memory bearer state;
 - packaged JavaScript syntax passes under Node when available;
 - exact M40→M41 diff remains confined to canonical report validation/export, operator UI export, tests, and documentation;
