@@ -106,7 +106,7 @@ class AppSessionStore:
             )
             snapshot = self._apply_event(snapshot, event)
             self._write_snapshot(snapshot)
-            self._snapshots[snapshot.session_id] = snapshot
+            self._snapshots[session_id] = snapshot
             return snapshot
 
     def events(self, session_id: str, *, after_sequence: int = 0) -> tuple[AppEvent, ...]:
@@ -185,11 +185,15 @@ class AppSessionStore:
         if source_bytes is not None and (type(source_bytes) is not int or source_bytes < 0):
             raise ValueError("artifact source_bytes must be a non-negative integer")
         if source_sha256 is not None:
+            if not isinstance(source_sha256, str):
+                raise ValueError("artifact source_sha256 must be lowercase SHA-256 hex")
             digest = source_sha256.strip()
             if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
                 raise ValueError("artifact source_sha256 must be lowercase SHA-256 hex")
             source_sha256 = digest
         if attestation_error is not None:
+            if not isinstance(attestation_error, str):
+                raise ValueError("artifact attestation_error must be text")
             attestation_error = attestation_error.strip()
             if not attestation_error:
                 raise ValueError("artifact attestation_error cannot be blank")
