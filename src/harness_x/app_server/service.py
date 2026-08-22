@@ -11,7 +11,7 @@ import threading
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel
 
@@ -151,6 +151,7 @@ class AppServerService:
         )
 
     def create_session(self, request: CodingSessionRequest) -> AppSessionSnapshot:
+        self._validate_launch_request(request)
         run_root = self.run_root / f"run_{uuid.uuid4().hex}"
         snapshot = self.store.create_session(request, output_root=run_root)
         with self._condition:
@@ -193,10 +194,42 @@ class AppServerService:
         if self._worker.is_alive() and threading.current_thread() is not self._worker:
             self._worker.join(timeout=2.0)
 
+    @staticmethod
+    def _validate_launch_request(request: CodingSessionRequest) -> None:
+        if not request.workspace_root.is_dir():
+            raise ValueError(
+                f"app-server workspace does not exist: {request.workspace_root}"
+            )
+        for label, path in (
+            ("verification_plan_path", request.verification_plan_path),
+            ("browser_application_spec_path", request.browser_application_spec_path),
+            ("browser_verification_plan_path", request.browser_verification_plan_path),
+        ):
+            if path is not None and not path.is_file():
+                raise ValueError(f"app-server {label} does not exist: {path}")
+        memory_root = request.project_memory_root
+        if memory_root is not None and memory_root.exists() and not memory_root.is_dir():
+            raise ValueError(
+                f"app-server project_memory_root is not a directory: {memory_root}"
+            )
+
     def _recover_sessions(self) -> None:
         for snapshot in self.store.sessions:
             if snapshot.status == AppSessionStatus.CREATED:
-                self._queue.append(snapshot.session_id)
+                # CREATED means the run never crossed the runtime-start boundary. It is safe to
+                # queue again; launch-time path validation will happen inside the runner/service
+                # on the original persisted request if the operator resumes the server.
+                try:
+                    self._validate_launch_request(snapshot.request)
+                except ValueError as exc:
+                    self.store.transition(
+                        snapshot.session_id,
+                        status=AppSessionStatus.FAILED,
+                        kind=AppEventKind.SESSION_FAILED,
+                        failure_reason=f"restart_launch_validation_failed: {exc}",
+                    )
+                else:
+                    self._queue.append(snapshot.session_id)
             elif snapshot.status in {
                 AppSessionStatus.RUNNING,
                 AppSessionStatus.CANCEL_REQUESTED,
