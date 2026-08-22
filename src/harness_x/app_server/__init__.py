@@ -12,6 +12,12 @@ from .protocol import (
 )
 from .service import AppServerService, HarnessCodingRunner
 from .store import AppSessionStore
+from .trace_projection import (
+    TraceProjectionEvent,
+    TraceProjectionPage,
+    build_trace_projection_page,
+    load_verified_trace_records,
+)
 
 __all__ = [
     "AppEvent",
@@ -25,4 +31,8 @@ __all__ = [
     "CodingSessionRequest",
     "HarnessCodingRunner",
     "LocalAppHTTPServer",
+    "TraceProjectionEvent",
+    "TraceProjectionPage",
+    "build_trace_projection_page",
+    "load_verified_trace_records",
 ]

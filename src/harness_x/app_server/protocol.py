@@ -1,8 +1,8 @@
 """Typed protocol contracts for the local Harness X App Server.
 
 M34 exposes existing Harness X runtime state to a future GUI without moving authority into
-HTTP/UI code. The server is single-user and loopback-only; these models define the stable
-wire contract and durable session projection.
+HTTP/UI code. M35 adds only a durable pointer to the authoritative causal trace; trace events
+remain owned by TraceStore and are projected read-only for UI consumption.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ class AppEventKind(StrEnum):
     SESSION_FAILED = "session_failed"
     SESSION_CANCELLED = "session_cancelled"
     ARTIFACT_AVAILABLE = "artifact_available"
+    TRACE_ATTACHED = "trace_attached"
 
 
 class CodingSessionRequest(BaseModel):
@@ -151,6 +152,8 @@ class AppSessionSnapshot(BaseModel):
     event_count: int = Field(default=0, ge=0)
     latest_event_hash: str | None = Field(default=None, min_length=64, max_length=64)
     coding_report_path: str | None = None
+    trace_id: str | None = Field(default=None, pattern=r"^trace_[0-9a-f]{32}$")
+    trace_path: str | None = None
     failure_reason: str | None = Field(default=None, max_length=4000)
     cancel_requested: bool = False
     revision: int = Field(default=1, ge=1)
@@ -160,6 +163,8 @@ class AppSessionSnapshot(BaseModel):
     def _derive_fingerprint(self) -> "AppSessionSnapshot":
         if self.status.terminal and self.completed_at is None:
             raise ValueError("terminal app session requires completed_at")
+        if (self.trace_id is None) != (self.trace_path is None):
+            raise ValueError("trace_id and trace_path must be present together")
         material = self.model_dump(mode="json", exclude={"fingerprint"})
         object.__setattr__(self, "fingerprint", hashlib.sha256(_canonical(material)).hexdigest())
         return self

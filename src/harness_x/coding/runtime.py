@@ -11,6 +11,7 @@ from harness_x.core import (
     ActionProposal,
     CandidateId,
     ComputeBudget,
+    EventType,
     ReasoningRequest,
     RoutineId,
     SourceKind,
@@ -393,7 +394,19 @@ class CodingTaskRuntime:
             results.append(item)
             if item.returncode != 0:
                 break
-        return tuple(results)
+        completed = tuple(results)
+        recorder.emit(
+            EventType.VERIFICATION_COMPLETED,
+            "coding.verifier",
+            metadata={
+                "configured_commands": len(commands),
+                "executed_commands": len(completed),
+                "passed": len(completed) == len(commands)
+                and all(item.returncode == 0 for item in completed),
+                "returncodes": [item.returncode for item in completed],
+            },
+        )
+        return completed
 
     def _remember_verification_failure(
         self,

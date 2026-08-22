@@ -50,7 +50,8 @@ class AppSessionStore:
 
     Events are fsynced before the snapshot projection is replaced. On startup, a snapshot that
     trails its ledger is deterministically reconciled. The ledger is the transition evidence;
-    the snapshot is only a convenient projection.
+    the snapshot is only a convenient projection. M35 stores only the authoritative trace
+    identity/path here; causal trace records remain exclusively in TraceStore.
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -175,6 +176,38 @@ class AppSessionStore:
                     "artifact_kind": artifact_kind[:120],
                     "path": str(Path(path).resolve()),
                 },
+            )
+            updated = self._apply_event(current, event)
+            self._write_snapshot(updated)
+            self._snapshots[session_id] = updated
+            return updated
+
+    def attach_trace(
+        self,
+        session_id: str,
+        *,
+        trace_id: str,
+        path: str | Path,
+    ) -> AppSessionSnapshot:
+        """Persist only the pointer to the authoritative TraceStore ledger."""
+
+        with self._lock:
+            current = self.session(session_id)
+            resolved = Path(path).resolve()
+            output_root = Path(current.output_root).resolve()
+            if resolved.parent != output_root:
+                raise ValueError("causal trace must be directly inside the session output root")
+            expected_name = f"{trace_id}.jsonl"
+            if resolved.name != expected_name:
+                raise ValueError("causal trace filename does not match trace_id")
+            if current.trace_id is not None:
+                if current.trace_id == trace_id and current.trace_path == str(resolved):
+                    return current
+                raise ValueError("app session already has a different causal trace attached")
+            event = self._append_event_locked(
+                current,
+                kind=AppEventKind.TRACE_ATTACHED,
+                payload={"trace_id": trace_id, "trace_path": str(resolved)},
             )
             updated = self._apply_event(current, event)
             self._write_snapshot(updated)
@@ -314,6 +347,13 @@ class AppSessionStore:
                     updates["completed_at"] = event.created_at
         if event.kind == AppEventKind.SESSION_CANCEL_REQUESTED:
             updates["cancel_requested"] = True
+        if event.kind == AppEventKind.TRACE_ATTACHED:
+            trace_id = str(event.payload.get("trace_id", ""))
+            trace_path = str(event.payload.get("trace_path", ""))
+            if not trace_id or not trace_path:
+                raise RuntimeError("trace_attached event is missing trace identity")
+            updates["trace_id"] = trace_id
+            updates["trace_path"] = trace_path
         if event.payload.get("coding_report_path") is not None:
             updates["coding_report_path"] = str(event.payload["coding_report_path"])
         if event.payload.get("failure_reason") is not None:
