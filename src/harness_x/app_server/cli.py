@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Sequence
 
-from .http_server import LocalAppHTTPServer
+from .operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
@@ -16,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness-x-app-server",
         description=(
-            "Run the local single-user Harness X App Server over authenticated loopback HTTP/SSE."
+            "Run the local single-user Harness X App Server with its authenticated operator UI."
         ),
     )
     parser.add_argument(
@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--host",
         choices=("127.0.0.1",),
         default="127.0.0.1",
-        help="M34 intentionally supports loopback IPv4 only.",
+        help="The local App Server intentionally supports loopback IPv4 only.",
     )
     parser.add_argument(
         "--port",
@@ -44,12 +44,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = args.root.resolve()
     service = AppServerService(root / "data")
-    server = LocalAppHTTPServer(service, root, host=args.host, port=args.port)
+    server = LocalOperatorHTTPServer(service, root, host=args.host, port=args.port)
     print(
         json.dumps(
             {
                 "schema_version": "app-server-start-v1",
                 "base_url": server.base_url,
+                "ui_url": server.ui_url,
                 "token_path": str(server.token_path),
                 "server_info_path": str(server.info_path),
                 "pid": os.getpid(),
