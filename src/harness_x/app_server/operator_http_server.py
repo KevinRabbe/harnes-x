@@ -78,14 +78,19 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
                         return
+                    session_id, suffix = pieces
                     if parsed.query:
+                        detail = (
+                            "report endpoint does not accept query parameters"
+                            if suffix == "/report"
+                            else "report export endpoint does not accept query parameters"
+                        )
                         self._error(
                             HTTPStatus.BAD_REQUEST,
                             "invalid_request",
-                            "report endpoints do not accept query parameters",
+                            detail,
                         )
                         return
-                    session_id, suffix = pieces
                     try:
                         snapshot = service.session(session_id)
                         events = service.store.events(session_id)
