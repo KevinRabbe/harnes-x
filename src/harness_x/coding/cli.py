@@ -10,17 +10,15 @@ from pathlib import Path
 from typing import Sequence
 
 from harness_x.browser import ApplicationServerSpec, PlaywrightBrowserProvider
-from harness_x.reasoning import (
-    OpenAICompatibleReasoningCore,
-    OpenAICompatibleSettings,
-    TransformersLocalSettings,
-)
-from harness_x.reasoning.adapters.repository_coding_transformers import (
-    RepositoryCodingTransformersReasoningCore,
-)
 
 from .browser_verification import load_browser_verification_plan
 from .isolation import IsolationRetention
+from .model_selection import (
+    DEFAULT_DEVELOPMENT_MODEL,
+    build_selected_reasoning_core,
+    resolve_model_selection,
+    write_model_selection_artifact,
+)
 from .procedure_revision_runtime import (
     ProcedureRevisionBrowserIsolatedRepositoryCodingTaskRuntime,
     ProcedureRevisionBrowserRepositoryCodingTaskRuntime,
@@ -34,8 +32,76 @@ from .verification import (
 )
 
 
-_DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+_DEFAULT_QWEN_MODEL = DEFAULT_DEVELOPMENT_MODEL
 _PYTHON_ALIASES = frozenset({"python", "python.exe", "python3", "python3.exe"})
+
+
+def _add_reasoning_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help=(
+            "Explicit M32 personal model profile. Built-ins: main, coder, reasoning, api. "
+            "No profile is selected automatically; omitting this flag preserves the existing "
+            "direct backend/model behavior."
+        ),
+    )
+    parser.add_argument(
+        "--model-profile-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON model-profile registry. Custom entries are added and matching "
+            "profile IDs override built-in definitions."
+        ),
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("transformers", "openai"),
+        default="transformers",
+        help="Direct reasoning backend when --model-profile is not used.",
+    )
+    parser.add_argument("--model", default=_DEFAULT_QWEN_MODEL)
+    parser.add_argument(
+        "--revision",
+        default=None,
+        help="Optional exact Hugging Face model revision for the direct transformers backend.",
+    )
+    parser.add_argument(
+        "--generation-max-new-tokens",
+        type=int,
+        default=4096,
+        help="Maximum generated tokens for one direct local Transformers reasoning turn.",
+    )
+    parser.add_argument(
+        "--no-4bit",
+        action="store_true",
+        help="Disable bitsandbytes 4-bit loading for the direct transformers backend.",
+    )
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Require the direct transformers backend to use the existing local HF cache.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "Override an OpenAI-compatible endpoint URL. With a local profile this is normally "
+            "the loopback vLLM/SGLang server; with direct flags the legacy default is used."
+        ),
+    )
+    parser.add_argument("--api-key-env", default=None)
+    parser.add_argument("--allow-remote", action="store_true")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh", "max"),
+        default=None,
+        help=(
+            "Optional OpenAI-compatible reasoning-effort override. Unsupported servers may "
+            "reject values; profiles only set this where the selected model documents support."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,37 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
             "a project checkout."
         ),
     )
-    parser.add_argument(
-        "--backend",
-        choices=("transformers", "openai"),
-        default="transformers",
-        help="Reasoning backend; transformers runs the model in this process.",
-    )
-    parser.add_argument("--model", default=_DEFAULT_QWEN_MODEL)
-    parser.add_argument(
-        "--revision",
-        default=None,
-        help="Optional exact Hugging Face model revision for the transformers backend.",
-    )
-    parser.add_argument(
-        "--generation-max-new-tokens",
-        type=int,
-        default=4096,
-        help="Maximum generated tokens for one local Transformers reasoning turn.",
-    )
-    parser.add_argument(
-        "--no-4bit",
-        action="store_true",
-        help="Disable bitsandbytes 4-bit loading for the transformers backend.",
-    )
-    parser.add_argument(
-        "--local-files-only",
-        action="store_true",
-        help="Require the transformers backend to use the existing local HF cache.",
-    )
-    parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
-    parser.add_argument("--api-key-env", default=None)
-    parser.add_argument("--allow-remote", action="store_true")
+    _add_reasoning_arguments(parser)
     parser.add_argument("--max-reasoning-steps", type=int, default=32)
     parser.add_argument("--max-tool-actions", type=int, default=48)
     parser.add_argument("--max-output-tokens", type=int, default=65536)
@@ -365,24 +401,11 @@ def _validate_resume_args(args: argparse.Namespace) -> None:
 
 
 def _build_core(args: argparse.Namespace):
-    if args.backend == "transformers":
-        return RepositoryCodingTransformersReasoningCore(
-            TransformersLocalSettings(
-                model=args.model,
-                revision=args.revision,
-                max_new_tokens=args.generation_max_new_tokens,
-                load_in_4bit=not args.no_4bit,
-                local_files_only=args.local_files_only,
-            )
-        )
-    return OpenAICompatibleReasoningCore(
-        OpenAICompatibleSettings(
-            base_url=args.base_url,
-            model=args.model,
-            api_key_env=args.api_key_env,
-            allow_remote_endpoint=args.allow_remote,
-        )
-    )
+    selection = resolve_model_selection(args)
+    core = build_selected_reasoning_core(selection)
+    # Deliberately secret-free metadata for callers that want to persist the exact selection.
+    core.model_selection = selection
+    return core
 
 
 def _runtime(
@@ -449,10 +472,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         _validate_resume_args(args)
         verification_plan, verification_commands = _build_verification_inputs(args)
         browser_inputs = _build_browser_inputs(args)
+        core = _build_core(args)
     except ValueError as exc:
         parser.error(str(exc))
 
-    core = _build_core(args)
+    selection = core.model_selection
+    write_model_selection_artifact(selection, args.output)
     runtime = _runtime(args, core, verification_plan, browser_inputs)
     try:
         report = runtime.run(
