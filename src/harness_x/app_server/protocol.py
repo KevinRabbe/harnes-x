@@ -52,7 +52,12 @@ class AppEventKind(StrEnum):
 
 
 class CodingSessionRequest(BaseModel):
-    """One explicit coding-session request accepted by the local app server."""
+    """One explicit coding-session request accepted by the local app server.
+
+    Paths are normalized to absolute paths but are not required to remain live forever. The
+    service validates existence when a new session is scheduled; historical snapshots remain
+    reloadable after a repository or verification file is later moved or deleted.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -92,32 +97,16 @@ class CodingSessionRequest(BaseModel):
             raise ValueError("project memory key cannot be blank")
         return stripped
 
-    @field_validator("workspace_root")
-    @classmethod
-    def _resolve_workspace(cls, value: Path) -> Path:
-        resolved = value.expanduser().resolve()
-        if not resolved.is_dir():
-            raise ValueError(f"workspace_root must be an existing directory: {resolved}")
-        return resolved
-
-    @field_validator("project_memory_root")
-    @classmethod
-    def _resolve_memory_root(cls, value: Path | None) -> Path | None:
-        return value.expanduser().resolve() if value is not None else None
-
     @field_validator(
+        "workspace_root",
         "verification_plan_path",
+        "project_memory_root",
         "browser_application_spec_path",
         "browser_verification_plan_path",
     )
     @classmethod
-    def _resolve_required_files(cls, value: Path | None) -> Path | None:
-        if value is None:
-            return None
-        resolved = value.expanduser().resolve()
-        if not resolved.is_file():
-            raise ValueError(f"configured app-server file does not exist: {resolved}")
-        return resolved
+    def _resolve_paths(cls, value: Path | None) -> Path | None:
+        return value.expanduser().resolve() if value is not None else None
 
     @field_validator("verification_commands")
     @classmethod
