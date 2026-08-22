@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Literal
 
@@ -69,6 +70,52 @@ def directory_fingerprint(path: str | Path) -> str:
             rows.append((target.relative_to(root).as_posix(), digest.hexdigest(), size))
     rows.sort()
     return hashlib.sha256(_canonical(rows)).hexdigest()
+
+
+def clone_comparison_memory_seed(seed_root: str | Path, target_root: str | Path) -> str:
+    """Copy one exact project-memory seed into a fresh comparison-owned root.
+
+    The target must not already contain state. This prevents an evaluation run from silently
+    combining a baseline snapshot with evidence from an earlier profile run.
+    """
+
+    seed = Path(seed_root).resolve()
+    target = Path(target_root).resolve()
+    if not seed.is_dir():
+        raise ValueError(f"comparison memory seed must be an existing directory: {seed}")
+    seed_fingerprint = directory_fingerprint(seed)
+    if target.exists():
+        if not target.is_dir():
+            raise ValueError(f"comparison memory target is not a directory: {target}")
+        if any(target.iterdir()):
+            raise ValueError(
+                f"comparison memory target must be absent or empty before seeding: {target}"
+            )
+    else:
+        target.mkdir(parents=True, exist_ok=False)
+
+    for current, dirs, names in os.walk(seed, followlinks=False):
+        base = Path(current)
+        relative = base.relative_to(seed)
+        destination = target / relative
+        destination.mkdir(parents=True, exist_ok=True)
+        for name in tuple(dirs):
+            child = base / name
+            if child.is_symlink():
+                raise ValueError(
+                    f"comparison memory seed rejects directory symlink: {child}"
+                )
+        for name in sorted(names):
+            source = base / name
+            if source.is_symlink():
+                raise ValueError(f"comparison memory seed rejects file symlink: {source}")
+            if source.is_file():
+                shutil.copy2(source, destination / name)
+
+    copied_fingerprint = directory_fingerprint(target)
+    if copied_fingerprint != seed_fingerprint:
+        raise RuntimeError("comparison memory seed copy fingerprint mismatch")
+    return copied_fingerprint
 
 
 class CodingRunManifest(BaseModel):
