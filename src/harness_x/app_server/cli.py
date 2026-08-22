@@ -43,7 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = args.root.resolve()
-    service = AppServerService(root / "data")
+    service = AppServerService(
+        root / "data",
+        server_version="0.1.0a0+app-server36-local-operator-ui",
+    )
     server = LocalOperatorHTTPServer(service, root, host=args.host, port=args.port)
     print(
         json.dumps(
