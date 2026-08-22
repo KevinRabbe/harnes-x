@@ -49,6 +49,13 @@ def test_report_export_client_uses_authenticated_exact_byte_download_without_sto
     assert javascript.index("URL.createObjectURL(blob)") < javascript.index("URL.revokeObjectURL(objectUrl)")
     assert ".textContent" in javascript
 
+    assert "new AbortController()" in javascript
+    assert "controller.signal" in javascript
+    assert "reportExportState.generation" in javascript
+    assert "reportExportIsCurrent(sessionId, generation)" in javascript
+    assert "cancelReportExport()" in javascript
+    assert 'window.addEventListener("beforeunload", cancelReportExport)' in javascript
+
     assert 'reportExportById("auth-form").addEventListener("submit"' in javascript
     assert 'reportById("auth-form").addEventListener("submit"' in report
     assert 'byId("auth-form").addEventListener("submit"' in app
