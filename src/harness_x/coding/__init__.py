@@ -31,6 +31,19 @@ from .isolation import (
     TaskWorkspaceChange,
     TaskWorkspaceIsolationManager,
 )
+from .procedure_improvement_browser_campaign import ProcedureImprovementBrowserCampaignRunner
+from .procedure_improvement_campaign import (
+    PendingProcedureImprovementStep,
+    ProcedureImprovementCampaign,
+    ProcedureImprovementCampaignBudget,
+    ProcedureImprovementCampaignReport,
+    ProcedureImprovementCampaignRunner,
+    ProcedureImprovementCampaignStatus,
+    ProcedureImprovementCampaignStepReport,
+    ProcedureImprovementCampaignStore,
+    ProcedureImprovementCampaignStoreState,
+    ProcedureImprovementStepKind,
+)
 from .procedure_revision import (
     ProcedureRevisionCandidate,
     ProcedureRevisionPolicy,
@@ -105,6 +118,17 @@ __all__ = [
     "IsolationResult",
     "IsolationRetention",
     "IsolationStrategy",
+    "PendingProcedureImprovementStep",
+    "ProcedureImprovementBrowserCampaignRunner",
+    "ProcedureImprovementCampaign",
+    "ProcedureImprovementCampaignBudget",
+    "ProcedureImprovementCampaignReport",
+    "ProcedureImprovementCampaignRunner",
+    "ProcedureImprovementCampaignStatus",
+    "ProcedureImprovementCampaignStepReport",
+    "ProcedureImprovementCampaignStore",
+    "ProcedureImprovementCampaignStoreState",
+    "ProcedureImprovementStepKind",
     "ProcedureRevisionBrowserCodingTaskReport",
     "ProcedureRevisionBrowserIsolatedCodingTaskReport",
     "ProcedureRevisionBrowserIsolatedRepositoryCodingTaskRuntime",
