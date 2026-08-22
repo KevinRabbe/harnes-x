@@ -13,6 +13,7 @@ from harness_x.coding.run_manifest import CodingRunManifest, load_coding_run_man
 SOURCE_FP = "a" * 64
 VERIFY_FP = "b" * 64
 MEMORY_FP = "c" * 64
+HARNESS_FP = "f" * 64
 
 
 def _selection(profile_id: str, model: str) -> ResolvedModelSelection:
@@ -40,6 +41,7 @@ def _write_run(
     source_fingerprint: str = SOURCE_FP,
     verification_fingerprint: str = VERIFY_FP,
     memory_fingerprint: str = MEMORY_FP,
+    harness_fingerprint: str = HARNESS_FP,
     task: str = "Implement the exact same feature",
 ) -> None:
     root.mkdir(parents=True)
@@ -49,6 +51,8 @@ def _write_run(
         workspace_root="/source",
         output_root=str(root),
         isolated=True,
+        harness_version="0.1.0a0-test",
+        harness_package_fingerprint=harness_fingerprint,
         verification_plan_fingerprint=verification_fingerprint,
         project_memory_root=f"/memory/{profile_id}",
         project_memory_key="logical-project",
@@ -141,6 +145,7 @@ def test_strict_comparison_reports_evidence_deltas_without_winner(tmp_path: Path
     assert report.metric_deltas_right_minus_left.verification_attempts == -1
     assert report.changed_files_both == ("src/a.py", "tests/test_a.py")
     assert report.changed_files_only_right == ("docs/a.md",)
+    assert report.left.harness_package_fingerprint == HARNESS_FP
     serialized = report.model_dump(mode="json")
     assert "winner" not in serialized
     assert "score" not in serialized
@@ -168,7 +173,7 @@ def test_starting_memory_drift_makes_comparison_non_strict(tmp_path: Path) -> No
         tool_actions=4,
         verification_attempts=1,
         changed_files=(),
-        memory_fingerprint="f" * 64,
+        memory_fingerprint="9" * 64,
     )
 
     report = compare_profile_run_roots(left, right)
@@ -177,7 +182,9 @@ def test_starting_memory_drift_makes_comparison_non_strict(tmp_path: Path) -> No
     assert "starting_project_memory_fingerprint" in report.incompatibilities
 
 
-def test_source_and_verification_drift_are_reported_independently(tmp_path: Path) -> None:
+def test_source_verification_and_harness_drift_are_reported_independently(
+    tmp_path: Path,
+) -> None:
     left = tmp_path / "left"
     right = tmp_path / "right"
     _write_run(
@@ -199,8 +206,9 @@ def test_source_and_verification_drift_are_reported_independently(tmp_path: Path
         tool_actions=5,
         verification_attempts=2,
         changed_files=("src/x.py",),
-        source_fingerprint="9" * 64,
+        source_fingerprint="7" * 64,
         verification_fingerprint="8" * 64,
+        harness_fingerprint="6" * 64,
     )
 
     report = compare_profile_run_roots(left, right)
@@ -208,6 +216,7 @@ def test_source_and_verification_drift_are_reported_independently(tmp_path: Path
     assert report.outcome_relation == "right_only_succeeded"
     assert "source_fingerprint" in report.incompatibilities
     assert "verification_plan_fingerprint" in report.incompatibilities
+    assert "harness_package_fingerprint" in report.incompatibilities
 
 
 def test_run_artifact_internal_selection_mismatch_is_rejected(tmp_path: Path) -> None:
