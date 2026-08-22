@@ -28,7 +28,7 @@
           </div>
           <span id="auth-state" class="pill pill--muted">Locked</span>
         </div>
-        <p class="muted small">Paste the token from the App Server <code>access-token</code> file. It is kept only in this browser tab's memory.</p>
+        <p class="muted small">Use <code>harness-x-app-server --open-ui</code> for one-time automatic local unlock, or paste the token from the App Server <code>access-token</code> file. The bearer is kept only in this browser tab's memory.</p>
         <form id="auth-form" class="stack">
           <label for="token">Bearer token</label>
           <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
@@ -196,5 +196,6 @@
   <script src="/ui/stream_policy.js" defer></script>
   <script src="/ui/report.js" defer></script>
   <script src="/ui/app.js" defer></script>
+  <script src="/ui/bootstrap.js" defer></script>
 </body>
 </html>

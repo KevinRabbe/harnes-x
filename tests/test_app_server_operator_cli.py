@@ -15,3 +15,5 @@ def test_installed_app_server_help_exposes_operator_ui_surface() -> None:
     normalized = " ".join(completed.stdout.split())
     assert "authenticated operator UI" in normalized
     assert "--host {127.0.0.1}" in normalized
+    assert "--open-ui" in normalized
+    assert "persistent bearer is never placed in the URL" in normalized
