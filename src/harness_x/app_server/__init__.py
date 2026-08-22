@@ -11,6 +11,12 @@ from .protocol import (
     AppSessionStatus,
     CodingSessionRequest,
 )
+from .report_projection import (
+    CodingReportProjection,
+    ReportCorruptionError,
+    ReportUnavailableError,
+    build_coding_report_projection,
+)
 from .service import AppServerService, HarnessCodingRunner
 from .store import AppSessionStore
 from .trace_projection import (
@@ -29,12 +35,16 @@ __all__ = [
     "AppSessionSnapshot",
     "AppSessionStatus",
     "AppSessionStore",
+    "CodingReportProjection",
     "CodingSessionRequest",
     "HarnessCodingRunner",
     "LocalAppHTTPServer",
     "LocalOperatorHTTPServer",
+    "ReportCorruptionError",
+    "ReportUnavailableError",
     "TraceProjectionEvent",
     "TraceProjectionPage",
+    "build_coding_report_projection",
     "build_trace_projection_page",
     "load_verified_trace_records",
 ]
