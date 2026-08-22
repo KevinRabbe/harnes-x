@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from urllib.parse import urlsplit
 
+from .bootstrap import OneTimeBootstrapTickets
 from .http_server import LocalAppHTTPServer
 from .report_projection import (
     ReportCorruptionError,
@@ -31,21 +32,29 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
     """Serve the operator UI without weakening inherited API authentication.
 
     Static UI assets contain no session data or credentials and remain public on the loopback
-    origin. Stateful inherited APIs still use the M34 bearer-token boundary. M38 adds only one
-    authenticated read-only projection for the canonical durable coding report.
+    origin. Stateful inherited APIs still use the M34 bearer-token boundary. M40 adds only a
+    short-lived one-time local bootstrap exchange for explicitly launched operator browsers.
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        self.bootstrap_tickets = OneTimeBootstrapTickets()
         super().__init__(*args, **kwargs)
         self.ui_url = f"{self.base_url}/ui/"
+
+    def issue_ui_bootstrap_url(self) -> str:
+        """Return one disposable fragment URL without exposing the persistent bearer."""
+
+        ticket = self.bootstrap_tickets.issue()
+        return f"{self.ui_url}#bootstrap={ticket}"
 
     def _handler_type(self):
         base_handler = super()._handler_type()
         service = self.service
         token = self.token
+        bootstrap_tickets = self.bootstrap_tickets
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/38"
+            server_version = "HarnessXAppServer/40"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -102,6 +111,72 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     return
 
                 super().do_GET()
+
+            def do_POST(self) -> None:  # noqa: N802
+                if not self._valid_host():
+                    self._error(HTTPStatus.BAD_REQUEST, "invalid_host")
+                    return
+                parsed = urlsplit(self.path)
+                if parsed.path == "/v1/operator/bootstrap":
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "bootstrap endpoint does not accept query parameters",
+                        )
+                        return
+                    if not self._same_origin_request():
+                        self._error(HTTPStatus.FORBIDDEN, "invalid_origin")
+                        return
+                    try:
+                        raw = self._read_json()
+                    except ValueError as exc:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_bootstrap_request",
+                            str(exc)[:4000],
+                        )
+                        return
+                    if (
+                        not isinstance(raw, dict)
+                        or set(raw) != {"ticket"}
+                        or not isinstance(raw.get("ticket"), str)
+                    ):
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_bootstrap_request",
+                            "bootstrap request must contain exactly one text ticket",
+                        )
+                        return
+                    if not bootstrap_tickets.redeem(raw["ticket"]):
+                        self._error(HTTPStatus.UNAUTHORIZED, "bootstrap_rejected")
+                        return
+                    self._json(
+                        HTTPStatus.OK,
+                        {
+                            "schema_version": "app-operator-bootstrap-v1",
+                            "access_token": token,
+                        },
+                    )
+                    return
+
+                super().do_POST()
+
+            def _same_origin_request(self) -> bool:
+                origin = self.headers.get("Origin", "")
+                request_host = self.headers.get("Host", "")
+                if not origin or not request_host:
+                    return False
+                parsed_origin = urlsplit(origin)
+                return (
+                    parsed_origin.scheme.casefold() == "http"
+                    and parsed_origin.username is None
+                    and parsed_origin.password is None
+                    and parsed_origin.path in {"", "/"}
+                    and not parsed_origin.query
+                    and not parsed_origin.fragment
+                    and parsed_origin.netloc.casefold() == request_host.casefold()
+                )
 
             def _redirect_ui(self) -> None:
                 self.close_connection = True
