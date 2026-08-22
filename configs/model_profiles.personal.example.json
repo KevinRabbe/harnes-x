@@ -1,0 +1,58 @@
+{
+  "schema_version": "model-profile-registry-v1",
+  "profiles": [
+    {
+      "schema_version": "model-profile-v1",
+      "profile_id": "main",
+      "role": "main",
+      "backend": "openai",
+      "model": "Qwen/Qwen3.8-27B",
+      "description": "Primary strong local coding, reasoning, and long-horizon agent model.",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "max_output_tokens": 32768,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "reasoning_effort": "xhigh"
+    },
+    {
+      "schema_version": "model-profile-v1",
+      "profile_id": "coder",
+      "role": "coder",
+      "backend": "openai",
+      "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "description": "Local non-thinking agentic coding specialist.",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "max_output_tokens": 32768,
+      "temperature": 0.7,
+      "top_p": 0.8
+    },
+    {
+      "schema_version": "model-profile-v1",
+      "profile_id": "reasoning",
+      "role": "reasoning",
+      "backend": "openai",
+      "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+      "description": "Independent local reasoning/second-opinion model; not an automatic vote.",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "max_output_tokens": 32768,
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "prompt_mode": "user_prefix"
+    },
+    {
+      "schema_version": "model-profile-v1",
+      "profile_id": "api",
+      "role": "api",
+      "backend": "openai",
+      "model": "gpt-5.6-sol",
+      "description": "Optional remote high-end coding/reasoning model; selected only when explicitly requested.",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "allow_remote_endpoint": true,
+      "requires_api_key": true,
+      "max_output_tokens": 32768,
+      "temperature": 0.0,
+      "reasoning_effort": "high"
+    }
+  ]
+}

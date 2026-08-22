@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Sequence
 
-from .cli import _build_browser_inputs, _build_core, _build_verification_inputs
+from .cli import (
+    _add_reasoning_arguments,
+    _build_browser_inputs,
+    _build_core,
+    _build_verification_inputs,
+)
 from .isolation import IsolationRetention
+from .model_selection import write_model_selection_artifact
 from .procedure_improvement_browser_campaign import ProcedureImprovementBrowserCampaignRunner
 from .procedure_improvement_campaign import (
     ProcedureImprovementCampaignBudget,
     ProcedureImprovementCampaignRunner,
     ProcedureImprovementCampaignStatus,
 )
-
-
-_DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,19 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=6,
         help="Maximum isolated M30 revision-validation tasks for this suspension campaign.",
     )
-    parser.add_argument(
-        "--backend",
-        choices=("transformers", "openai"),
-        default="transformers",
-    )
-    parser.add_argument("--model", default=_DEFAULT_QWEN_MODEL)
-    parser.add_argument("--revision", default=None)
-    parser.add_argument("--generation-max-new-tokens", type=int, default=4096)
-    parser.add_argument("--no-4bit", action="store_true")
-    parser.add_argument("--local-files-only", action="store_true")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
-    parser.add_argument("--api-key-env", default=None)
-    parser.add_argument("--allow-remote", action="store_true")
+    _add_reasoning_arguments(parser)
     parser.add_argument("--max-reasoning-steps", type=int, default=32)
     parser.add_argument("--max-tool-actions", type=int, default=48)
     parser.add_argument("--max-output-tokens", type=int, default=65536)
@@ -148,6 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         verification_plan, _ = _build_verification_inputs(args)
         browser_inputs = _build_browser_inputs(args)
         core = _build_core(args)
+        write_model_selection_artifact(core.model_selection, args.output)
         runner = _runner(args, core, verification_plan, browser_inputs)
         try:
             report = runner.run(
