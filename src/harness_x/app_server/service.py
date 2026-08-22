@@ -36,6 +36,10 @@ from .protocol import (
     AppSessionStatus,
     CodingSessionRequest,
 )
+from .report_attestation import (
+    ReportAttestationCaptureError,
+    capture_report_attestation,
+)
 from .store import AppSessionStore
 
 
@@ -299,6 +303,27 @@ class AppServerService:
             # rewrite the coding runtime's independently established success/failure outcome.
             return
 
+    def _record_report_artifact(self, session_id: str, report_path: Path) -> None:
+        """Persist report provenance before terminal transition without acquiring outcome authority."""
+
+        try:
+            attestation = capture_report_attestation(report_path)
+        except ReportAttestationCaptureError as exc:
+            self.store.add_artifact(
+                session_id,
+                artifact_kind="coding_task_report",
+                path=report_path,
+                attestation_error=f"{type(exc).__name__}: {str(exc)[:900]}",
+            )
+            return
+        self.store.add_artifact(
+            session_id,
+            artifact_kind="coding_task_report",
+            path=report_path,
+            source_bytes=attestation.source_bytes,
+            source_sha256=attestation.source_sha256,
+        )
+
     def _run_one(self, session_id: str) -> None:
         current = self.store.session(session_id)
         if current.status == AppSessionStatus.CANCEL_REQUESTED:
@@ -331,11 +356,7 @@ class AppServerService:
         self._discover_trace_without_affecting_outcome(session_id)
         report_path = Path(self.store.session(session_id).output_root) / "coding-task-report.json"
         if report_path.exists():
-            self.store.add_artifact(
-                session_id,
-                artifact_kind="coding_task_report",
-                path=report_path,
-            )
+            self._record_report_artifact(session_id, report_path)
         succeeded = bool(getattr(report, "succeeded", False))
         failure_reason = getattr(report, "failure_reason", None)
         current = self.store.session(session_id)
