@@ -9,6 +9,16 @@ from .base import (
     ReasoningCoreInfo,
 )
 from .context_builder import BoundedContextBuilder, ContextBudget, ContextBuildResult
+from .profiles import (
+    ModelProfile,
+    ModelProfileBackend,
+    ModelProfileRegistry,
+    ModelProfileRole,
+    builtin_model_profiles,
+    load_model_profile_registry,
+    model_profile_registry,
+    model_profile_registry_json,
+)
 from .service import ReasoningService
 from .stub import StubReasoningCore
 from .adapters import (
@@ -59,6 +69,10 @@ __all__ = [
     "HuginnTransformersBackend",
     "HuginnTransformersSettings",
     "LearnedDepthSelector",
+    "ModelProfile",
+    "ModelProfileBackend",
+    "ModelProfileRegistry",
+    "ModelProfileRole",
     "OpenAICompatibleReasoningCore",
     "OpenAICompatibleSettings",
     "RECURRENT_DEPTH_RESEARCH_VERSION",
@@ -80,7 +94,11 @@ __all__ = [
     "TransformersLocalSettings",
     "benchmark_fixed_depth_curve",
     "build_reference_recurrent_depth_fixture",
+    "builtin_model_profiles",
+    "load_model_profile_registry",
     "load_recurrent_depth_cases",
+    "model_profile_registry",
+    "model_profile_registry_json",
     "prepare_depth_selection_examples",
     "run_recurrent_depth_research",
     "run_reference_recurrent_depth_research",
