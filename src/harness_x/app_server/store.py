@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 from .protocol import (
     AppEvent,
@@ -315,7 +313,9 @@ class AppSessionStore:
             updates["coding_report_path"] = str(event.payload["coding_report_path"])
         if event.payload.get("failure_reason") is not None:
             updates["failure_reason"] = str(event.payload["failure_reason"])[:4000]
-        return snapshot.model_copy(update=updates)
+        material = snapshot.model_dump(mode="python", exclude={"fingerprint"})
+        material.update(updates)
+        return AppSessionSnapshot.model_validate(material)
 
     def _session_root(self, session_id: str) -> Path:
         return self.root / session_id
