@@ -1,6 +1,7 @@
-"""Local single-user Harness X App Server foundation."""
+"""Local single-user Harness X App Server foundation and operator UI."""
 
 from .http_server import LocalAppHTTPServer
+from .operator_http_server import LocalOperatorHTTPServer
 from .protocol import (
     AppEvent,
     AppEventKind,
@@ -31,6 +32,7 @@ __all__ = [
     "CodingSessionRequest",
     "HarnessCodingRunner",
     "LocalAppHTTPServer",
+    "LocalOperatorHTTPServer",
     "TraceProjectionEvent",
     "TraceProjectionPage",
     "build_trace_projection_page",
