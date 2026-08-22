@@ -21,6 +21,10 @@ from .service import AppServerService
 
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost"})
+_DEFAULT_SESSION_LIMIT = 100
+_MAX_SESSION_LIMIT = 500
+_DEFAULT_EVENT_LIMIT = 200
+_MAX_EVENT_LIMIT = 1000
 
 
 def _atomic_text(path: Path, content: str, *, mode: int | None = None) -> None:
@@ -148,12 +152,27 @@ class LocalAppHTTPServer:
                     self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
                     return
                 if parsed.path == "/v1/sessions":
+                    try:
+                        query = parse_qs(parsed.query, keep_blank_values=False)
+                        limit = self._bounded_limit(
+                            query,
+                            default=_DEFAULT_SESSION_LIMIT,
+                            maximum=_MAX_SESSION_LIMIT,
+                        )
+                    except ValueError as exc:
+                        self._error(HTTPStatus.BAD_REQUEST, "invalid_request", str(exc))
+                        return
+                    sessions = service.sessions()
+                    selected = sessions[-limit:] if limit < len(sessions) else sessions
                     self._json(
                         HTTPStatus.OK,
                         {
                             "schema_version": "app-session-list-v1",
+                            "total": len(sessions),
+                            "limit": limit,
+                            "truncated": len(selected) < len(sessions),
                             "sessions": [
-                                item.model_dump(mode="json") for item in service.sessions()
+                                item.model_dump(mode="json") for item in selected
                             ],
                         },
                     )
@@ -173,13 +192,24 @@ class LocalAppHTTPServer:
                     if suffix == "/events":
                         query = parse_qs(parsed.query, keep_blank_values=False)
                         after = self._after_sequence(query)
-                        events = service.store.events(session_id, after_sequence=after)
+                        limit = self._bounded_limit(
+                            query,
+                            default=_DEFAULT_EVENT_LIMIT,
+                            maximum=_MAX_EVENT_LIMIT,
+                        )
+                        all_events = service.store.events(session_id, after_sequence=after)
+                        events = all_events[:limit]
                         self._json(
                             HTTPStatus.OK,
                             {
                                 "schema_version": "app-event-page-v1",
                                 "session_id": session_id,
                                 "after": after,
+                                "limit": limit,
+                                "has_more": len(all_events) > len(events),
+                                "next_after": (
+                                    events[-1].sequence if events else after
+                                ),
                                 "events": [item.model_dump(mode="json") for item in events],
                             },
                         )
@@ -243,9 +273,11 @@ class LocalAppHTTPServer:
             def do_OPTIONS(self) -> None:  # noqa: N802
                 # M34 intentionally does not enable cross-origin browser access. A future UI
                 # served from this origin can use the API without CORS.
+                self.close_connection = True
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self.send_header("Allow", "GET, POST, OPTIONS")
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "close")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
@@ -292,6 +324,24 @@ class LocalAppHTTPServer:
                     raise ValueError("after cannot be negative")
                 return after
 
+            def _bounded_limit(
+                self,
+                query: dict[str, list[str]],
+                *,
+                default: int,
+                maximum: int,
+            ) -> int:
+                values = query.get("limit", [str(default)])
+                if len(values) != 1:
+                    raise ValueError("limit must be specified once")
+                try:
+                    limit = int(values[0])
+                except ValueError as exc:
+                    raise ValueError("limit must be an integer") from exc
+                if limit < 1 or limit > maximum:
+                    raise ValueError(f"limit must be between 1 and {maximum}")
+                return limit
+
             def _session_path(self, path: str) -> tuple[str, str] | None:
                 prefix = "/v1/sessions/"
                 if not path.startswith(prefix):
@@ -308,6 +358,7 @@ class LocalAppHTTPServer:
 
             def _stream_events(self, session_id: str, after: int) -> None:
                 service.session(session_id)
+                self.close_connection = True
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
@@ -345,12 +396,14 @@ class LocalAppHTTPServer:
                     separators=(",", ":"),
                     default=str,
                 ).encode("utf-8")
+                self.close_connection = True
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(body)
 
