@@ -5,6 +5,8 @@ from __future__ import annotations
 from http import HTTPStatus
 from urllib.parse import urlsplit
 
+from harness_x.core.errors import TraceCorruptionError
+
 from .bootstrap import OneTimeBootstrapTickets
 from .http_server import LocalAppHTTPServer
 from .report_projection import (
@@ -13,6 +15,12 @@ from .report_projection import (
     ValidatedCodingReport,
     build_coding_report_projection,
     read_validated_coding_report,
+)
+from .trace_export import (
+    TraceExportNotTerminalError,
+    TraceExportUnavailableError,
+    ValidatedTraceExport,
+    read_validated_trace_export,
 )
 from .ui_assets import load_ui_asset
 
@@ -37,6 +45,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
     origin. Stateful inherited APIs still use the M34 bearer-token boundary. M40 adds only a
     short-lived one-time local bootstrap exchange for explicitly launched operator browsers.
     M41 adds one authenticated raw-byte export for the canonical validated coding report.
+    M42 adds one terminal-only exact-byte export for the attached verified causal trace.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -57,7 +66,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
         bootstrap_tickets = self.bootstrap_tickets
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/41"
+            server_version = "HarnessXAppServer/42"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -74,6 +83,52 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     return
 
                 pieces = self._session_path(parsed.path)
+                if pieces is not None and pieces[1] == "/trace/export":
+                    if not self._authorized(token):
+                        self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                        return
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "trace export endpoint does not accept query parameters",
+                        )
+                        return
+                    session_id, _ = pieces
+                    try:
+                        snapshot = service.session(session_id)
+                        events = service.store.events(session_id)
+                        validated_trace = read_validated_trace_export(
+                            snapshot=snapshot,
+                            events=events,
+                        )
+                    except KeyError:
+                        self._error(HTTPStatus.NOT_FOUND, "unknown_session")
+                        return
+                    except TraceExportNotTerminalError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "trace_export_not_terminal",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except TraceExportUnavailableError as exc:
+                        self._error(
+                            HTTPStatus.NOT_FOUND,
+                            "trace_export_not_available",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except TraceCorruptionError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "trace_corruption",
+                            str(exc)[:4000],
+                        )
+                        return
+                    self._trace_export(validated_trace)
+                    return
+
                 if pieces is not None and pieces[1] in {"/report", "/report/export"}:
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
@@ -245,6 +300,40 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                 self.send_header(
                     "X-Harness-X-Artifact-Event-Hash",
                     validated.artifact_event_hash,
+                )
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _trace_export(self, validated: ValidatedTraceExport) -> None:
+                body = validated.source.payload
+                self.close_connection = True
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="causal-trace.jsonl"',
+                )
+                self.send_header("Content-Length", str(validated.source.source_bytes))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Harness-X-Trace-ID", validated.trace_id)
+                self.send_header(
+                    "X-Harness-X-Trace-SHA256",
+                    validated.source.source_sha256,
+                )
+                self.send_header(
+                    "X-Harness-X-Trace-Records",
+                    str(len(validated.records)),
+                )
+                self.send_header(
+                    "X-Harness-X-Trace-Final-Event-Hash",
+                    validated.final_event_hash or "none",
+                )
+                self.send_header(
+                    "X-Harness-X-Trace-Attachment-Event-Hash",
+                    validated.attachment_event_hash,
                 )
                 self.send_header("Connection", "close")
                 self.end_headers()
