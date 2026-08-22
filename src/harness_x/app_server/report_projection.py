@@ -2,20 +2,34 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import stat
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .protocol import AppEvent, AppEventKind, AppSessionSnapshot
+from .report_attestation import (
+    MAX_REPORT_BYTES,
+    REPORT_ATTESTATION_SCHEMA_VERSION,
+    ReportAttestationCaptureError,
+    read_report_source,
+)
 
-_MAX_REPORT_BYTES = 2 * 1024 * 1024
 _REPORT_FILENAME = "coding-task-report.json"
 _REPORT_ARTIFACT_KIND = "coding_task_report"
+_ATTESTATION_KEYS = frozenset(
+    {
+        "attestation_schema_version",
+        "attestation_status",
+        "source_digest_algorithm",
+        "source_bytes",
+        "source_sha256",
+        "attestation_error",
+    }
+)
+
+ReportAttestationStatus = Literal["verified", "legacy_unattested", "unavailable"]
 
 
 class ReportUnavailableError(RuntimeError):
@@ -23,22 +37,29 @@ class ReportUnavailableError(RuntimeError):
 
 
 class ReportCorruptionError(RuntimeError):
-    """Durable report metadata or source bytes violate the M38 projection contract."""
+    """Durable report metadata or source bytes violate the projection contract."""
 
 
 class CodingReportProjection(BaseModel):
-    """Bounded read-only projection of exact report source bytes plus parsed JSON."""
+    """Bounded report projection plus durable-content-attestation state."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["app-coding-report-projection-v1"] = (
-        "app-coding-report-projection-v1"
+    schema_version: Literal["app-coding-report-projection-v2"] = (
+        "app-coding-report-projection-v2"
     )
     session_id: str = Field(pattern=r"^app_[0-9a-f]{32}$")
     artifact_event_sequence: int = Field(ge=1)
+    artifact_event_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_path: str
-    source_bytes: int = Field(ge=0, le=_MAX_REPORT_BYTES)
+    source_bytes: int = Field(ge=0, le=MAX_REPORT_BYTES)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attestation_status: ReportAttestationStatus
+    attested_source_bytes: int | None = Field(default=None, ge=0, le=MAX_REPORT_BYTES)
+    attested_source_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    attestation_error: str | None = Field(default=None, max_length=1000)
     report: dict[str, Any]
 
 
@@ -93,48 +114,91 @@ def _artifact_event(
     return event
 
 
-def _read_bounded_regular_file(path: Path, *, maximum_bytes: int) -> bytes:
-    flags = os.O_RDONLY
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    flags |= nofollow
-    try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise ReportCorruptionError(f"cannot open coding report source: {exc}") from exc
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ReportCorruptionError("coding report source is not a regular file")
-        if metadata.st_size > maximum_bytes:
-            raise ReportCorruptionError(
-                f"coding report exceeds {maximum_bytes} byte projection limit"
-            )
-        with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            payload = handle.read(maximum_bytes + 1)
-        if len(payload) > maximum_bytes:
-            raise ReportCorruptionError(
-                f"coding report exceeds {maximum_bytes} byte projection limit"
-            )
-        return payload
-    finally:
-        os.close(descriptor)
+def _artifact_attestation(
+    event: AppEvent,
+) -> tuple[ReportAttestationStatus, int | None, str | None, str | None]:
+    payload = event.payload
+    present = _ATTESTATION_KEYS.intersection(payload)
+    if not present:
+        return "legacy_unattested", None, None, None
+
+    if payload.get("attestation_schema_version") != REPORT_ATTESTATION_SCHEMA_VERSION:
+        raise ReportCorruptionError("coding report artifact has an invalid attestation schema")
+
+    status = payload.get("attestation_status")
+    if status == "captured":
+        required = {
+            "attestation_schema_version",
+            "attestation_status",
+            "source_digest_algorithm",
+            "source_bytes",
+            "source_sha256",
+        }
+        if not required.issubset(payload) or "attestation_error" in payload:
+            raise ReportCorruptionError("coding report captured attestation is incomplete")
+        if payload.get("source_digest_algorithm") != "sha256":
+            raise ReportCorruptionError("coding report attestation algorithm is not sha256")
+        raw_bytes = payload.get("source_bytes")
+        raw_sha = payload.get("source_sha256")
+        if type(raw_bytes) is not int or raw_bytes < 0 or raw_bytes > MAX_REPORT_BYTES:
+            raise ReportCorruptionError("coding report attested source_bytes is invalid")
+        if (
+            not isinstance(raw_sha, str)
+            or len(raw_sha) != 64
+            or any(ch not in "0123456789abcdef" for ch in raw_sha)
+        ):
+            raise ReportCorruptionError("coding report attested source_sha256 is invalid")
+        return "verified", raw_bytes, raw_sha, None
+
+    if status == "unavailable":
+        required = {
+            "attestation_schema_version",
+            "attestation_status",
+            "attestation_error",
+        }
+        forbidden = {"source_digest_algorithm", "source_bytes", "source_sha256"}
+        if not required.issubset(payload) or forbidden.intersection(payload):
+            raise ReportCorruptionError("coding report unavailable attestation is malformed")
+        error = payload.get("attestation_error")
+        if not isinstance(error, str) or not error.strip():
+            raise ReportCorruptionError("coding report attestation_error is invalid")
+        return "unavailable", None, None, error[:1000]
+
+    raise ReportCorruptionError("coding report artifact has an invalid attestation status")
 
 
 def build_coding_report_projection(
     *,
     snapshot: AppSessionSnapshot,
     events: tuple[AppEvent, ...],
-    maximum_bytes: int = _MAX_REPORT_BYTES,
+    maximum_bytes: int = MAX_REPORT_BYTES,
 ) -> CodingReportProjection:
     """Validate and project the one canonical durable coding report for ``snapshot``."""
 
-    if maximum_bytes < 1 or maximum_bytes > _MAX_REPORT_BYTES:
-        raise ValueError(f"maximum_bytes must be between 1 and {_MAX_REPORT_BYTES}")
+    if maximum_bytes < 1 or maximum_bytes > MAX_REPORT_BYTES:
+        raise ValueError(f"maximum_bytes must be between 1 and {MAX_REPORT_BYTES}")
     _output_root, report_path = _canonical_report_path(snapshot)
     artifact = _artifact_event(snapshot, events, report_path)
-    payload = _read_bounded_regular_file(report_path, maximum_bytes=maximum_bytes)
+    attestation_status, attested_bytes, attested_sha, attestation_error = (
+        _artifact_attestation(artifact)
+    )
     try:
-        text = payload.decode("utf-8")
+        source = read_report_source(report_path, maximum_bytes=maximum_bytes)
+    except ReportAttestationCaptureError as exc:
+        raise ReportCorruptionError(str(exc)) from exc
+
+    if attestation_status == "verified":
+        if source.source_bytes != attested_bytes:
+            raise ReportCorruptionError(
+                "coding report current byte count does not match durable attestation"
+            )
+        if source.source_sha256 != attested_sha:
+            raise ReportCorruptionError(
+                "coding report current SHA-256 does not match durable attestation"
+            )
+
+    try:
+        text = source.payload.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ReportCorruptionError("coding report source is not valid UTF-8") from exc
     try:
@@ -143,11 +207,17 @@ def build_coding_report_projection(
         raise ReportCorruptionError(f"coding report source is not valid JSON: {exc}") from exc
     if not isinstance(report, dict):
         raise ReportCorruptionError("coding report JSON root must be an object")
+
     return CodingReportProjection(
         session_id=snapshot.session_id,
         artifact_event_sequence=artifact.sequence,
+        artifact_event_hash=artifact.event_hash,
         source_path=str(report_path),
-        source_bytes=len(payload),
-        source_sha256=hashlib.sha256(payload).hexdigest(),
+        source_bytes=source.source_bytes,
+        source_sha256=source.source_sha256,
+        attestation_status=attestation_status,
+        attested_source_bytes=attested_bytes,
+        attested_source_sha256=attested_sha,
+        attestation_error=attestation_error,
         report=report,
     )
