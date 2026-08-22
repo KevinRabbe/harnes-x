@@ -16,6 +16,13 @@ function currentSessionId() {
   return reportById("session-id").textContent.trim();
 }
 
+function attestationLabel(status) {
+  if (status === "verified") return "ledger attestation verified";
+  if (status === "legacy_unattested") return "legacy path-only artifact";
+  if (status === "unavailable") return "attestation unavailable";
+  return null;
+}
+
 async function loadCodingReport(sessionId) {
   const generation = reportState.generation + 1;
   reportState.generation = generation;
@@ -65,7 +72,14 @@ async function loadCodingReport(sessionId) {
     reportById("report-content").textContent = payload.detail || "Coding report projection failed integrity checks.";
     return;
   }
-  if (!response.ok || !payload || payload.schema_version !== "app-coding-report-projection-v1") {
+
+  const provenance = payload ? attestationLabel(payload.attestation_status) : null;
+  if (
+    !response.ok
+    || !payload
+    || payload.schema_version !== "app-coding-report-projection-v2"
+    || !provenance
+  ) {
     reportById("report-metadata").textContent = `HTTP ${response.status}`;
     reportById("report-content").textContent = payload && (payload.detail || payload.error)
       ? String(payload.detail || payload.error)
@@ -73,11 +87,19 @@ async function loadCodingReport(sessionId) {
     return;
   }
 
-  reportById("report-metadata").textContent = [
+  const metadata = [
+    provenance,
     `${payload.source_bytes} bytes`,
     `artifact event #${payload.artifact_event_sequence}`,
-    `sha256 ${payload.source_sha256}`,
-  ].join(" · ");
+    `event ${payload.artifact_event_hash}`,
+    `current sha256 ${payload.source_sha256}`,
+  ];
+  if (payload.attestation_status === "verified") {
+    metadata.push(`attested sha256 ${payload.attested_source_sha256}`);
+  } else if (payload.attestation_status === "unavailable" && payload.attestation_error) {
+    metadata.push(`capture error: ${payload.attestation_error}`);
+  }
+  reportById("report-metadata").textContent = metadata.join(" · ");
   reportById("report-content").textContent = JSON.stringify(payload.report, null, 2);
 }
 

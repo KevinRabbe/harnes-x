@@ -71,8 +71,12 @@ def test_http_report_projection_is_authenticated_and_read_only(tmp_path: Path) -
         with urlopen(_request(server, path, authorized=True), timeout=3.0) as response:
             payload = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
-        assert payload["schema_version"] == "app-coding-report-projection-v1"
+        assert payload["schema_version"] == "app-coding-report-projection-v2"
         assert payload["session_id"] == snapshot.session_id
+        assert payload["attestation_status"] == "verified"
+        assert payload["attested_source_sha256"] == payload["source_sha256"]
+        assert payload["attested_source_bytes"] == payload["source_bytes"]
+        assert len(payload["artifact_event_hash"]) == 64
         assert payload["report"]["succeeded"] is True
         assert payload["report"]["note"] == "<img src=x onerror=alert(1)>"
         assert payload["source_path"] == snapshot.coding_report_path
@@ -109,7 +113,7 @@ def test_http_report_projection_returns_404_before_report_exists(tmp_path: Path)
         service.close()
 
 
-def test_http_report_projection_fails_visible_after_source_tamper(tmp_path: Path) -> None:
+def test_http_report_projection_fails_visible_after_valid_json_tamper(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     service = AppServerService(tmp_path / "service", runner=_runner)
@@ -117,14 +121,21 @@ def test_http_report_projection_fails_visible_after_source_tamper(tmp_path: Path
     server.start_in_thread()
     try:
         snapshot = _completed_session(service, workspace)
-        Path(snapshot.coding_report_path).write_text('{"broken":', encoding="utf-8")
+        report_path = Path(snapshot.coding_report_path)
+        original = report_path.read_text(encoding="utf-8")
+        tampered = original.replace("alert(1)", "alert(2)")
+        assert tampered != original
+        assert len(tampered.encode("utf-8")) == len(original.encode("utf-8"))
+        json.loads(tampered)
+        report_path.write_text(tampered, encoding="utf-8")
+
         path = f"/v1/sessions/{snapshot.session_id}/report"
         with pytest.raises(HTTPError) as exc_info:
             urlopen(_request(server, path, authorized=True), timeout=3.0)
         assert exc_info.value.code == 409
         payload = json.loads(exc_info.value.read().decode("utf-8"))
         assert payload["error"] == "report_corruption"
-        assert "valid JSON" in payload["detail"]
+        assert "durable attestation" in payload["detail"]
     finally:
         server.close()
         service.close()

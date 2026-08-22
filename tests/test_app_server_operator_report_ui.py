@@ -26,6 +26,11 @@ def test_report_viewer_is_packaged_and_uses_safe_authenticated_rendering() -> No
     assert "/v1/sessions/${encodeURIComponent(sessionId)}/report" in javascript
     assert "Authorization" in javascript
     assert "Bearer ${reportState.token}" in javascript
+    assert "app-coding-report-projection-v2" in javascript
+    assert "ledger attestation verified" in javascript
+    assert "legacy path-only artifact" in javascript
+    assert "attestation unavailable" in javascript
+    assert "artifact_event_hash" in javascript
     assert ".textContent" in javascript
     assert "JSON.stringify(payload.report, null, 2)" in javascript
     assert "MutationObserver" in javascript
