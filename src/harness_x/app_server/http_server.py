@@ -16,8 +16,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from pydantic import ValidationError
 
+from harness_x.core.errors import TraceCorruptionError
+
 from .protocol import AppServerError, CodingSessionRequest
 from .service import AppServerService
+from .trace_projection import build_trace_projection_page
 
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost"})
@@ -25,6 +28,8 @@ _DEFAULT_SESSION_LIMIT = 100
 _MAX_SESSION_LIMIT = 500
 _DEFAULT_EVENT_LIMIT = 200
 _MAX_EVENT_LIMIT = 1000
+_DEFAULT_TRACE_LIMIT = 200
+_MAX_TRACE_LIMIT = 1000
 
 
 def _atomic_text(path: Path, content: str, *, mode: int | None = None) -> None:
@@ -131,7 +136,7 @@ class LocalAppHTTPServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
-            server_version = "HarnessXAppServer/34"
+            server_version = "HarnessXAppServer/35"
             sys_version = ""
 
             def log_message(self, format: str, *args: Any) -> None:
@@ -219,10 +224,41 @@ class LocalAppHTTPServer:
                         after = self._after_sequence(query)
                         self._stream_events(session_id, after)
                         return
+                    if suffix == "/trace":
+                        query = parse_qs(parsed.query, keep_blank_values=False)
+                        after = self._after_sequence(query)
+                        limit = self._bounded_limit(
+                            query,
+                            default=_DEFAULT_TRACE_LIMIT,
+                            maximum=_MAX_TRACE_LIMIT,
+                        )
+                        snapshot = service.discover_trace(session_id)
+                        page = build_trace_projection_page(
+                            session_id=session_id,
+                            trace_path=snapshot.trace_path,
+                            trace_id=snapshot.trace_id,
+                            after=after,
+                            limit=limit,
+                            terminal=snapshot.status.terminal,
+                        )
+                        self._json(HTTPStatus.OK, page.model_dump(mode="json"))
+                        return
+                    if suffix == "/trace/stream":
+                        query = parse_qs(parsed.query, keep_blank_values=False)
+                        after = self._after_sequence(query)
+                        self._stream_trace(session_id, after)
+                        return
                 except KeyError:
                     self._error(HTTPStatus.NOT_FOUND, "unknown_session")
                     return
-                except ValueError as exc:
+                except TraceCorruptionError as exc:
+                    self._error(
+                        HTTPStatus.CONFLICT,
+                        "trace_corruption",
+                        str(exc)[:4000],
+                    )
+                    return
+                except (RuntimeError, ValueError) as exc:
                     self._error(HTTPStatus.BAD_REQUEST, "invalid_request", str(exc))
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found")
@@ -271,6 +307,9 @@ class LocalAppHTTPServer:
                 self._error(HTTPStatus.NOT_FOUND, "not_found")
 
             def do_OPTIONS(self) -> None:  # noqa: N802
+                if not self._valid_host():
+                    self._error(HTTPStatus.BAD_REQUEST, "invalid_host")
+                    return
                 # M34 intentionally does not enable cross-origin browser access. A future UI
                 # served from this origin can use the API without CORS.
                 self.close_connection = True
@@ -356,8 +395,7 @@ class LocalAppHTTPServer:
                     return None
                 return session_id, suffix
 
-            def _stream_events(self, session_id: str, after: int) -> None:
-                service.session(session_id)
+            def _stream_headers(self) -> None:
                 self.close_connection = True
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -365,6 +403,10 @@ class LocalAppHTTPServer:
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Connection", "close")
                 self.end_headers()
+
+            def _stream_events(self, session_id: str, after: int) -> None:
+                service.session(session_id)
+                self._stream_headers()
                 cursor = after
                 idle_deadline = time.monotonic() + 30.0 * 60.0
                 try:
@@ -386,6 +428,64 @@ class LocalAppHTTPServer:
                             return
                         if not events:
                             time.sleep(0.2)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+            def _stream_trace(self, session_id: str, after: int) -> None:
+                service.session(session_id)
+                self._stream_headers()
+                cursor = after
+                idle_deadline = time.monotonic() + 30.0 * 60.0
+                try:
+                    while time.monotonic() < idle_deadline:
+                        snapshot = service.discover_trace(session_id)
+                        page = build_trace_projection_page(
+                            session_id=session_id,
+                            trace_path=snapshot.trace_path,
+                            trace_id=snapshot.trace_id,
+                            after=cursor,
+                            limit=_DEFAULT_TRACE_LIMIT,
+                            terminal=snapshot.status.terminal,
+                        )
+                        for event in page.events:
+                            message = (
+                                f"id: {event.step}\n"
+                                "event: trace_event\n"
+                                f"data: {event.model_dump_json()}\n\n"
+                            ).encode("utf-8")
+                            self.wfile.write(message)
+                            self.wfile.flush()
+                            cursor = event.step
+                            idle_deadline = time.monotonic() + 30.0 * 60.0
+                        if page.has_more:
+                            continue
+                        snapshot = service.session(session_id)
+                        if snapshot.status.terminal:
+                            # A terminal trace must end on a complete validated record boundary;
+                            # build_trace_projection_page enforces that above.
+                            return
+                        if not page.events:
+                            time.sleep(0.2)
+                except TraceCorruptionError as exc:
+                    try:
+                        diagnostic = json.dumps(
+                            {
+                                "schema_version": "app-trace-stream-error-v1",
+                                "error": "trace_corruption",
+                                "detail": str(exc)[:4000],
+                            },
+                            separators=(",", ":"),
+                        )
+                        self.wfile.write(
+                            (
+                                "event: trace_error\n"
+                                f"data: {diagnostic}\n\n"
+                            ).encode("utf-8")
+                        )
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    return
                 except (BrokenPipeError, ConnectionResetError):
                     return
 
