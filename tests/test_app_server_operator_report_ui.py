@@ -22,6 +22,7 @@ def test_report_viewer_is_packaged_and_uses_safe_authenticated_rendering() -> No
     assert 'id="report-content"' in html
     assert 'id="report-metadata"' in html
     assert '<script src="/ui/report.js" defer></script>' in html
+    assert html.index('/ui/report.js') < html.index('/ui/app.js')
     assert "/v1/sessions/${encodeURIComponent(sessionId)}/report" in javascript
     assert "Authorization" in javascript
     assert "Bearer ${reportState.token}" in javascript
