@@ -1,4 +1,4 @@
-"""M36 local operator UI transport layered over the authenticated M34/M35 App Server."""
+"""Local operator UI transport layered over the authenticated M34/M35 App Server."""
 
 from __future__ import annotations
 
@@ -6,6 +6,11 @@ from http import HTTPStatus
 from urllib.parse import urlsplit
 
 from .http_server import LocalAppHTTPServer
+from .report_projection import (
+    ReportCorruptionError,
+    ReportUnavailableError,
+    build_coding_report_projection,
+)
 from .ui_assets import load_ui_asset
 
 _UI_CSP = (
@@ -23,11 +28,11 @@ _UI_CSP = (
 
 
 class LocalOperatorHTTPServer(LocalAppHTTPServer):
-    """Serve the static M36 operator UI without weakening API authentication.
+    """Serve the operator UI without weakening inherited API authentication.
 
-    The UI assets themselves contain no session data or credentials, so they are available on
-    the same loopback origin without bearer authentication. Every stateful API call continues to
-    flow through the inherited M34/M35 handlers and therefore still requires the bearer token.
+    Static UI assets contain no session data or credentials and remain public on the loopback
+    origin. Stateful inherited APIs still use the M34 bearer-token boundary. M38 adds only one
+    authenticated read-only projection for the canonical durable coding report.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -36,9 +41,11 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
 
     def _handler_type(self):
         base_handler = super()._handler_type()
+        service = self.service
+        token = self.token
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/36"
+            server_version = "HarnessXAppServer/38"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -53,6 +60,47 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     content_type, body = asset
                     self._ui_asset(content_type, body)
                     return
+
+                pieces = self._session_path(parsed.path)
+                if pieces is not None and pieces[1] == "/report":
+                    if not self._authorized(token):
+                        self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                        return
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "report endpoint does not accept query parameters",
+                        )
+                        return
+                    session_id = pieces[0]
+                    try:
+                        snapshot = service.session(session_id)
+                        events = service.store.events(session_id)
+                        projection = build_coding_report_projection(
+                            snapshot=snapshot,
+                            events=events,
+                        )
+                    except KeyError:
+                        self._error(HTTPStatus.NOT_FOUND, "unknown_session")
+                        return
+                    except ReportUnavailableError as exc:
+                        self._error(
+                            HTTPStatus.NOT_FOUND,
+                            "report_not_available",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except ReportCorruptionError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "report_corruption",
+                            str(exc)[:4000],
+                        )
+                        return
+                    self._json(HTTPStatus.OK, projection.model_dump(mode="json"))
+                    return
+
                 super().do_GET()
 
             def _redirect_ui(self) -> None:

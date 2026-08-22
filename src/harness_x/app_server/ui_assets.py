@@ -13,6 +13,7 @@ _MAX_UI_ASSET_BYTES = 512 * 1024
 _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/": ("index.html", "text/html; charset=utf-8"),
     "/ui/stream_policy.js": ("stream_policy.js", "text/javascript; charset=utf-8"),
+    "/ui/report.js": ("report.js", "text/javascript; charset=utf-8"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8"),
 }

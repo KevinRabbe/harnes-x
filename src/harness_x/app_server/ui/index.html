@@ -155,6 +155,17 @@
           <p id="failure-reason" class="failure-box hidden"></p>
         </section>
 
+        <section class="panel" aria-labelledby="report-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Durable coding artifact</p>
+              <h3 id="report-heading">Coding report</h3>
+            </div>
+          </div>
+          <p id="report-metadata" class="mono muted small">—</p>
+          <pre id="report-content" class="task-text" aria-live="polite">No durable coding report loaded.</pre>
+        </section>
+
         <div class="stream-grid">
           <section class="panel stream-panel" aria-labelledby="trace-heading">
             <div class="panel-heading">
@@ -183,6 +194,7 @@
   </main>
 
   <script src="/ui/stream_policy.js" defer></script>
+  <script src="/ui/report.js" defer></script>
   <script src="/ui/app.js" defer></script>
 </body>
 </html>
