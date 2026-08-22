@@ -9,7 +9,11 @@ import pytest
 from pydantic import BaseModel
 
 from harness_x.app_server.http_server import LocalAppHTTPServer
-from harness_x.app_server.protocol import CodingSessionRequest
+from harness_x.app_server.protocol import (
+    AppEventKind,
+    AppSessionStatus,
+    CodingSessionRequest,
+)
 from harness_x.app_server.service import AppServerService
 
 
@@ -46,7 +50,7 @@ def _get_json(server: LocalAppHTTPServer, path: str):
         method="GET",
     )
     with urlopen(request, timeout=3.0) as response:
-        return response, json.loads(response.read().decode("utf-8"))
+        return response.status, json.loads(response.read().decode("utf-8"))
 
 
 def test_session_and_event_pages_are_bounded_and_cursor_explicit(tmp_path: Path) -> None:
@@ -166,8 +170,8 @@ def test_cancel_response_closes_connection_even_when_body_is_not_consumed(tmp_pa
         )
         service.store.transition(
             snapshot.session_id,
-            status="failed",
-            kind="session_failed",
+            status=AppSessionStatus.FAILED,
+            kind=AppEventKind.SESSION_FAILED,
             failure_reason="fixture terminal state",
         )
         request = Request(
