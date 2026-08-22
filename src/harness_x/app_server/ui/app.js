@@ -3,6 +3,7 @@
 const state = {
   token: null,
   selectedSessionId: null,
+  selectionGeneration: 0,
   sessions: new Map(),
   streamControllers: [],
   lifecycleSequences: new Set(),
@@ -90,6 +91,7 @@ function abortStreams() {
 
 function lockOperator() {
   abortStreams();
+  state.selectionGeneration += 1;
   state.token = null;
   state.selectedSessionId = null;
   state.sessions.clear();
@@ -190,7 +192,10 @@ function renderSnapshot(snapshot) {
   setPill("session-status", snapshot.status, snapshot.status);
   setText("summary-model", snapshot.request.model_profile);
   setText("summary-workspace", snapshot.request.workspace_root);
-  setText("summary-trace", snapshot.trace_id || "Not attached");
+  setText(
+    "summary-trace",
+    snapshot.trace_id ? `${snapshot.trace_id} · ${snapshot.trace_path}` : "Not attached",
+  );
   setText("summary-report", snapshot.coding_report_path || "Not available");
   setText("task-text", snapshot.request.task);
 
@@ -295,7 +300,12 @@ function appendLifecycleEvent(event) {
   root.scrollTop = root.scrollHeight;
 }
 
-async function loadSessionEvidence(sessionId) {
+function selectionIsCurrent(sessionId, generation) {
+  return state.selectedSessionId === sessionId && state.selectionGeneration === generation;
+}
+
+async function loadSessionEvidence(sessionId, generation) {
+  if (!selectionIsCurrent(sessionId, generation)) return null;
   state.lifecycleSequences.clear();
   state.traceSteps.clear();
   byId("lifecycle-events").replaceChildren();
@@ -308,6 +318,7 @@ async function loadSessionEvidence(sessionId) {
     api(`/v1/sessions/${encoded}/events?after=0&limit=1000`),
     api(`/v1/sessions/${encoded}/trace?after=0&limit=1000`),
   ]);
+  if (!selectionIsCurrent(sessionId, generation)) return null;
   for (const event of eventPage.events || []) appendLifecycleEvent(event);
   for (const event of tracePage.events || []) appendTraceEvent(event);
   return {
@@ -375,7 +386,8 @@ async function streamSse(path, controller, onEvent) {
   if (buffer.trim()) onEvent(parseSseBlock(buffer));
 }
 
-function startStreams(sessionId, eventAfter, traceAfter) {
+function startStreams(sessionId, eventAfter, traceAfter, generation) {
+  if (!selectionIsCurrent(sessionId, generation)) return;
   abortStreams();
   const encoded = encodeURIComponent(sessionId);
 
@@ -389,7 +401,7 @@ function startStreams(sessionId, eventAfter, traceAfter) {
     `/v1/sessions/${encoded}/events/stream?after=${eventAfter}`,
     lifecycleController,
     (message) => {
-      if (!message.data) return;
+      if (!selectionIsCurrent(sessionId, generation) || !message.data) return;
       try {
         appendLifecycleEvent(JSON.parse(message.data));
       } catch (error) {
@@ -397,11 +409,11 @@ function startStreams(sessionId, eventAfter, traceAfter) {
       }
     },
   ).then(async () => {
-    if (state.selectedSessionId !== sessionId || lifecycleController.signal.aborted) return;
+    if (!selectionIsCurrent(sessionId, generation) || lifecycleController.signal.aborted) return;
     setPill("lifecycle-state", "Closed", "muted");
     await refreshSelectedSnapshot();
   }).catch((error) => {
-    if (lifecycleController.signal.aborted) return;
+    if (!selectionIsCurrent(sessionId, generation) || lifecycleController.signal.aborted) return;
     setPill("lifecycle-state", "Error", "failed");
     console.warn("lifecycle stream failed", error);
   });
@@ -410,7 +422,7 @@ function startStreams(sessionId, eventAfter, traceAfter) {
     `/v1/sessions/${encoded}/trace/stream?after=${traceAfter}`,
     traceController,
     (message) => {
-      if (!message.data) return;
+      if (!selectionIsCurrent(sessionId, generation) || !message.data) return;
       try {
         const payload = JSON.parse(message.data);
         if (message.type === "trace_error") appendTraceError(payload);
@@ -420,10 +432,10 @@ function startStreams(sessionId, eventAfter, traceAfter) {
       }
     },
   ).then(() => {
-    if (state.selectedSessionId !== sessionId || traceController.signal.aborted) return;
+    if (!selectionIsCurrent(sessionId, generation) || traceController.signal.aborted) return;
     if (!byId("trace-state").textContent.includes("Corrupt")) setPill("trace-state", "Closed", "muted");
   }).catch((error) => {
-    if (traceController.signal.aborted) return;
+    if (!selectionIsCurrent(sessionId, generation) || traceController.signal.aborted) return;
     setPill("trace-state", "Error", "failed");
     console.warn("trace stream failed", error);
   });
@@ -446,17 +458,20 @@ async function refreshSelectedSnapshot() {
 async function selectSession(sessionId) {
   if (!state.token) return;
   abortStreams();
+  const generation = state.selectionGeneration + 1;
+  state.selectionGeneration = generation;
   state.selectedSessionId = sessionId;
   renderSessions([...state.sessions.values()]);
   try {
     const encoded = encodeURIComponent(sessionId);
     const snapshot = await api(`/v1/sessions/${encoded}`);
-    if (state.selectedSessionId !== sessionId) return;
+    if (!selectionIsCurrent(sessionId, generation)) return;
     renderSnapshot(snapshot);
-    const cursors = await loadSessionEvidence(sessionId);
-    if (state.selectedSessionId !== sessionId) return;
-    startStreams(sessionId, cursors.eventAfter, cursors.traceAfter);
+    const cursors = await loadSessionEvidence(sessionId, generation);
+    if (!cursors || !selectionIsCurrent(sessionId, generation)) return;
+    startStreams(sessionId, cursors.eventAfter, cursors.traceAfter, generation);
   } catch (error) {
+    if (!selectionIsCurrent(sessionId, generation)) return;
     byId("trace-events").replaceChildren(paragraph(messageFromError(error), "error-text"));
   }
 }
