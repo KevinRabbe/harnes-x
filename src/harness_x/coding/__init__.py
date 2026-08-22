@@ -64,9 +64,25 @@ from .procedure_revision_runtime import (
     ProcedureRevisionVerifiedRepositoryCodingTaskRuntime,
     RevisionAwareProjectMemoryStore,
 )
+from .profile_comparison import (
+    ComparableRunSummary,
+    ProfileRunComparisonReport,
+    ProfileRunMetricDeltas,
+    compare_profile_run_roots,
+    load_comparable_run,
+    write_profile_run_comparison,
+)
 from .repository_runtime import (
     RepositoryAwareAutonomousCodingTaskRuntime,
     RepositoryContextReasoningCore,
+)
+from .run_manifest import (
+    CodingRunManifest,
+    build_coding_run_manifest,
+    clone_comparison_memory_seed,
+    directory_fingerprint,
+    load_coding_run_manifest,
+    write_coding_run_manifest,
 )
 from .runtime import CodingTaskReport, CodingTaskRuntime, CodingVerificationResult
 from .strict_verification import StrictVerificationPlatform
@@ -107,10 +123,12 @@ __all__ = [
     "BrowserVerifiedIsolatedCodingTaskReport",
     "BrowserVerifiedIsolatedRepositoryCodingTaskRuntime",
     "BrowserVerifiedRepositoryCodingTaskRuntime",
+    "CodingRunManifest",
     "CodingTaskReport",
     "CodingTaskRuntime",
     "CodingVerificationResult",
     "CommandVerificationCheck",
+    "ComparableRunSummary",
     "FileContainsVerificationCheck",
     "FileExistsVerificationCheck",
     "IsolatedCodingTaskReport",
@@ -144,6 +162,8 @@ __all__ = [
     "ProcedureRevisionStore",
     "ProcedureRevisionUpdateProposal",
     "ProcedureRevisionVerifiedRepositoryCodingTaskRuntime",
+    "ProfileRunComparisonReport",
+    "ProfileRunMetricDeltas",
     "RepositoryAwareAutonomousCodingTaskRuntime",
     "RepositoryContextReasoningCore",
     "RevisionAwareProjectMemoryStore",
@@ -163,7 +183,15 @@ __all__ = [
     "VerifiedIsolatedCodingTaskReport",
     "VerifiedIsolatedRepositoryCodingTaskRuntime",
     "VerifiedRepositoryCodingTaskRuntime",
+    "build_coding_run_manifest",
+    "clone_comparison_memory_seed",
     "command_verification_plan",
+    "compare_profile_run_roots",
+    "directory_fingerprint",
     "load_browser_verification_plan",
+    "load_coding_run_manifest",
+    "load_comparable_run",
     "load_verification_plan",
+    "write_coding_run_manifest",
+    "write_profile_run_comparison",
 ]
