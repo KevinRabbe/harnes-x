@@ -50,16 +50,14 @@ This keeps causal identity stable across CLI/runtime use, App Server use, replay
 
 ## Verification observability hardening
 
-M35 integration exposed one pre-existing observability gap in the coding runtime: software-owned command verification executed through the normal tool boundary but did not append the already-defined `verification_completed` event to the authoritative trace.
+M35 integration exposed a pre-existing observability gap: software-owned coding verification could establish an authoritative result without appending the already-defined `verification_completed` event to the same causal trace.
 
-The coding verifier now emits one bounded summary after each completed verification attempt. The event records only:
+The runtime now closes that gap at the verification authority itself rather than synthesizing a UI event:
 
-- the number of configured commands;
-- the number actually executed;
-- whether the attempt passed;
-- command return codes.
+- the legacy command verifier emits one bounded completion summary containing configured/executed command counts, pass state, and return codes;
+- the strict typed verification platform used by the current isolated M30 stack emits one bounded completion summary containing the verification run identity/kind, verdict, plan fingerprint, workspace-stability state, required/advisory failure IDs, and a source reference to the verification-run fingerprint.
 
-Detailed process execution remains represented by the existing tool events, and verification authority is unchanged. The App Server does not synthesize this event.
+Detailed command/file evidence and process execution remain represented by the existing verification artifacts and tool events. Verification policy, verdict authority, and completion criteria are unchanged. The App Server remains read-only with respect to causal execution and does not synthesize `verification_completed`.
 
 ## Durable trace attachment
 
@@ -226,7 +224,7 @@ The M35 App Server → isolated coding-runtime integration test requires a real 
 - expose software-owned verification completion;
 - expose coding-control phase changes.
 
-Separate HTTP acceptance covers live-while-running trace SSE and explicit HTTP corruption behavior. Restart coverage verifies that a durable trace attachment remains attached exactly once after interrupted-run reconciliation.
+Separate HTTP acceptance covers live-while-running trace SSE, explicit complete-record corruption behavior, and the concurrent-writer rule that only a running final partial JSONL record may be ignored. Restart coverage verifies that a durable trace attachment remains attached exactly once after interrupted-run reconciliation.
 
 ## Public package surface
 
