@@ -62,6 +62,16 @@ def _read_trace_export_source(
     source_path = Path(path)
     if source_path.is_symlink():
         raise TraceCorruptionError("causal trace export source cannot be a symbolic link")
+    try:
+        resolved_source = source_path.resolve(strict=True)
+    except OSError as exc:
+        raise TraceCorruptionError(
+            f"cannot resolve causal trace export source: {exc}"
+        ) from exc
+    if resolved_source != source_path:
+        raise TraceCorruptionError(
+            "causal trace export source resolves through symbolic-link path substitution"
+        )
 
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
