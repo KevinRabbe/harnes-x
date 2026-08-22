@@ -58,6 +58,7 @@ harness-x-code = "harness_x.coding.cli:main"
 harness-x-improve-procedure = "harness_x.coding.campaign_cli:main"
 harness-x-profile-run = "harness_x.coding.profile_run_cli:main"
 harness-x-compare-runs = "harness_x.coding.profile_comparison_cli:main"
+harness-x-app-server = "harness_x.app_server.cli:main"
 harness-x-recurrent-depth = "harness_x.reasoning.recurrent_depth_cli:main"
 harness-x-empirical-adapter = "harness_x.training.empirical_cli:main"
 
