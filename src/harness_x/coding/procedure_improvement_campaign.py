@@ -28,7 +28,10 @@ from .procedure_revision import (
     ProcedureRevisionState,
     ProcedureRevisionStore,
 )
-from .procedure_revision_runtime import ProcedureRevisionVerifiedRepositoryCodingTaskRuntime
+from .procedure_revision_runtime import (
+    ProcedureRevisionContextReasoningCore,
+    ProcedureRevisionVerifiedRepositoryCodingTaskRuntime,
+)
 from .project_memory import ProjectMemoryEntry, ProjectMemoryEntryKind, ProjectMemoryEntryState, ProjectMemoryStore
 from .verification import VerificationPlan
 
@@ -559,7 +562,9 @@ class ProcedureImprovementCampaignRunner:
         )
         steps: list[ProcedureImprovementCampaignStepReport] = []
 
-        # A terminal campaign for the same exact suspension event is intentionally not reopened.
+        # M30 owns READY->PROMOTED recovery. Invoke its startup reconciliation before M31
+        # chooses another experiment so a crash cannot spend a needless proposal/trial budget unit.
+        self._reconcile_m30_startup(memory, reliability, revisions)
         campaign = campaigns.reconcile(
             campaign.campaign_id,
             reliability_store=reliability,
@@ -567,6 +572,7 @@ class ProcedureImprovementCampaignRunner:
         )
         while not campaign.terminal:
             memory, reliability, revisions, campaigns = self._stores()
+            self._reconcile_m30_startup(memory, reliability, revisions)
             campaign = campaigns.reconcile(
                 campaign.campaign_id,
                 reliability_store=reliability,
@@ -689,6 +695,23 @@ class ProcedureImprovementCampaignRunner:
             project_id=memory.project_id,
         )
         return memory, reliability, revisions, campaigns
+
+    def _reconcile_m30_startup(
+        self,
+        memory: ProjectMemoryStore,
+        reliability: ProcedureReliabilityStore,
+        revisions: ProcedureRevisionStore,
+    ) -> None:
+        # Constructing M30's context wrapper performs its existing software-owned startup
+        # reconciliation. No model call occurs; M31 intentionally does not reproduce the
+        # READY/replacement/reliability promotion rule here.
+        ProcedureRevisionContextReasoningCore(
+            self.core,
+            memory,
+            reliability,
+            revisions,
+            allow_revision_trials=False,
+        )
 
     def _run_isolated_m30(
         self,
