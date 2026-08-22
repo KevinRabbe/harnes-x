@@ -58,7 +58,11 @@ def test_operator_ui_assets_are_public_but_session_api_remains_authenticated(
         assert "frame-ancestors 'none'" in csp
         assert "'unsafe-inline'" not in csp
         assert server.token not in html
-        assert '<script src="/ui/app.js" defer></script>' in html
+        policy_script = '<script src="/ui/stream_policy.js" defer></script>'
+        app_script = '<script src="/ui/app.js" defer></script>'
+        assert policy_script in html
+        assert app_script in html
+        assert html.index(policy_script) < html.index(app_script)
         assert '<link rel="stylesheet" href="/ui/styles.css">' in html
 
         with pytest.raises(HTTPError) as exc_info:
@@ -83,6 +87,10 @@ def test_operator_ui_client_keeps_bearer_auth_in_memory_and_uses_safe_dom_render
         assert "/events/stream?after=" in javascript
         assert "/trace/stream?after=" in javascript
         assert "response.body.getReader()" in javascript
+        assert "streamReconnectTimers" in javascript
+        assert "reconnectDelayMs" in javascript
+        assert "advanceCursor" in javascript
+        assert "clearTimeout" in javascript
         assert ".textContent" in javascript
         assert "innerHTML" not in javascript
         assert "localStorage" not in javascript
@@ -90,6 +98,12 @@ def test_operator_ui_client_keeps_bearer_auth_in_memory_and_uses_safe_dom_render
         assert "document.cookie" not in javascript
         assert "EventSource" not in javascript
         assert server.token not in javascript
+
+        policy_status, _, policy = _get_text(server, "/ui/stream_policy.js")
+        assert policy_status == 200
+        assert "maxReconnectAttempts" in policy
+        assert "non-contiguous stream cursor" in policy
+        assert server.token not in policy
     finally:
         server.close()
         service.close()
@@ -97,6 +111,7 @@ def test_operator_ui_client_keeps_bearer_auth_in_memory_and_uses_safe_dom_render
 
 def test_operator_ui_asset_allowlist_cannot_read_arbitrary_package_paths() -> None:
     assert load_ui_asset("/ui/") is not None
+    assert load_ui_asset("/ui/stream_policy.js") is not None
     assert load_ui_asset("/ui/app.js") is not None
     assert load_ui_asset("/ui/styles.css") is not None
     assert load_ui_asset("/ui/../protocol.py") is None
