@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -60,3 +61,61 @@ def test_failed_browser_open_invalidates_disposable_ticket(
     finally:
         server.close()
         service.close()
+
+
+def test_cli_startup_json_never_prints_bootstrap_ticket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret_url = "http://127.0.0.1:12345/ui/#bootstrap=secret-ticket-material"
+    opened: list[str] = []
+
+    class FakeService:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeTickets:
+        def invalidate(self) -> None:
+            pass
+
+    class FakeHTTPD:
+        def server_close(self) -> None:
+            pass
+
+    class FakeServer:
+        def __init__(self, _service, root, **_kwargs) -> None:
+            root = Path(root)
+            self.base_url = "http://127.0.0.1:12345"
+            self.ui_url = self.base_url + "/ui/"
+            self.token_path = root / "access-token"
+            self.info_path = root / "server-info.json"
+            self.bootstrap_tickets = FakeTickets()
+            self.httpd = FakeHTTPD()
+
+        def issue_ui_bootstrap_url(self) -> str:
+            return secret_url
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_module, "AppServerService", FakeService)
+    monkeypatch.setattr(cli_module, "LocalOperatorHTTPServer", FakeServer)
+    monkeypatch.setattr(
+        cli_module.webbrowser,
+        "open",
+        lambda url, **_kwargs: opened.append(url) or True,
+    )
+
+    assert cli_module.main(["--root", str(tmp_path), "--open-ui"]) == 0
+    startup_text = capsys.readouterr().out.strip()
+    startup = json.loads(startup_text)
+    assert opened == [secret_url]
+    assert "secret-ticket-material" not in startup_text
+    assert "#bootstrap=" not in startup_text
+    assert startup["ui_url"] == "http://127.0.0.1:12345/ui/"
+    assert startup["ui_open_requested"] is True
+    assert startup["ui_opened"] is True
