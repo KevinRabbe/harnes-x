@@ -66,6 +66,13 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
                         return
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "report endpoint does not accept query parameters",
+                        )
+                        return
                     session_id = pieces[0]
                     try:
                         snapshot = service.session(session_id)
