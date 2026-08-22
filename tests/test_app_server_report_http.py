@@ -130,7 +130,7 @@ def test_http_report_projection_fails_visible_after_source_tamper(tmp_path: Path
         service.close()
 
 
-def test_operator_transport_does_not_accept_caller_selected_report_paths(tmp_path: Path) -> None:
+def test_operator_transport_rejects_caller_selected_report_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     service = AppServerService(tmp_path / "service", runner=_runner)
@@ -139,19 +139,27 @@ def test_operator_transport_does_not_accept_caller_selected_report_paths(tmp_pat
     try:
         snapshot = _completed_session(service, workspace)
         base = f"/v1/sessions/{snapshot.session_id}/report"
-        for path in (
-            base + "/coding-task-report.json",
-            base + "?path=/etc/passwd",
-        ):
-            if "?" in path:
-                # Query parameters do not become a filesystem selector; canonical report still wins.
-                with urlopen(_request(server, path, authorized=True), timeout=3.0) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-                assert payload["source_path"] == snapshot.coding_report_path
-            else:
-                with pytest.raises(HTTPError) as exc_info:
-                    urlopen(_request(server, path, authorized=True), timeout=3.0)
-                assert exc_info.value.code == 404
+
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(
+                _request(
+                    server,
+                    base + "/coding-task-report.json",
+                    authorized=True,
+                ),
+                timeout=3.0,
+            )
+        assert exc_info.value.code == 404
+
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(
+                _request(server, base + "?path=/etc/passwd", authorized=True),
+                timeout=3.0,
+            )
+        assert exc_info.value.code == 400
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "invalid_request"
+        assert "does not accept query parameters" in payload["detail"]
     finally:
         server.close()
         service.close()
