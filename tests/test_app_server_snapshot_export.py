@@ -81,9 +81,9 @@ def test_snapshot_export_contains_complete_fingerprint_preimage_and_exact_identi
         assert raw["session_id"] == snapshot.session_id
         assert raw["status"] == "succeeded"
         assert raw["request"]["task"] == snapshot.request.task
-        assert raw["request"]["workspace_root"] == snapshot.request.workspace_root
+        assert raw["request"]["workspace_root"] == str(snapshot.request.workspace_root)
         assert raw["request"]["verification_commands"] == ["python -m pytest"]
-        assert raw["request"]["project_memory_root"] == snapshot.request.project_memory_root
+        assert raw["request"]["project_memory_root"] == str(snapshot.request.project_memory_root)
         assert raw["request"]["project_memory_key"] == "portable/session"
         assert raw["output_root"] == snapshot.output_root
         assert raw["event_count"] == snapshot.event_count
