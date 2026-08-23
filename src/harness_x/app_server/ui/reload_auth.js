@@ -105,7 +105,20 @@ async function mintReloadCapability(token) {
   } catch (_error) {
     payload = null;
   }
-  if (generation !== reloadAuthState.mintGeneration || reloadAuthState.token !== token) return;
+  if (generation !== reloadAuthState.mintGeneration || reloadAuthState.token !== token) {
+    if (
+      response.ok
+      && payload
+      && payload.schema_version === "app-operator-reload-ticket-v1"
+      && typeof payload.ticket === "string"
+      && reloadAuthTicketPattern.test(payload.ticket)
+    ) {
+      const staleTicket = payload.ticket;
+      payload.ticket = "";
+      void revokeReloadCapability(token, staleTicket);
+    }
+    return;
+  }
 
   if (
     !response.ok
