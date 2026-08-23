@@ -8,10 +8,6 @@ from pathlib import Path
 from typing import Sequence
 
 from . import cli as legacy_cli
-from .evidence_verification import (
-    PortableEvidenceVerificationError,
-    verify_portable_evidence,
-)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +47,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
 
     if args.command == "verify-evidence":
+        from .evidence_verification import (
+            PortableEvidenceVerificationError,
+            verify_portable_evidence,
+        )
+
         try:
             result = verify_portable_evidence(
                 args.manifest,
