@@ -17,6 +17,10 @@ dependencies = [
 dev = [
   "pytest>=8,<10",
   "lm-format-enforcer==0.11.3",
+  "cryptography>=45,<47",
+]
+evidence-signing = [
+  "cryptography>=45,<47",
 ]
 training = [
   "torch>=2.4,<3",
