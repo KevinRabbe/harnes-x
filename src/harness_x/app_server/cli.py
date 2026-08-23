@@ -9,8 +9,10 @@ import webbrowser
 from pathlib import Path
 from typing import Sequence
 
-from .family_operator_http_server import LocalOperatorHTTPServer
+from harness_x.evidence_verification import PortableEvidenceVerificationError
+
 from .service import AppServerService
+from .signed_evidence_operator_http_server import LocalOperatorHTTPServer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +48,15 @@ def build_parser() -> argparse.ArgumentParser:
             "the persistent bearer is never placed in the URL."
         ),
     )
+    parser.add_argument(
+        "--evidence-signing-private-key",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local unencrypted Ed25519 PKCS8 private-key PEM used only to sign "
+            "terminal evidence-manifest bytes."
+        ),
+    )
     return parser
 
 
@@ -64,13 +75,24 @@ def _open_operator_ui(server: LocalOperatorHTTPServer) -> bool:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     root = args.root.resolve()
     service = AppServerService(
         root / "data",
         server_version="0.1.0a0+app-server40-one-time-ui-bootstrap",
     )
-    server = LocalOperatorHTTPServer(service, root, host=args.host, port=args.port)
+    try:
+        server = LocalOperatorHTTPServer(
+            service,
+            root,
+            host=args.host,
+            port=args.port,
+            evidence_signing_private_key=args.evidence_signing_private_key,
+        )
+    except PortableEvidenceVerificationError as exc:
+        service.close()
+        parser.error(str(exc))
     ui_opened = _open_operator_ui(server) if args.open_ui else False
     print(
         json.dumps(
