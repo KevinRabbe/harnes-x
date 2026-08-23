@@ -65,6 +65,7 @@ function markStreamRecoverable(kind, sessionId, cursor, generation) {
     return;
   }
   streamRecoveryState[kind] = Object.freeze({ sessionId, cursor, generation });
+  byId("stream-recovery-status").textContent = `${kind === "lifecycle" ? "Lifecycle" : "Trace"} automatic reconnect exhausted; manual reconnect is available.`;
   updateStreamRecoveryButton();
 }
 
