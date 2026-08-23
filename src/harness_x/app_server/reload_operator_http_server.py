@@ -67,9 +67,16 @@ class LocalOperatorHTTPServer(M47LocalOperatorHTTPServer):
                             "reload-ticket request must contain exactly previous_ticket as text or null",
                         )
                         return
-                    issued = reload_capabilities.issue(
-                        previous_ticket=raw.get("previous_ticket")
-                    )
+                    try:
+                        issued = reload_capabilities.issue(
+                            previous_ticket=raw.get("previous_ticket")
+                        )
+                    except RuntimeError:
+                        self._error(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            "reload_unavailable",
+                        )
+                        return
                     self._json(
                         HTTPStatus.OK,
                         {
