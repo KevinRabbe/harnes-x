@@ -21,6 +21,7 @@ _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/snapshot_export.js": ("snapshot_export.js", "text/javascript; charset=utf-8"),
     "/ui/reload_auth.js": ("reload_auth.js", "text/javascript; charset=utf-8"),
     "/ui/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/ui/selection_restore.js": ("selection_restore.js", "text/javascript; charset=utf-8"),
     "/ui/stream_recovery.js": ("stream_recovery.js", "text/javascript; charset=utf-8"),
     "/ui/bootstrap.js": ("bootstrap.js", "text/javascript; charset=utf-8"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8"),
