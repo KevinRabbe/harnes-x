@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from . import cli as legacy_cli
@@ -26,16 +27,16 @@ def build_parser() -> argparse.ArgumentParser:
         "verify-evidence",
         help="Verify an exported terminal evidence manifest and local report/trace files offline",
     )
-    verify.add_argument("manifest", type=legacy_cli.Path)
+    verify.add_argument("manifest", type=Path)
     verify.add_argument(
         "--report",
-        type=legacy_cli.Path,
+        type=Path,
         default=None,
         help="Local coding-task-report.json export when the manifest marks it available",
     )
     verify.add_argument(
         "--trace",
-        type=legacy_cli.Path,
+        type=Path,
         default=None,
         help="Local causal-trace.jsonl export when the manifest marks it available",
     )
