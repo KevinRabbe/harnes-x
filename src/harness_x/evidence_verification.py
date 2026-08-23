@@ -1,4 +1,4 @@
-"""Offline verification for the portable M43 terminal evidence set."""
+"""Offline verification for the portable M43+ terminal evidence set."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from harness_x.app_server.evidence_manifest import (
     CodingReportEvidenceAvailable,
     TerminalEvidenceManifest,
     TraceEvidenceAvailable,
+)
+from harness_x.app_server.lifecycle_export import (
+    MAX_LIFECYCLE_EXPORT_BYTES,
+    LifecycleLedgerExport,
 )
 from harness_x.app_server.report_attestation import MAX_REPORT_BYTES
 from harness_x.app_server.trace_export import MAX_TRACE_EXPORT_BYTES
@@ -46,17 +50,24 @@ class PortableEvidenceVerification:
     session_id: str
     manifest_bytes: int
     manifest_sha256: str
+    lifecycle_status: str
+    lifecycle_events: int | None
     report_status: str
     trace_status: str
     trace_records: int | None
 
     def summary(self) -> str:
+        lifecycle_events = (
+            "none" if self.lifecycle_events is None else str(self.lifecycle_events)
+        )
         trace_records = "none" if self.trace_records is None else str(self.trace_records)
         return (
             "valid: "
             f"session={self.session_id} "
             f"manifest_bytes={self.manifest_bytes} "
             f"manifest_sha256={self.manifest_sha256} "
+            f"lifecycle={self.lifecycle_status} "
+            f"lifecycle_events={lifecycle_events} "
             f"report={self.report_status} "
             f"trace={self.trace_status} "
             f"trace_records={trace_records}"
@@ -141,6 +152,17 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _reject_lifecycle_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise PortableEvidenceVerificationError(
+                f"lifecycle JSON contains duplicate object key: {key}"
+            )
+        result[key] = value
+    return result
+
+
 def _load_manifest(source: BoundedEvidenceSource) -> TerminalEvidenceManifest:
     try:
         text = source.payload.decode("utf-8", errors="strict")
@@ -171,6 +193,110 @@ def _load_manifest(source: BoundedEvidenceSource) -> TerminalEvidenceManifest:
             "manifest fingerprint does not match manifest contents"
         )
     return manifest
+
+
+def _load_lifecycle(source: BoundedEvidenceSource) -> LifecycleLedgerExport:
+    try:
+        text = source.payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise PortableEvidenceVerificationError("lifecycle ledger is not valid UTF-8") from exc
+    try:
+        raw = json.loads(text, object_pairs_hook=_reject_lifecycle_duplicate_keys)
+    except PortableEvidenceVerificationError:
+        raise
+    except json.JSONDecodeError as exc:
+        raise PortableEvidenceVerificationError(
+            f"lifecycle ledger is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise PortableEvidenceVerificationError(
+            "lifecycle ledger JSON root must be an object"
+        )
+    try:
+        return LifecycleLedgerExport.model_validate(raw)
+    except ValidationError as exc:
+        raise PortableEvidenceVerificationError(
+            f"lifecycle ledger does not satisfy app-lifecycle-ledger-export-v1: {exc}"
+        ) from exc
+
+
+def _verify_lifecycle(
+    manifest: TerminalEvidenceManifest,
+    lifecycle_path: str | Path | None,
+) -> tuple[str, int | None]:
+    if lifecycle_path is None:
+        return "not_supplied", None
+
+    source = _bounded_regular_file(
+        lifecycle_path,
+        maximum_bytes=MAX_LIFECYCLE_EXPORT_BYTES,
+    )
+    export = _load_lifecycle(source)
+    expected = manifest.lifecycle
+
+    if export.session_id != manifest.session_id:
+        raise PortableEvidenceVerificationError(
+            "lifecycle ledger belongs to a different manifest session"
+        )
+    comparisons = (
+        (export.status, expected.status, "status"),
+        (export.snapshot_revision, expected.snapshot_revision, "snapshot revision"),
+        (
+            export.snapshot_fingerprint,
+            expected.snapshot_fingerprint,
+            "snapshot fingerprint",
+        ),
+        (export.event_count, expected.event_count, "event count"),
+        (export.ledger_head_hash, expected.ledger_head_hash, "ledger head hash"),
+        (export.ledger_head_kind, expected.ledger_head_kind, "ledger head kind"),
+        (export.created_at, expected.created_at, "created timestamp"),
+        (export.completed_at, expected.completed_at, "completed timestamp"),
+    )
+    for observed, wanted, label in comparisons:
+        if observed != wanted:
+            raise PortableEvidenceVerificationError(
+                f"lifecycle ledger {label} does not match manifest"
+            )
+
+    if len(export.events) != export.event_count:
+        raise PortableEvidenceVerificationError(
+            "lifecycle ledger event array length does not match event_count"
+        )
+
+    previous_hash: str | None = None
+    for expected_sequence, event in enumerate(export.events, start=1):
+        if event.session_id != manifest.session_id:
+            raise PortableEvidenceVerificationError(
+                f"cross-session lifecycle event at sequence {expected_sequence}"
+            )
+        if event.sequence != expected_sequence:
+            raise PortableEvidenceVerificationError(
+                f"non-contiguous lifecycle event sequence at {expected_sequence}"
+            )
+        if event.previous_hash != previous_hash:
+            raise PortableEvidenceVerificationError(
+                f"broken lifecycle previous hash at sequence {expected_sequence}"
+            )
+        if not event.verify_hash():
+            raise PortableEvidenceVerificationError(
+                f"lifecycle event hash mismatch at sequence {expected_sequence}"
+            )
+        previous_hash = event.event_hash
+
+    final = export.events[-1]
+    if final.sequence != export.event_count:
+        raise PortableEvidenceVerificationError(
+            "lifecycle final event sequence does not match event_count"
+        )
+    if final.event_hash != export.ledger_head_hash or previous_hash != export.ledger_head_hash:
+        raise PortableEvidenceVerificationError(
+            "lifecycle final event hash does not match ledger head"
+        )
+    if final.kind.value != export.ledger_head_kind:
+        raise PortableEvidenceVerificationError(
+            "lifecycle final event kind does not match ledger head kind"
+        )
+    return "verified", len(export.events)
 
 
 def _verify_report_provenance(report: CodingReportEvidenceAvailable) -> None:
@@ -294,22 +420,26 @@ def _verify_trace(
 def verify_portable_evidence(
     manifest_path: str | Path,
     *,
+    lifecycle_path: str | Path | None = None,
     report_path: str | Path | None = None,
     trace_path: str | Path | None = None,
 ) -> PortableEvidenceVerification:
-    """Verify one portable M43 manifest and its explicitly supplied evidence files offline."""
+    """Verify one portable terminal manifest and explicitly supplied evidence files offline."""
 
     manifest_source = _bounded_regular_file(
         manifest_path,
         maximum_bytes=MAX_EVIDENCE_MANIFEST_BYTES,
     )
     manifest = _load_manifest(manifest_source)
+    lifecycle_status, lifecycle_events = _verify_lifecycle(manifest, lifecycle_path)
     report_status = _verify_report(manifest, report_path)
     trace_status, trace_records = _verify_trace(manifest, trace_path)
     return PortableEvidenceVerification(
         session_id=manifest.session_id,
         manifest_bytes=manifest_source.source_bytes,
         manifest_sha256=manifest_source.source_sha256,
+        lifecycle_status=lifecycle_status,
+        lifecycle_events=lifecycle_events,
         report_status=report_status,
         trace_status=trace_status,
         trace_records=trace_records,
