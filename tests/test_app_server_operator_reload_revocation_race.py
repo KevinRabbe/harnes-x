@@ -106,13 +106,11 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"), { filename: proces
   await new Promise(setImmediate);
   await new Promise(setImmediate);
 
-  assert(calls.length === 5, "stale successful mint must retain belt-and-suspenders ticket/family cleanup");
-  assert(calls[3].url === "/v1/operator/reload-revoke", "stale returned ticket must still use M50 cleanup");
+  assert(calls.length === 4, "stale successful mint must trigger exact returned-ticket cleanup only");
+  assert(calls[3].url === "/v1/operator/reload-revoke", "stale returned ticket must use M50 cleanup");
   assert(JSON.parse(calls[3].options.body).ticket === replacementTicket, "stale returned ticket must be revoked");
-  assert(calls[4].url === "/v1/operator/reload-family-revoke", "stale mint must also retire its family");
-  assert(JSON.parse(calls[4].options.body).family === family, "stale family cleanup must use original family");
   assert(calls[3].options.headers.Authorization === "Bearer bearer-main", "stale ticket cleanup must use captured bearer");
-  assert(calls[4].options.headers.Authorization === "Bearer bearer-main", "stale family cleanup must use captured bearer");
+  assert(calls.filter((call) => call.url === "/v1/operator/reload-family-revoke").length === 1, "stale response must not revoke a family that could have a newer current ticket");
   assert(!storage.has(key), "stale mint response must never repopulate ticket storage");
   assert(!storage.has(familyKey), "stale mint response must never repopulate family storage");
   assert(reloadAuthState.token === null, "stale mint response must never restore bearer state");
