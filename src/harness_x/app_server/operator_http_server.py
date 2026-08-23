@@ -16,6 +16,14 @@ from .evidence_manifest import (
     render_terminal_evidence_manifest,
 )
 from .http_server import LocalAppHTTPServer
+from .lifecycle_export import (
+    LifecycleExportCorruptionError,
+    LifecycleExportNotTerminalError,
+    LifecycleExportTooLargeError,
+    RenderedLifecycleLedgerExport,
+    build_lifecycle_ledger_export,
+    render_lifecycle_ledger_export,
+)
 from .report_projection import (
     ReportCorruptionError,
     ReportUnavailableError,
@@ -54,7 +62,8 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
     M41 adds one authenticated raw-byte export for the canonical validated coding report.
     M42 adds one terminal-only exact-byte export for the attached verified causal trace.
     M43 adds one terminal-only generated evidence manifest correlating those identities with the
-    validated App Server lifecycle head.
+    validated App Server lifecycle head. M45 adds one terminal-only generated lifecycle-ledger
+    export for offline verification of the authoritative App Server event chain.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -75,7 +84,7 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
         bootstrap_tickets = self.bootstrap_tickets
 
         class Handler(base_handler):
-            server_version = "HarnessXAppServer/43"
+            server_version = "HarnessXAppServer/45"
 
             def do_GET(self) -> None:  # noqa: N802
                 if not self._valid_host():
@@ -92,6 +101,53 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                     return
 
                 pieces = self._session_path(parsed.path)
+                if pieces is not None and pieces[1] == "/lifecycle/export":
+                    if not self._authorized(token):
+                        self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                        return
+                    if parsed.query:
+                        self._error(
+                            HTTPStatus.BAD_REQUEST,
+                            "invalid_request",
+                            "lifecycle export endpoint does not accept query parameters",
+                        )
+                        return
+                    session_id, _ = pieces
+                    try:
+                        snapshot = service.session(session_id)
+                        events = service.store.events(session_id)
+                        export = build_lifecycle_ledger_export(
+                            snapshot=snapshot,
+                            events=events,
+                        )
+                        rendered_export = render_lifecycle_ledger_export(export)
+                    except KeyError:
+                        self._error(HTTPStatus.NOT_FOUND, "unknown_session")
+                        return
+                    except LifecycleExportNotTerminalError as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "lifecycle_export_not_terminal",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except LifecycleExportTooLargeError as exc:
+                        self._error(
+                            HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                            "lifecycle_export_too_large",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except (LifecycleExportCorruptionError, RuntimeError) as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "lifecycle_corruption",
+                            str(exc)[:4000],
+                        )
+                        return
+                    self._lifecycle_export(rendered_export)
+                    return
+
                 if pieces is not None and pieces[1] == "/evidence/manifest":
                     if not self._authorized(token):
                         self._error(HTTPStatus.UNAUTHORIZED, "unauthorized")
@@ -403,6 +459,34 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                 self.send_header(
                     "X-Harness-X-Evidence-Manifest-SHA256",
                     rendered.source_sha256,
+                )
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(rendered.payload)
+
+            def _lifecycle_export(self, rendered: RenderedLifecycleLedgerExport) -> None:
+                self.close_connection = True
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="session-lifecycle-ledger.json"',
+                )
+                self.send_header("Content-Length", str(rendered.source_bytes))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header(
+                    "X-Harness-X-Lifecycle-SHA256",
+                    rendered.source_sha256,
+                )
+                self.send_header(
+                    "X-Harness-X-Lifecycle-Events",
+                    str(rendered.event_count),
+                )
+                self.send_header(
+                    "X-Harness-X-Lifecycle-Head-Hash",
+                    rendered.ledger_head_hash,
                 )
                 self.send_header("Connection", "close")
                 self.end_headers()

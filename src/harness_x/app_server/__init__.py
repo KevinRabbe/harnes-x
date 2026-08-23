@@ -8,6 +8,14 @@ from .evidence_manifest import (
     render_terminal_evidence_manifest,
 )
 from .http_server import LocalAppHTTPServer
+from .lifecycle_export import (
+    LifecycleExportCorruptionError,
+    LifecycleExportNotTerminalError,
+    LifecycleExportTooLargeError,
+    LifecycleLedgerExport,
+    build_lifecycle_ledger_export,
+    render_lifecycle_ledger_export,
+)
 from .operator_http_server import LocalOperatorHTTPServer
 from .protocol import (
     AppEvent,
@@ -47,6 +55,10 @@ __all__ = [
     "EvidenceManifestCorruptionError",
     "EvidenceManifestNotTerminalError",
     "HarnessCodingRunner",
+    "LifecycleExportCorruptionError",
+    "LifecycleExportNotTerminalError",
+    "LifecycleExportTooLargeError",
+    "LifecycleLedgerExport",
     "LocalAppHTTPServer",
     "LocalOperatorHTTPServer",
     "ReportCorruptionError",
@@ -55,8 +67,10 @@ __all__ = [
     "TraceProjectionEvent",
     "TraceProjectionPage",
     "build_coding_report_projection",
+    "build_lifecycle_ledger_export",
     "build_terminal_evidence_manifest",
     "build_trace_projection_page",
     "load_verified_trace_records",
+    "render_lifecycle_ledger_export",
     "render_terminal_evidence_manifest",
 ]
