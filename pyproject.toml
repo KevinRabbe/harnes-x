@@ -53,7 +53,7 @@ browser = [
 ]
 
 [project.scripts]
-harness-x = "harness_x.cli:main"
+harness-x = "harness_x.cli_entry:main"
 harness-x-code = "harness_x.coding.cli:main"
 harness-x-improve-procedure = "harness_x.coding.campaign_cli:main"
 harness-x-profile-run = "harness_x.coding.profile_run_cli:main"
