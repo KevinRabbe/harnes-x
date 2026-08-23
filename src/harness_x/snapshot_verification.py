@@ -120,11 +120,8 @@ def _load_snapshot(source: BoundedEvidenceSource) -> PortableSessionSnapshot:
 
 def _verify_snapshot(
     manifest: TerminalEvidenceManifest,
-    snapshot_path: str | Path | None,
-) -> tuple[str, int | None]:
-    if snapshot_path is None:
-        return "not_supplied", None
-
+    snapshot_path: str | Path,
+) -> tuple[str, int]:
     source = _bounded_regular_file(
         snapshot_path,
         maximum_bytes=MAX_SESSION_SNAPSHOT_EXPORT_BYTES,
@@ -159,6 +156,22 @@ def verify_portable_evidence_with_snapshot(
     trace_path: str | Path | None = None,
 ) -> PortableEvidenceVerificationWithSnapshot:
     """Verify M44/M45 evidence plus an optional complete M47 session snapshot."""
+
+    # When M47 evidence is omitted, delegate through the frozen M45 verifier path exactly.
+    # The wrapper adds only explicit snapshot=not_supplied summary state and performs no
+    # M47-specific manifest read or correlation work.
+    if snapshot_path is None:
+        base = verify_portable_evidence(
+            manifest_path,
+            lifecycle_path=lifecycle_path,
+            report_path=report_path,
+            trace_path=trace_path,
+        )
+        return PortableEvidenceVerificationWithSnapshot(
+            base=base,
+            snapshot_status="not_supplied",
+            snapshot_revision=None,
+        )
 
     # Keep the M45 verifier unchanged, but independently pin the manifest bytes used by
     # the M47 correlation step. A combined success is valid only when both reads saw
