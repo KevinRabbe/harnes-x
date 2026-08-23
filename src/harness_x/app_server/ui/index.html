@@ -120,8 +120,10 @@
           </div>
           <div class="session-actions">
             <span id="session-status" class="pill pill--muted">unknown</span>
+            <button id="reconnect-streams" type="button" class="secondary hidden" disabled>Reconnect live streams</button>
             <button id="cancel-session" type="button" class="danger" disabled>Request cancel</button>
           </div>
+          <p id="stream-recovery-status" class="mono muted small" aria-live="polite"></p>
         </section>
 
         <section class="summary-grid">
@@ -212,6 +214,7 @@
   <script src="/ui/evidence_manifest.js" defer></script>
   <script src="/ui/lifecycle_export.js" defer></script>
   <script src="/ui/app.js" defer></script>
+  <script src="/ui/stream_recovery.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>
 </html>
