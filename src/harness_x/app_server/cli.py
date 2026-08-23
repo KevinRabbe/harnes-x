@@ -9,7 +9,7 @@ import webbrowser
 from pathlib import Path
 from typing import Sequence
 
-from .reload_operator_http_server import LocalOperatorHTTPServer
+from .revocation_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
