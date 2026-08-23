@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from http.client import HTTPConnection
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -184,21 +185,20 @@ def test_reload_revoke_oversized_body_does_not_consume_ticket(tmp_path: Path) ->
     server.start_in_thread()
     try:
         ticket = _issue(server)
-        request = Request(
-            server.base_url + "/v1/operator/reload-revoke",
-            data=b"{" + (b"x" * (3 * 1024 * 1024)) + b"}",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {server.token}",
-                "Content-Type": "application/json",
-                "Origin": server.base_url,
-            },
-            method="POST",
-        )
-        with pytest.raises(HTTPError) as exc_info:
-            urlopen(request, timeout=3.0)
-        assert exc_info.value.code == 400
-        payload = json.loads(exc_info.value.read())
+        connection = HTTPConnection(server.host, server.port, timeout=3.0)
+        connection.putrequest("POST", "/v1/operator/reload-revoke")
+        connection.putheader("Accept", "application/json")
+        connection.putheader("Authorization", f"Bearer {server.token}")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Origin", server.base_url)
+        connection.putheader("Content-Length", str(3 * 1024 * 1024))
+        connection.endheaders()
+        response = connection.getresponse()
+        try:
+            assert response.status == 400
+            payload = json.loads(response.read())
+        finally:
+            connection.close()
         assert payload["schema_version"] == "app-server-error-v1"
         assert payload["error"] == "invalid_reload_revoke_request"
 
