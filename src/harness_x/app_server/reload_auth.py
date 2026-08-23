@@ -14,6 +14,7 @@ RELOAD_CAPABILITY_BYTES = 32
 MAX_OUTSTANDING_RELOAD_CAPABILITIES = 32
 _MAX_RELOAD_CAPABILITY_TTL_SECONDS = 5.0 * 60.0
 _MAX_RELOAD_CAPABILITY_COUNT = 64
+_MAX_GENERATION_ATTEMPTS = 8
 
 
 class ReloadCapabilities:
@@ -60,8 +61,6 @@ class ReloadCapabilities:
     def issue(self, *, previous_ticket: object = None) -> str:
         """Issue one bounded capability, removing a supplied previous ticket when present."""
 
-        ticket = secrets.token_urlsafe(RELOAD_CAPABILITY_BYTES)
-        digest = hashlib.sha256(ticket.encode("ascii")).digest()
         now = self._clock()
         expires_at = now + self._ttl_seconds
         previous_digest = self._digest(previous_ticket)
@@ -74,6 +73,27 @@ class ReloadCapabilities:
                     for stored, expiry in self._entries
                     if not hmac.compare_digest(previous_digest, stored)
                 ]
+
+            ticket: str | None = None
+            digest: bytes | None = None
+            for _ in range(_MAX_GENERATION_ATTEMPTS):
+                candidate_ticket = secrets.token_urlsafe(RELOAD_CAPABILITY_BYTES)
+                candidate_digest = hashlib.sha256(candidate_ticket.encode("ascii")).digest()
+                collides_with_previous = (
+                    previous_digest is not None
+                    and hmac.compare_digest(candidate_digest, previous_digest)
+                )
+                collides_with_outstanding = any(
+                    hmac.compare_digest(candidate_digest, stored)
+                    for stored, _ in self._entries
+                )
+                if not collides_with_previous and not collides_with_outstanding:
+                    ticket = candidate_ticket
+                    digest = candidate_digest
+                    break
+            if ticket is None or digest is None:
+                raise RuntimeError("failed to generate a unique reload capability")
+
             if len(self._entries) >= self._max_outstanding:
                 oldest_index = min(
                     range(len(self._entries)),
