@@ -284,6 +284,19 @@ def _trace_evidence(
     )
 
 
+def _verify_snapshot_fingerprint(snapshot: AppSessionSnapshot) -> None:
+    try:
+        recomputed = AppSessionSnapshot.model_validate(snapshot.model_dump(mode="json"))
+    except Exception as exc:
+        raise EvidenceManifestCorruptionError(
+            f"session snapshot cannot be revalidated: {exc}"
+        ) from exc
+    if snapshot.fingerprint != recomputed.fingerprint:
+        raise EvidenceManifestCorruptionError(
+            "session snapshot fingerprint does not match snapshot contents"
+        )
+
+
 def build_terminal_evidence_manifest(
     *,
     snapshot: AppSessionSnapshot,
@@ -292,11 +305,14 @@ def build_terminal_evidence_manifest(
     """Build one deterministic manifest from validated terminal-session evidence."""
 
     lifecycle = _validated_lifecycle(snapshot, events)
+    coding_report = _report_evidence(snapshot, events)
+    causal_trace = _trace_evidence(snapshot, events)
+    _verify_snapshot_fingerprint(snapshot)
     return TerminalEvidenceManifest(
         session_id=snapshot.session_id,
         lifecycle=lifecycle,
-        coding_report=_report_evidence(snapshot, events),
-        causal_trace=_trace_evidence(snapshot, events),
+        coding_report=coding_report,
+        causal_trace=causal_trace,
     )
 
 
