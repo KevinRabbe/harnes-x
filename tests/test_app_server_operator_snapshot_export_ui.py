@@ -32,6 +32,11 @@ def test_snapshot_export_client_is_terminal_authenticated_hashed_and_storage_fre
         < html.index("/ui/stream_recovery.js")
         < html.index("/ui/bootstrap.js")
     )
+    lifecycle_button = html.index('id="download-lifecycle-ledger"')
+    manifest_button = html.index('id="download-evidence-manifest"')
+    lifecycle_pill = html.index('id="lifecycle-state"')
+    snapshot_button = html.index('id="download-session-snapshot"')
+    assert lifecycle_button < manifest_button < lifecycle_pill < snapshot_button
 
     assert "/snapshot/export" in javascript
     assert "Authorization" in javascript
