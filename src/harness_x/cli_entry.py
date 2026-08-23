@@ -1,4 +1,4 @@
-"""Installed Harness X CLI wrapper adding M44 portable evidence verification."""
+"""Installed Harness X CLI wrapper adding portable evidence verification."""
 
 from __future__ import annotations
 
@@ -21,9 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify = subparsers.add_parser(
         "verify-evidence",
-        help="Verify an exported terminal evidence manifest and local report/trace files offline",
+        help="Verify an exported terminal manifest and local lifecycle/report/trace evidence offline",
     )
     verify.add_argument("manifest", type=Path)
+    verify.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
     verify.add_argument(
         "--report",
         type=Path,
@@ -40,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch M44 locally and delegate every pre-M44 command unchanged."""
+    """Dispatch portable evidence verification and delegate every legacy command unchanged."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -55,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             result = verify_portable_evidence(
                 args.manifest,
+                lifecycle_path=args.lifecycle,
                 report_path=args.report,
                 trace_path=args.trace,
             )
