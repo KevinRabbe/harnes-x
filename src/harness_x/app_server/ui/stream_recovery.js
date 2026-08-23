@@ -134,7 +134,7 @@ async function recoverDisconnectedStreams() {
     }
 
     if (restarted.length) {
-      byId("stream-recovery-status").textContent = `Reconnected ${restarted.join(" + ")} stream${restarted.length === 1 ? "" : "s"}.`;
+      byId("stream-recovery-status").textContent = `Restarted ${restarted.join(" + ")} stream${restarted.length === 1 ? "" : "s"}.`;
     }
   } catch (error) {
     if (!selectionIsCurrent(sessionId, generation)) return;
