@@ -60,6 +60,14 @@ def _redeem_error(server: LocalOperatorHTTPServer, ticket: str) -> tuple[int, di
     return exc_info.value.code, json.loads(exc_info.value.read())
 
 
+def _assert_error(payload: dict[str, object], code: str) -> None:
+    assert payload == {
+        "schema_version": "app-server-error-v1",
+        "error": code,
+        "detail": None,
+    }
+
+
 def test_unknown_malformed_used_and_expired_capabilities_share_generic_rejection(tmp_path: Path) -> None:
     service = AppServerService(tmp_path / "service")
     server = LocalOperatorHTTPServer(service, tmp_path / "transport", port=0)
@@ -73,7 +81,7 @@ def test_unknown_malformed_used_and_expired_capabilities_share_generic_rejection
         for ticket in (expired, "not-a-ticket", "Z" * 43):
             code, payload = _redeem_error(server, ticket)
             assert code == 401
-            assert payload == {"error": "reload_rejected"}
+            _assert_error(payload, "reload_rejected")
 
         used = _issue(server)
         with urlopen(
@@ -88,7 +96,7 @@ def test_unknown_malformed_used_and_expired_capabilities_share_generic_rejection
             assert response.status == 200
         code, payload = _redeem_error(server, used)
         assert code == 401
-        assert payload == {"error": "reload_rejected"}
+        _assert_error(payload, "reload_rejected")
     finally:
         server.close()
         service.close()
@@ -192,7 +200,7 @@ def test_reload_capability_generation_failure_is_structured_and_fail_closed(
                 timeout=3.0,
             )
         assert exc_info.value.code == 503
-        assert json.loads(exc_info.value.read()) == {"error": "reload_unavailable"}
+        _assert_error(json.loads(exc_info.value.read()), "reload_unavailable")
     finally:
         server.close()
         service.close()
