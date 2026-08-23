@@ -7,6 +7,7 @@ from .evidence_manifest import (
     build_terminal_evidence_manifest,
     render_terminal_evidence_manifest,
 )
+from .family_operator_http_server import LocalOperatorHTTPServer
 from .http_server import LocalAppHTTPServer
 from .lifecycle_export import (
     LifecycleExportCorruptionError,
@@ -31,7 +32,6 @@ from .report_projection import (
     ReportUnavailableError,
     build_coding_report_projection,
 )
-from .revocation_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService, HarnessCodingRunner
 from .snapshot_export import (
     MAX_SESSION_SNAPSHOT_EXPORT_BYTES,
