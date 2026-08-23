@@ -39,7 +39,7 @@ def test_unsigned_server_construction_does_not_invoke_signer_loader(
     try:
         assert server.evidence_manifest_signer is None
     finally:
-        server.close()
+        server.httpd.server_close()
         service.close()
 
 
