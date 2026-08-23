@@ -28,7 +28,7 @@
           </div>
           <span id="auth-state" class="pill pill--muted">Locked</span>
         </div>
-        <p class="muted small">Use <code>harness-x-app-server --open-ui</code> for one-time automatic local unlock, or paste the token from the App Server <code>access-token</code> file. The bearer stays only in page memory; while unlocked, this tab keeps one short-lived one-time reload capability and the selected session id in <code>sessionStorage</code> so a normal reload can restore local operator context.</p>
+        <p class="muted small">Use <code>harness-x-app-server --open-ui</code> for one-time automatic local unlock, or paste the token from the App Server <code>access-token</code> file. The bearer stays only in page memory; while unlocked, this tab keeps one short-lived one-time reload capability, one non-authorizing reload-family id, and the selected session id in <code>sessionStorage</code> so a normal reload can restore local operator context.</p>
         <form id="auth-form" class="stack">
           <label for="token">Bearer token</label>
           <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>

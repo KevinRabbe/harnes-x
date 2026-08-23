@@ -22,6 +22,7 @@ def test_reload_auth_client_is_packaged_in_qualified_listener_order() -> None:
     bootstrap = _asset_text("/ui/bootstrap.js")
 
     assert "short-lived one-time reload capability" in html
+    assert "non-authorizing reload-family id" in html
     assert "sessionStorage" in html
     assert '<script src="/ui/reload_auth.js" defer></script>' in html
     assert (
@@ -45,22 +46,34 @@ def test_reload_auth_storage_network_rotation_and_bootstrap_boundaries_are_expli
     javascript = _asset_text("/ui/reload_auth.js")
 
     assert 'const reloadAuthStorageKey = "harness-x.operator.reload-ticket.v1";' in javascript
+    assert 'const reloadAuthFamilyStorageKey = "harness-x.operator.reload-family.v1";' in javascript
     assert 'sessionStorage.getItem(reloadAuthStorageKey)' in javascript
     assert 'sessionStorage.setItem(reloadAuthStorageKey, ticket)' in javascript
     assert 'sessionStorage.removeItem(reloadAuthStorageKey)' in javascript
+    assert 'sessionStorage.getItem(reloadAuthFamilyStorageKey)' in javascript
+    assert 'sessionStorage.setItem(reloadAuthFamilyStorageKey, family)' in javascript
+    assert 'sessionStorage.removeItem(reloadAuthFamilyStorageKey)' in javascript
+    assert "crypto.getRandomValues(bytes)" in javascript
+    assert "btoa(binary)" in javascript
     assert 'window.location.hash.startsWith("#bootstrap=")' in javascript
     assert "if (reloadAuthBootstrapPresentAtLoad) return;" in javascript
-    assert 'fetch("/v1/operator/reload-ticket"' in javascript
+    assert 'fetch("/v1/operator/reload-family-ticket"' in javascript
     assert 'fetch("/v1/operator/reload"' in javascript
     assert 'fetch("/v1/operator/reload-revoke"' in javascript
+    assert 'fetch("/v1/operator/reload-family-revoke"' in javascript
     assert 'Authorization: `Bearer ${token}`' in javascript
-    assert javascript.count('credentials: "omit"') == 3
-    assert javascript.count('cache: "no-store"') == 3
+    assert javascript.count('credentials: "omit"') == 4
+    assert javascript.count('cache: "no-store"') == 4
     assert "const previousTicket = storedReloadCapability();" in javascript
-    assert 'JSON.stringify({ previous_ticket: previousTicket })' in javascript
+    assert 'JSON.stringify({ previous_ticket: previousTicket, family })' in javascript
     assert 'JSON.stringify({ ticket })' in javascript
+    assert 'JSON.stringify({ family })' in javascript
     assert "removeStoredReloadCapability();" in javascript
-    assert javascript.index("removeStoredReloadCapability();", javascript.index("async function restoreOperatorAfterReload")) < javascript.index('fetch("/v1/operator/reload"')
+    assert "removeStoredReloadFamily();" in javascript
+    assert javascript.index(
+        "removeStoredReloadCapability();",
+        javascript.index("async function restoreOperatorAfterReload"),
+    ) < javascript.index('fetch("/v1/operator/reload"')
     assert 'payload.access_token = ""' in javascript
     assert 'authForm.requestSubmit()' in javascript
     assert 'tokenField.value = ""' in javascript
@@ -87,6 +100,7 @@ def test_reload_auth_storage_network_rotation_and_bootstrap_boundaries_are_expli
     assert "sessionStorage.setItem(reloadAuthStorageKey, token)" not in javascript
     assert "sessionStorage.setItem(reloadAuthStorageKey, accessToken)" not in javascript
     assert "sessionStorage.setItem(reloadAuthStorageKey, payload.access_token)" not in javascript
+    assert "sessionStorage.setItem(reloadAuthFamilyStorageKey, token)" not in javascript
 
 
 def test_reload_auth_asset_allowlist_remains_exact() -> None:
@@ -141,6 +155,13 @@ globalThis.sessionStorage = {
   setItem(key, value) { storage.set(key, String(value)); },
   removeItem(key) { storage.delete(key); },
 };
+globalThis.crypto = {
+  getRandomValues(bytes) {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = index;
+    return bytes;
+  },
+};
+globalThis.btoa = (value) => Buffer.from(value, "binary").toString("base64");
 
 const elements = new Map();
 function makeElement(id) {
@@ -175,7 +196,12 @@ globalThis.clearTimeout = (id) => timers.delete(id);
 const calls = [];
 const responses = [];
 globalThis.fetch = async (url, options) => {
-  calls.push({ url, options, stored: storage.get("harness-x.operator.reload-ticket.v1") ?? null });
+  calls.push({
+    url,
+    options,
+    stored: storage.get("harness-x.operator.reload-ticket.v1") ?? null,
+    family: storage.get("harness-x.operator.reload-family.v1") ?? null,
+  });
   if (responses.length === 0) throw new Error("unexpected fetch");
   return responses.shift();
 };
@@ -195,44 +221,58 @@ form.requestSubmit = () => {
 
 (async () => {
   const key = "harness-x.operator.reload-ticket.v1";
+  const familyKey = "harness-x.operator.reload-family.v1";
   const ticketA = "A".repeat(43);
   const ticketB = "B".repeat(43);
   const ticketC = "C".repeat(43);
 
-  responses.push(fakeResponse(200, { schema_version: "app-operator-reload-ticket-v1", ticket: ticketA }));
+  responses.push(fakeResponse(200, { schema_version: "app-operator-reload-family-ticket-v1", ticket: ticketA }));
   token.value = "bearer-main";
   form.handlers.get("submit")({ preventDefault() {} });
   await new Promise(setImmediate);
-  assert(calls.length === 1 && calls[0].url === "/v1/operator/reload-ticket", "manual auth must mint reload ticket");
+  assert(calls.length === 1 && calls[0].url === "/v1/operator/reload-family-ticket", "manual auth must mint family reload ticket");
   assert(calls[0].options.headers.Authorization === "Bearer bearer-main", "issuance must use page-memory bearer");
   assert(calls[0].options.credentials === "omit", "issuance must omit ambient credentials");
-  assert(storage.get(key) === ticketA, "only reload ticket must persist");
+  const family = storage.get(familyKey);
+  assert(typeof family === "string" && /^[A-Za-z0-9_-]{43}$/.test(family), "auth must persist one canonical family id");
+  const firstBody = JSON.parse(calls[0].options.body);
+  assert(firstBody.family === family && firstBody.previous_ticket === null, "issuance must bind ticket to stored family");
+  assert(storage.get(key) === ticketA, "reload ticket must persist");
   assert([...storage.values()].every((value) => value !== "bearer-main"), "bearer must never persist");
   assert([...timers.values()].some((item) => item.delay === 120000), "successful auth must schedule bounded renewal");
 
   storage.set(key, ticketB);
   responses.push(fakeResponse(200, { schema_version: "app-operator-reload-v1", access_token: "bearer-restored" }));
-  responses.push(fakeResponse(200, { schema_version: "app-operator-reload-ticket-v1", ticket: ticketC }));
+  responses.push(fakeResponse(200, { schema_version: "app-operator-reload-family-ticket-v1", ticket: ticketC }));
   token.value = "";
   await restoreOperatorAfterReload();
   assert(calls[1].url === "/v1/operator/reload", "reload path must redeem capability");
   assert(calls[1].stored === null, "capability must be removed before redemption fetch");
+  assert(calls[1].family === family, "ordinary reload must retain family before redemption");
   assert(calls[1].options.credentials === "omit", "redemption must omit ambient credentials");
   await new Promise(setImmediate);
-  assert(calls[2].url === "/v1/operator/reload-ticket", "restored auth must rotate next ticket through existing submit listener");
+  assert(calls[2].url === "/v1/operator/reload-family-ticket", "restored auth must rotate through family issuance");
   assert(calls[2].options.headers.Authorization === "Bearer bearer-restored", "rotation must use recovered bearer only in memory");
+  assert(JSON.parse(calls[2].options.body).family === family, "reload rotation must preserve the family");
   assert(storage.get(key) === ticketC, "rotated capability must replace redeemed capability");
+  assert(storage.get(familyKey) === family, "ordinary reload must preserve family id");
   assert(token.value === "", "temporary DOM bearer field must be cleared");
   assert([...storage.values()].every((value) => !String(value).startsWith("bearer-")), "recovered bearer must never persist");
 
   responses.push(fakeResponse(204, null));
+  responses.push(fakeResponse(204, null));
   lock.handlers.get("click")({ preventDefault() {} });
   assert(!storage.has(key), "lock must synchronously clear reload capability");
+  assert(!storage.has(familyKey), "lock must synchronously clear reload family");
   assert(timers.size === 0, "lock must cancel renewal timer");
-  assert(calls[3].url === "/v1/operator/reload-revoke", "lock must revoke the captured reload capability");
-  assert(calls[3].stored === null, "revocation must start only after local capability removal");
-  assert(calls[3].options.headers.Authorization === "Bearer bearer-restored", "revocation must use page-memory bearer");
-  assert(JSON.parse(calls[3].options.body).ticket === ticketC, "revocation must target the current tab capability");
+  assert(calls[3].url === "/v1/operator/reload-revoke", "lock must retain M50 known-ticket cleanup");
+  assert(calls[3].stored === null && calls[3].family === null, "ticket cleanup must start after local ticket/family removal");
+  assert(calls[3].options.headers.Authorization === "Bearer bearer-restored", "ticket cleanup must use page-memory bearer");
+  assert(JSON.parse(calls[3].options.body).ticket === ticketC, "ticket cleanup must target the current tab capability");
+  assert(calls[4].url === "/v1/operator/reload-family-revoke", "lock must revoke captured family");
+  assert(calls[4].stored === null && calls[4].family === null, "family cleanup must start after local clear");
+  assert(calls[4].options.headers.Authorization === "Bearer bearer-restored", "family cleanup must use page-memory bearer");
+  assert(JSON.parse(calls[4].options.body).family === family, "family cleanup must target captured family");
 
   console.log = process.stdout.write.bind(process.stdout);
   console.log("ok");
