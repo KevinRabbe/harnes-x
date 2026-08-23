@@ -117,9 +117,11 @@
             <p class="eyebrow">Selected session</p>
             <h2 id="session-heading">Session</h2>
             <p id="session-id" class="mono muted"></p>
+            <p id="stream-recovery-status" class="mono muted small" aria-live="polite"></p>
           </div>
           <div class="session-actions">
             <span id="session-status" class="pill pill--muted">unknown</span>
+            <button id="reconnect-streams" type="button" class="secondary hidden" disabled>Reconnect live streams</button>
             <button id="cancel-session" type="button" class="danger" disabled>Request cancel</button>
           </div>
         </section>
@@ -212,6 +214,7 @@
   <script src="/ui/evidence_manifest.js" defer></script>
   <script src="/ui/lifecycle_export.js" defer></script>
   <script src="/ui/app.js" defer></script>
+  <script src="/ui/stream_recovery.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>
 </html>
