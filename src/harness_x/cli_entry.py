@@ -21,9 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify = subparsers.add_parser(
         "verify-evidence",
-        help="Verify an exported terminal manifest and local lifecycle/report/trace evidence offline",
+        help="Verify an exported terminal manifest and local snapshot/lifecycle/report/trace evidence offline",
     )
     verify.add_argument("manifest", type=Path)
+    verify.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
     verify.add_argument(
         "--lifecycle",
         type=Path,
@@ -53,14 +59,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
 
     if args.command == "verify-evidence":
-        from .evidence_verification import (
-            PortableEvidenceVerificationError,
-            verify_portable_evidence,
-        )
+        from .evidence_verification import PortableEvidenceVerificationError
+        from .snapshot_verification import verify_portable_evidence_with_snapshot
 
         try:
-            result = verify_portable_evidence(
+            result = verify_portable_evidence_with_snapshot(
                 args.manifest,
+                snapshot_path=args.snapshot,
                 lifecycle_path=args.lifecycle,
                 report_path=args.report,
                 trace_path=args.trace,
