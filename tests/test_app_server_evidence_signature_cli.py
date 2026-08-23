@@ -41,8 +41,8 @@ class _FakeServer:
         self.evidence_signing_private_key = evidence_signing_private_key
         self.base_url = "http://127.0.0.1:8765"
         self.ui_url = self.base_url + "/ui/"
-        self.token_path = root / "token"
-        self.info_path = root / "server.json"
+        self.token_path = root / "access-token"
+        self.info_path = root / "server-info.json"
         self.httpd = SimpleNamespace(server_close=self._server_close)
         self.server_closed = False
         self.served = False
@@ -93,8 +93,8 @@ def test_unsigned_startup_passes_no_signer_and_preserves_start_json(
         "base_url": "http://127.0.0.1:8765",
         "pid": payload["pid"],
         "schema_version": "app-server-start-v1",
-        "server_info_path": str(root.resolve() / "server.json"),
-        "token_path": str(root.resolve() / "token"),
+        "server_info_path": str(root.resolve() / "server-info.json"),
+        "token_path": str(root.resolve() / "access-token"),
         "ui_open_requested": False,
         "ui_opened": False,
         "ui_url": "http://127.0.0.1:8765/ui/",
