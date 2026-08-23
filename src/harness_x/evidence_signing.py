@@ -84,6 +84,8 @@ class PortableEvidenceVerificationWithSignature:
     key_fingerprint: str | None
 
     def summary(self) -> str:
+        if self.signature_status == "not_supplied":
+            return self.base.summary()
         key = "none" if self.key_fingerprint is None else self.key_fingerprint
         return f"{self.base.summary()} signature={self.signature_status} key={key}"
 
@@ -164,6 +166,7 @@ def _exclusive_write(path: str | Path, payload: bytes, *, mode: int) -> str:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
     created = False
+    failure: EvidenceSigningError | None = None
     try:
         descriptor = os.open(lexical, flags, mode)
         created = True
@@ -176,13 +179,24 @@ def _exclusive_write(path: str | Path, payload: bytes, *, mode: int) -> str:
             os.fsync(handle.fileno())
         if written != len(payload):
             raise EvidenceSigningError(f"short write while creating output: {lexical}")
-    except FileExistsError as exc:
-        raise EvidenceSigningError(f"refusing to overwrite existing output: {lexical}") from exc
+    except FileExistsError:
+        failure = EvidenceSigningError(f"refusing to overwrite existing output: {lexical}")
+    except EvidenceSigningError as exc:
+        failure = exc
     except OSError as exc:
-        raise EvidenceSigningError(f"cannot create output: {lexical}: {exc}") from exc
+        failure = EvidenceSigningError(f"cannot create output: {lexical}: {exc}")
+    except Exception as exc:  # defensive cleanup for unexpected local I/O failures
+        failure = EvidenceSigningError(f"cannot create output: {lexical}: {exc}")
     finally:
         if descriptor is not None:
             os.close(descriptor)
+    if failure is not None:
+        if created:
+            try:
+                os.unlink(lexical)
+            except OSError:
+                pass
+        raise failure
     if not created:
         raise EvidenceSigningError(f"output was not created: {lexical}")
     return str(lexical)
