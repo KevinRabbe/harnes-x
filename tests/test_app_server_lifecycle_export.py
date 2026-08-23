@@ -156,11 +156,18 @@ def test_lifecycle_export_rejects_snapshot_count_and_head_disagreement(tmp_path:
     service = AppServerService(tmp_path / "service")
     try:
         snapshot, events, _ = _terminal_session(service, tmp_path)
-        wrong_count = snapshot.model_copy(update={"event_count": snapshot.event_count + 1})
+
+        wrong_count_raw = snapshot.model_dump(mode="json")
+        wrong_count_raw["event_count"] = snapshot.event_count + 1
+        wrong_count = type(snapshot).model_validate(wrong_count_raw)
+        assert wrong_count.fingerprint != snapshot.fingerprint
         with pytest.raises(LifecycleExportCorruptionError, match="event_count"):
             build_lifecycle_ledger_export(snapshot=wrong_count, events=events)
 
-        wrong_head = snapshot.model_copy(update={"latest_event_hash": "0" * 64})
+        wrong_head_raw = snapshot.model_dump(mode="json")
+        wrong_head_raw["latest_event_hash"] = "0" * 64
+        wrong_head = type(snapshot).model_validate(wrong_head_raw)
+        assert wrong_head.fingerprint != snapshot.fingerprint
         with pytest.raises(LifecycleExportCorruptionError, match="ledger head"):
             build_lifecycle_ledger_export(snapshot=wrong_head, events=events)
     finally:
