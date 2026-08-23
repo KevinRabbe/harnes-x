@@ -8,6 +8,7 @@ import pytest
 
 import harness_x.evidence_signing as signing
 from harness_x.evidence_signing import EvidenceSigningError
+from harness_x.evidence_verification import PortableEvidenceVerificationError
 
 
 def test_cryptography_is_optional_for_base_install_and_present_in_signing_dev_extras() -> None:
@@ -71,3 +72,17 @@ def test_output_parent_symlink_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(EvidenceSigningError, match="output parent"):
         signing._exclusive_write(linked / "out.bin", b"data", mode=0o600)
     assert not (actual / "out.bin").exists()
+
+
+def test_private_key_input_has_independent_small_size_limit(tmp_path: Path) -> None:
+    oversized = tmp_path / "oversized.private.pem"
+    oversized.write_bytes(b"x" * (signing.MAX_EVIDENCE_KEY_BYTES + 1))
+    with pytest.raises(PortableEvidenceVerificationError, match="exceeds 16384 byte limit"):
+        signing._load_private_key(oversized)
+
+
+def test_signature_envelope_has_independent_small_size_limit(tmp_path: Path) -> None:
+    oversized = tmp_path / "oversized.sig.json"
+    oversized.write_bytes(b"x" * (signing.MAX_EVIDENCE_SIGNATURE_BYTES + 1))
+    with pytest.raises(PortableEvidenceVerificationError, match="exceeds 65536 byte limit"):
+        signing._load_signature_envelope(oversized)
