@@ -190,8 +190,12 @@
                 <p class="eyebrow">App Server ledger</p>
                 <h3 id="lifecycle-heading">Lifecycle</h3>
               </div>
-              <span id="lifecycle-state" class="pill pill--muted">Idle</span>
+              <div class="session-actions">
+                <button id="download-evidence-manifest" type="button" class="secondary" disabled>Download evidence manifest</button>
+                <span id="lifecycle-state" class="pill pill--muted">Idle</span>
+              </div>
             </div>
+            <p id="evidence-manifest-status" class="mono muted small" aria-live="polite"></p>
             <div id="lifecycle-events" class="timeline timeline--compact" aria-live="polite"></div>
           </section>
         </div>
@@ -203,6 +207,7 @@
   <script src="/ui/report.js" defer></script>
   <script src="/ui/report_export.js" defer></script>
   <script src="/ui/trace_export.js" defer></script>
+  <script src="/ui/evidence_manifest.js" defer></script>
   <script src="/ui/app.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>
