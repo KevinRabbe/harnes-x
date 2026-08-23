@@ -33,9 +33,9 @@ def _request(workspace: Path) -> CodingSessionRequest:
 
 def _running_session(service: AppServerService, tmp_path: Path):
     workspace = tmp_path / "workspace"
-    workspace.mkdir(exist_ok=True)
+    workspace.mkdir(parents=True, exist_ok=True)
     output = tmp_path / "output"
-    output.mkdir(exist_ok=True)
+    output.mkdir(parents=True, exist_ok=True)
     snapshot = service.store.create_session(_request(workspace), output_root=output)
     return service.store.transition(
         snapshot.session_id,
