@@ -18,6 +18,7 @@ from harness_x.app_server.snapshot_export import (
 )
 
 from .evidence_verification import (
+    MAX_EVIDENCE_MANIFEST_BYTES,
     BoundedEvidenceSource,
     PortableEvidenceVerification,
     PortableEvidenceVerificationError,
@@ -159,17 +160,28 @@ def verify_portable_evidence_with_snapshot(
 ) -> PortableEvidenceVerificationWithSnapshot:
     """Verify M44/M45 evidence plus an optional complete M47 session snapshot."""
 
+    # Keep the M45 verifier unchanged, but independently pin the manifest bytes used by
+    # the M47 correlation step. A combined success is valid only when both reads saw
+    # the same bounded manifest identity, preventing cross-read manifest substitution.
+    manifest_source = _bounded_regular_file(
+        manifest_path,
+        maximum_bytes=MAX_EVIDENCE_MANIFEST_BYTES,
+    )
+    manifest = _load_manifest(manifest_source)
     base = verify_portable_evidence(
         manifest_path,
         lifecycle_path=lifecycle_path,
         report_path=report_path,
         trace_path=trace_path,
     )
-    manifest_source = _bounded_regular_file(
-        manifest_path,
-        maximum_bytes=2 * 1024 * 1024,
-    )
-    manifest = _load_manifest(manifest_source)
+    if (
+        base.manifest_bytes != manifest_source.source_bytes
+        or base.manifest_sha256 != manifest_source.source_sha256
+    ):
+        raise PortableEvidenceVerificationError(
+            "evidence manifest changed between portable verification reads"
+        )
+
     snapshot_status, snapshot_revision = _verify_snapshot(manifest, snapshot_path)
     return PortableEvidenceVerificationWithSnapshot(
         base=base,
