@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import harness_x.app_server.signed_evidence_operator_http_server as signed_server
 from harness_x.app_server.service import AppServerService
 from harness_x.evidence_signing import EvidenceSigningError, MAX_EVIDENCE_KEY_BYTES
+from harness_x.evidence_verification import PortableEvidenceVerificationError
 
 
 def _construct_with_key(service: AppServerService, root: Path, key: Path):
@@ -78,7 +79,7 @@ def test_oversized_private_key_fails_before_transport_construction(tmp_path: Pat
     oversized.write_bytes(b"x" * (MAX_EVIDENCE_KEY_BYTES + 1))
     service = AppServerService(tmp_path / "service")
     try:
-        with pytest.raises(EvidenceSigningError, match="exceeds maximum size"):
+        with pytest.raises(PortableEvidenceVerificationError, match="exceeds maximum size"):
             _construct_with_key(service, tmp_path / "transport", oversized)
         assert not (tmp_path / "transport").exists()
     finally:
@@ -94,7 +95,7 @@ def test_symlink_private_key_is_rejected_before_transport_construction(tmp_path:
     linked.symlink_to(actual)
     service = AppServerService(tmp_path / "service")
     try:
-        with pytest.raises(EvidenceSigningError, match="symbolic link"):
+        with pytest.raises(PortableEvidenceVerificationError, match="symbolic link"):
             _construct_with_key(service, tmp_path / "transport", linked)
         assert not (tmp_path / "transport").exists()
     finally:
