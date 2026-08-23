@@ -47,6 +47,17 @@ def test_augmented_help_exposes_verify_evidence_without_removing_legacy_commands
     assert "benchmark-dynamic-compute" in output
 
 
+def test_verify_evidence_subcommand_help_exposes_optional_lifecycle_input(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli_entry.main(["verify-evidence", "--help"])
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--lifecycle" in output
+    assert "session-lifecycle-ledger.json" in output
+    assert "--report" in output
+    assert "--trace" in output
+
+
 def test_verify_evidence_cli_prints_deterministic_valid_summary(tmp_path: Path, capsys) -> None:
     manifest_path = tmp_path / "manifest.json"
     manifest = _manifest(manifest_path)
@@ -56,6 +67,8 @@ def test_verify_evidence_cli_prints_deterministic_valid_summary(tmp_path: Path, 
     assert output.startswith(f"valid: session={manifest.session_id} ")
     assert "manifest_bytes=" in output
     assert "manifest_sha256=" in output
+    assert "lifecycle=not_supplied" in output
+    assert "lifecycle_events=none" in output
     assert "report=not_available" in output
     assert "trace=not_available" in output
     assert "trace_records=none" in output
