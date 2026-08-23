@@ -79,7 +79,7 @@ def test_oversized_private_key_fails_before_transport_construction(tmp_path: Pat
     oversized.write_bytes(b"x" * (MAX_EVIDENCE_KEY_BYTES + 1))
     service = AppServerService(tmp_path / "service")
     try:
-        with pytest.raises(PortableEvidenceVerificationError, match="exceeds maximum size"):
+        with pytest.raises(PortableEvidenceVerificationError, match="exceeds 16384 byte limit"):
             _construct_with_key(service, tmp_path / "transport", oversized)
         assert not (tmp_path / "transport").exists()
     finally:
