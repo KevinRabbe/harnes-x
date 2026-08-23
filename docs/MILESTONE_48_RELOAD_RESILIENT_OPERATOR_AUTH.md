@@ -1,181 +1,374 @@
 # Milestone 48 — Reload-Resilient Operator Reauthentication
 
-M48 is stacked directly on frozen M47 and closes one explicit operator-availability limitation left by M40/M46: the operator bearer is intentionally kept only in page memory, so a full browser reload loses authentication and requires a fresh manual token paste or a new `--open-ui` launch.
+M48 is stacked directly on frozen M47 and closes one explicit operator-availability limitation left by M40/M46: the operator bearer is intentionally kept only in page memory, so a full browser reload loses authentication and otherwise requires a fresh manual token paste or a new `--open-ui` launch.
 
-M48 adds bounded same-tab reload reauthentication without persisting the long-lived App Server bearer. It introduces one short-lived single-use **reload capability** kept only in tab-scoped `sessionStorage`. The capability is not accepted by normal App Server APIs; it can only be redeemed through one loopback same-origin operator endpoint to recover the existing bearer, after which the bearer again flows through the already-qualified auth form listeners and remains page-memory only.
+M48 adds bounded reload reauthentication **without persisting the long-lived App Server bearer**. It introduces one short-lived, single-use opaque reload capability stored only in tab-scoped `sessionStorage`. That capability is accepted only by one exact same-origin redemption endpoint to recover the existing bearer. The recovered bearer is then fed through the already-qualified auth-form listener chain and returns to page-memory-only handling.
 
-This milestone deliberately changes one M40 non-goal: `sessionStorage` may now contain the opaque reload capability. It still must never contain the persistent bearer, report/trace/evidence bytes, or task/runtime state. The security expansion is explicit and bounded rather than being described as equivalent to M40 page-memory-only authentication.
+This milestone deliberately changes one M40 non-goal: `sessionStorage` may now contain the opaque reload capability. It still must never contain the persistent bearer, report/trace/evidence bytes, or task/runtime state. M48 therefore expands the browser-side threat surface relative to M40, and that expansion is explicit rather than being described as equivalent to pure page-memory authentication.
 
-## Scope
+## Frozen-parent boundary
 
-M48 adds two operator endpoints layered over the frozen M47 operator server:
+M48 is based exactly on frozen M47:
+
+```text
+f5aace96c883bcb2bd9c88a9b9ed758adba57402
+```
+
+The M47 branch/PR is not modified or merged. M48 layers a new operator-server subclass over the frozen M47 server and leaves inherited M47 snapshot export, M45 lifecycle export, M43 evidence manifest, M42 trace export, M41 report export, M40 bootstrap, and M46 stream-recovery implementations unchanged.
+
+## New operator endpoints
+
+M48 adds exactly two POST endpoints:
 
 ```text
 POST /v1/operator/reload-ticket
 POST /v1/operator/reload
 ```
 
-`/v1/operator/reload-ticket` requires the existing bearer and same-origin browser `Origin`. It issues a new reload capability and may replace the previously stored capability supplied by the same tab.
+No caller-selected path, session, role, credential scope, TTL, storage key, or serialization option is accepted.
 
-`/v1/operator/reload` does not require the bearer because its only purpose is to redeem one reload capability. It still requires literal-loopback Host validation, an exact same-origin `Origin`, no query parameters, a bounded exact JSON request shape, and a valid unexpired one-time capability.
+### `POST /v1/operator/reload-ticket`
 
-Successful redemption returns the existing persistent bearer once in a `Cache-Control: no-store` response. The bearer is never placed in `sessionStorage`, a URL, cookie, localStorage, server-info metadata, lifecycle state, or logs.
+Purpose: mint/rotate the short-lived reload capability while the current page already possesses the normal App Server bearer.
 
-## Reload capability contract
+Requirements:
 
-A reload capability:
+- inherited literal-loopback Host validation;
+- no query parameters;
+- exact same-origin browser `Origin` matching Host;
+- the existing persistent bearer in `Authorization: Bearer ...`;
+- inherited bounded JSON body parsing;
+- exact JSON object shape:
 
-- contains at least 256 bits of cryptographic randomness;
-- is accepted only by `/v1/operator/reload`;
-- is single-use;
-- has a fixed maximum lifetime of five minutes;
-- is stored server-side only as SHA-256 digest plus expiration metadata;
-- is never written to disk, lifecycle/session state, server-info, logs, or URLs;
-- is stored browser-side only under one exact tab-scoped `sessionStorage` key;
-- is removed from `sessionStorage` **before** redemption is attempted;
-- becomes useless after server restart because the server-side digest set is process-memory only;
-- cannot authorize ordinary `/v1/sessions...` routes directly.
+```json
+{"previous_ticket": null}
+```
 
-The server keeps only a small bounded set of outstanding reload-capability digests so multiple operator tabs do not invalidate one another. Expired entries are pruned. Issuance with a previous capability removes that matching previous digest when present before issuing the replacement, keeping normal renewal bounded without requiring a persistent tab identifier.
+or
 
-Malformed/unknown/expired/used capabilities fail with the same generic rejection and do not expose whether a particular digest ever existed.
+```json
+{"previous_ticket": "<opaque prior capability>"}
+```
 
-## Active-tab renewal
+Unexpected/missing fields or non-string/non-null `previous_ticket` fail before issuance.
 
-A capability valid for only five minutes would not provide useful reload behavior if it were issued once and allowed to expire while the operator remained active. The M48 browser client therefore renews the capability periodically while the view remains unlocked, using the existing page-memory bearer.
+Successful response:
 
-Renewal:
+```json
+{
+  "schema_version": "app-operator-reload-ticket-v1",
+  "ticket": "<opaque capability>"
+}
+```
 
-- occurs on a bounded interval shorter than the server capability lifetime;
-- sends the currently stored previous capability, if any, only to the authenticated same-origin issuance endpoint so the server can replace it;
-- stores only the newly returned reload capability;
-- stops when the operator locks;
-- clears local capability state on authenticated issuance failure;
-- never copies the bearer into persistent browser storage.
+The inherited JSON transport applies `Cache-Control: no-store` and exact content length. The response never includes the persistent bearer.
 
-Background-tab throttling or long suspension can still allow the capability to expire. In that case reload recovery fails closed and the existing manual bearer unlock / explicit `--open-ui` flow remains available. M48 therefore provides bounded active-tab reload resilience, not an indefinite browser login session.
+A pathological failure to generate a unique capability after the bounded retry count returns structured `503 reload_unavailable` rather than exposing an unhandled server exception.
 
-## Browser reload flow
+### `POST /v1/operator/reload`
 
-A new exact-allowlisted client is loaded before `app.js` so it can capture the submitted token before the existing main listener synchronously clears the password field, while still deferring reload redemption until all qualified auth listeners have registered.
+Purpose: redeem one unexpired single-use reload capability after a normal browser reload.
 
-On normal manual or M40-bootstrap authentication:
+Requirements:
 
-1. existing report/export/snapshot listeners retain their page-memory copies as before;
-2. the M48 listener captures the submitted bearer only for the authenticated reload-ticket issuance request;
-3. `app.js` captures the bearer and clears the password field as before;
-4. M48 stores only the returned opaque reload capability in `sessionStorage`;
-5. periodic capability renewal may continue while unlocked.
+- inherited literal-loopback Host validation;
+- no query parameters;
+- exact same-origin browser `Origin` matching Host;
+- inherited bounded JSON body parsing;
+- exact JSON object shape:
 
-On full page reload:
+```json
+{"ticket": "<opaque capability>"}
+```
 
-1. M48 reads the exact reload-capability key from `sessionStorage`;
-2. it removes the key immediately before any network request;
-3. it rejects malformed local values without network redemption;
-4. after all deferred UI scripts have registered their existing auth listeners, it POSTs the capability to `/v1/operator/reload` with `credentials: "omit"`;
-5. successful redemption returns the existing bearer in a no-store response;
-6. M48 places that bearer into the existing password input only long enough to synchronously call `requestSubmit()`;
-7. all existing qualified listeners capture it in their normal order and `app.js` clears the field;
-8. the M48 submit listener mints a fresh one-time reload capability for the next reload;
-9. response/local temporary bearer references and the DOM field are cleared as far as JavaScript permits.
+No bearer/cookie/ambient credential is used for redemption.
 
-If an M40 `#bootstrap=...` fragment is present, the explicit bootstrap flow remains authoritative. M48 must not race a stored reload capability against a fresh bootstrap launch.
+A successful redemption consumes the capability and returns:
 
-## Same-origin and request-shape boundary
+```json
+{
+  "schema_version": "app-operator-reload-v1",
+  "access_token": "<existing App Server bearer>"
+}
+```
 
-Both M48 endpoints are loopback-only inherited operator routes and require exact same-origin `Origin` matching the current Host.
+The response is `Cache-Control: no-store`. The bearer is returned only because a valid same-origin one-time reload capability was redeemed; the capability itself is never accepted as the bearer for ordinary App Server APIs.
 
-Issuance additionally requires the existing bearer. Redemption accepts no cookies or ambient browser credentials.
+Unknown, malformed-text, expired, or already-used capabilities all collapse to the same generic:
 
-Both endpoints reject:
+```text
+401 reload_rejected
+```
 
-- query parameters;
-- missing or cross-origin Origin;
-- malformed/non-object JSON;
-- unexpected fields;
-- oversized bodies;
-- invalid Host.
+Request-shape, Host, Origin, or query rejection occurs before capability consumption.
 
-Rejected request-shape/origin attempts must not consume a valid reload capability.
+## Reload capability store
 
-## Storage boundary
+`ReloadCapabilities` is process-memory-only and stores no raw capability after issuance.
 
-M48 intentionally permits exactly one new browser-persistent secret: the opaque reload capability in tab-scoped `sessionStorage`.
+Frozen constants:
+
+```text
+random input bytes:       32 bytes (>=256 bits)
+default/max TTL:          300 seconds
+browser renewal interval: 120 seconds
+network retry interval:   30 seconds
+default outstanding cap:  32 digests
+constructor hard cap:     64 digests
+unique-generation tries:  8
+```
+
+Each capability is generated with `secrets.token_urlsafe(32)` and represented server-side only by:
+
+```text
+SHA-256(capability ASCII bytes) + monotonic expiration
+```
+
+The raw capability is not written to disk, session/lifecycle state, server-info metadata, URLs, or logs by M48.
+
+Properties:
+
+- one-time redemption;
+- exact expiry at/after the monotonic deadline;
+- expiry pruning before issuance/redemption/count inspection;
+- bounded outstanding digest count;
+- multiple independent tickets can coexist for ordinary multi-tab use;
+- server restart drops the complete reload-capability set while the existing durable bearer remains unchanged;
+- invalid `previous_ticket` input cannot block an otherwise authenticated issuance;
+- a supplied valid prior ticket is retired only when a unique replacement has successfully been generated;
+- if unique generation fails, the old still-unexpired prior ticket remains valid;
+- generated digest collisions with the supplied prior ticket or any outstanding ticket are rejected and regenerated;
+- capacity overflow evicts the earliest-expiring outstanding digest, preserving a hard server-memory bound.
+
+The collision rules are intentionally explicit even though a 256-bit random collision is extraordinarily unlikely. Without them, duplicate digest entries could make the same raw capability redeemable more than once in the collision case.
+
+## Browser storage boundary
+
+The exact persistent browser key introduced by M48 is:
+
+```text
+harness-x.operator.reload-ticket.v1
+```
+
+Only the reload capability may be stored under that key in `sessionStorage`.
 
 The following remain forbidden:
 
-- persistent bearer in `sessionStorage`, localStorage, IndexedDB, Cache Storage, cookies, URL, fragment, or query;
-- reload capability in localStorage, cookies, IndexedDB, Cache Storage, URL, fragment, or query;
-- report/trace/manifest/lifecycle/snapshot evidence in browser persistent storage;
-- a refresh token or second long-lived bearer;
-- server-side durable browser-login state.
+- persistent bearer in `sessionStorage`;
+- bearer in `localStorage`, IndexedDB, Cache Storage, cookie, URL, fragment, or query;
+- reload capability in `localStorage`, IndexedDB, Cache Storage, cookie, URL, fragment, or query;
+- evidence/report/trace/lifecycle/snapshot bytes in browser persistent storage;
+- a second long-lived bearer or durable refresh credential;
+- durable server-side browser-login state.
 
-Locking the operator clears the tab-scoped capability synchronously and stops renewal. An already issued server-side digest may remain until its short expiration if the page cannot explicitly revoke it; that residual lifetime is part of the bounded capability model and must be documented/tested rather than hidden.
+M48 does not add Service Workers or SharedWorkers.
 
-## Multi-tab boundary
+### `sessionStorage` duplication nuance
 
-M48 must not make one tab's ordinary renewal invalidate every other tab. The reload-capability store therefore supports a small bounded set of independent outstanding digests rather than the M40 bootstrap store's single replacement-invalidating slot.
+Browsers generally scope `sessionStorage` to a top-level browsing context, but a newly duplicated/opened tab may initially receive a copy of the opener's `sessionStorage` depending on browser behavior. M48 therefore does **not** claim that a reload capability can never be copied client-side.
 
-No user identity, tab identity, session cookie, or authorization role is introduced. This remains a single-user loopback operator surface.
+The server-side capability remains single-use. If two tab contexts temporarily hold the same copied capability, only the first successful redemption can recover the bearer; the other copy becomes rejected. Once each authenticated tab performs normal capability issuance/renewal, independent outstanding digests can coexist.
+
+## Manual/bootstrap authentication flow
+
+M48 loads `/ui/reload_auth.js` before `app.js` so its auth-submit listener sees the token before the existing main listener synchronously clears the password field.
+
+Final qualified listener/script ordering is intended to remain:
+
+```text
+stream_policy.js
+report.js
+report_export.js
+trace_export.js
+evidence_manifest.js
+lifecycle_export.js
+snapshot_export.js
+reload_auth.js
+app.js
+stream_recovery.js
+bootstrap.js
+```
+
+Therefore every pre-M48 report/evidence/snapshot client still captures the same bearer before `app.js` clears the field.
+
+On a manual or M40-bootstrap submit:
+
+1. existing listeners capture their page-memory bearer copies as before;
+2. M48 increments its auth generation and copies the bearer into M48 page memory;
+3. M48 starts authenticated same-origin reload-ticket issuance;
+4. `app.js` captures the bearer and clears the password field as before;
+5. successful issuance stores only the opaque reload capability;
+6. M48 schedules renewal while the tab stays unlocked.
+
+An invalid submitted bearer cannot mint a reload capability because `/reload-ticket` independently requires the real persistent bearer.
+
+## Normal reload recovery
+
+At script evaluation M48 records whether the page initially contained an M40 `#bootstrap=...` fragment. This is captured **before** `bootstrap.js` later scrubs the fragment, so an explicit fresh `--open-ui` bootstrap cannot race stored reload recovery.
+
+On an ordinary reload with no fresh bootstrap fragment:
+
+1. read the exact `sessionStorage` reload-capability key;
+2. locally reject/remove malformed values;
+3. remove the valid capability from `sessionStorage` **before** the redemption request;
+4. wait until `DOMContentLoaded`, ensuring all deferred auth listeners are registered;
+5. POST the ticket to `/v1/operator/reload` with `credentials: "omit"` and `cache: "no-store"`;
+6. validate `app-operator-reload-v1` and a non-empty returned bearer;
+7. generation-check the response so a newer manual auth attempt wins over stale reload completion;
+8. put the bearer into the existing password field only long enough to synchronously call `authForm.requestSubmit()`;
+9. the normal qualified listeners capture it and `app.js` clears the password field;
+10. M48's own submit listener mints the next reload capability;
+11. temporary response/DOM bearer references are cleared as far as JavaScript permits.
+
+There is no infinite reload retry loop. A failed/expired redemption leaves the existing manual token form available.
+
+## Active capability renewal
+
+A 300-second ticket issued only once would expire during a long-running operator tab, so M48 rotates it every 120 seconds while its page-memory bearer remains present.
+
+Renewal sends the currently stored old ticket, if any, only to the bearer-authenticated `/reload-ticket` endpoint. Server-side replacement is atomic as described above.
+
+Browser failure behavior is deliberately split:
+
+- network/transport failure retains the currently stored ticket and schedules another issuance attempt after 30 seconds;
+- an HTTP/schema/invalid-ticket issuance response clears the stored ticket and stops renewal;
+- issuance `401` also clears M48's page-memory bearer;
+- inability to write `sessionStorage` clears local capability state and stops renewal.
+
+This avoids destroying a still-valid ticket merely because one network request failed while still failing closed on an explicit server rejection.
+
+Background-tab throttling or prolonged suspension can still allow the 300-second capability to expire before renewal. M48 provides bounded active-tab reload resilience, not an indefinite login session.
+
+## Lock behavior
+
+The M48 lock listener runs through the existing `lock-button` action and synchronously:
+
+- increments auth/mint generations;
+- clears M48's page-memory bearer reference;
+- cancels its renewal timer;
+- removes the `sessionStorage` capability.
+
+M48 intentionally does not add a separate revocation endpoint. An issuance request already in flight when lock occurs can leave an unreachable server-side digest until its short expiry; generation guards prevent the response from restoring it locally. That residual maximum lifetime is part of the explicit bounded-threat model.
+
+## Browser security behavior
+
+`reload_auth.js` uses:
+
+- exact same-origin relative endpoints;
+- `credentials: "omit"` for issuance and redemption;
+- `cache: "no-store"`;
+- exact ticket shape validation (`43` URL-safe characters for the 32-byte token-url-safe representation);
+- auth/mint generation counters for stale-result suppression;
+- one bounded renewal timer;
+- `textContent` for reload failure display;
+- no `localStorage`, cookies, IndexedDB, Cache Storage, Service Worker, SharedWorker, query parameter, or URL credential surface.
+
+The existing M40 bootstrap fragment remains the explicit-launch precedence path.
+
+## Same-origin / request-shape boundary
+
+Both endpoints inherit literal-loopback Host enforcement and require exact HTTP same-origin `Origin` matching the request Host.
+
+Both reject query parameters and bodies larger than the inherited App Server JSON limit. Exact field sets are required after parsing.
+
+Tests prove that missing/cross-origin Origin, query rejection, extra fields, and oversized bodies cannot consume an already valid reload capability.
 
 ## Authority boundary
 
-M48 changes only local operator credential continuity across a browser reload. It cannot:
+M48 changes only local operator credential continuity across browser reload.
 
-- bypass the persistent bearer requirement on normal stateful APIs;
+It does **not**:
+
+- bypass the persistent bearer requirement on ordinary stateful APIs;
+- make reload capabilities valid normal API bearer tokens;
 - create/cancel/retry/resume Harness X tasks;
-- change App Server lifecycle/session authority;
+- change App Server session/lifecycle store or service authority;
 - change report/trace/evidence provenance;
+- alter M46 stream cursor/recovery policy;
 - execute models or tools;
-- change verifier/completion decisions;
+- change runtime/verifier completion decisions;
 - mutate memory, budgets, controller, or control policy;
 - grant remote network access;
-- create multi-user identity or authorization.
+- introduce user identities, roles, sessions, or authorization policy.
 
-The App Server bearer remains the sole credential for normal operator APIs. The reload capability is a short-lived one-time bridge back to that credential through an exact same-origin endpoint.
+The persistent App Server bearer remains the sole credential for ordinary operator APIs. The reload capability is only a bounded one-time bridge to recover that bearer at one exact same-origin endpoint.
 
 ## Security limitation
 
-M48 expands the browser-side threat surface compared with M40 because a secret capable of recovering the bearer now survives page reload in `sessionStorage` for a bounded period. A same-origin script compromise or local process able to read that tab's browser storage during the validity window may steal the reload capability. This is not claimed to be equivalent to pure page-memory bearer handling.
+M48 has a strictly larger browser-side secret lifetime than M40. A same-origin script compromise or local actor able to read the tab's `sessionStorage` during the validity window can steal a reload capability and race to redeem it for the bearer. The same-origin requirement does not protect against a same-origin script compromise.
 
-The mitigating boundaries are: tab-scoped storage, five-minute maximum lifetime, active rotation, single use, digest-only server memory, server-restart invalidation, exact same-origin redemption, no ambient cookies, and manual fallback after expiration.
+Mitigations are bounded, not absolute:
 
-## Non-goals / limitations
+- 300-second maximum lifetime;
+- 120-second active rotation;
+- one-time server redemption;
+- digest-only process memory;
+- collision/duplicate rejection;
+- atomic replacement;
+- server-restart invalidation;
+- exact same-origin endpoint;
+- no ambient cookies;
+- remove-before-redeem client behavior;
+- manual fallback after failure/expiry.
 
-M48 does not add cookies, OAuth, remote login, TLS/remote bind, indefinite login sessions, Service Workers, SharedWorkers, localStorage credentials, desktop-shell secrets, OS keychain integration, selected-session persistence, stream cursor persistence, background polling, generic deep links, or multi-user identity.
+M48 is therefore a usability/security tradeoff and must not be described as preserving M40's exact page-memory-only browser threat surface.
 
-M48 restores authentication after a normal same-tab reload when a valid capability is present. It does not promise recovery after browser/process restart, server restart, capability expiry, storage clearing, private-mode policy restrictions, or prolonged background suspension.
+## Non-goals / remaining limitations
 
-Selected session and live-stream cursors remain page-memory state and may need to be reselected/rebuilt after reload; M48 concerns credential continuity only.
+M48 does not add cookies, OAuth, remote login, TLS/remote bind, indefinite login sessions, Service Workers, SharedWorkers, localStorage credentials, OS keychain integration, desktop-shell secret storage, selected-session persistence, stream cursor persistence, running-session state restoration, generic deep links, or multi-user identity.
+
+M48 does not promise automatic recovery after:
+
+- browser/process restart;
+- App Server restart;
+- capability expiry;
+- storage clearing/restriction;
+- prolonged background throttling;
+- copied-tab one-time capability losing a redemption race.
+
+Selected session and live-stream cursors remain page-memory state and may need to be reselected/rebuilt after a full reload. M48 concerns credential continuity only.
+
+## Source-audit findings kept fail-visible
+
+Two security hardenings were added after the first integrated candidate:
+
+1. **Capability digest collision:** the initial bounded store allowed duplicate generated digests. Although a 256-bit collision is extraordinarily unlikely, duplicate entries could make one raw ticket redeemable twice. M48 now regenerates on collision with any outstanding or prior digest and fails closed after a bounded number of attempts.
+2. **Non-atomic rotation failure:** the first collision fix retired `previous_ticket` before successfully generating its replacement. A pathological RNG failure could therefore destroy an otherwise usable prior capability. Rotation now generates/validates the replacement first, then retires the old digest atomically. Regression coverage proves failed rotation preserves the prior ticket.
+
+These are source-audit findings, not hidden behind green CI.
 
 ## Deterministic acceptance
 
 Before freeze, M48 must prove:
 
-- exact frozen M47 base;
-- this scope document is the first M48 commit;
-- M47 branch/PR remains unchanged and unmerged;
-- reload capabilities contain >=256 bits entropy, are digest-only server memory, max five-minute TTL, single-use, bounded-count, expiry-pruned, and server-restart-ephemeral;
-- multiple outstanding capabilities can coexist without ordinary cross-tab invalidation;
-- authenticated renewal can replace a supplied prior capability;
-- invalid prior replacement input cannot prevent an authenticated caller from receiving a new capability;
-- `/v1/operator/reload-ticket` requires bearer + same-origin Origin and rejects query/malformed/extra/oversized requests;
-- `/v1/operator/reload` requires same-origin Origin and rejects query/malformed/extra/oversized requests;
-- rejected Host/origin/request-shape attempts do not consume valid capability;
-- expired/used/unknown/malformed capability failures are generic;
-- normal App Server routes still reject reload capabilities used as bearer tokens;
-- successful redemption returns only the existing bearer and consumes the capability;
-- browser stores only reload capability under one exact `sessionStorage` key and never stores bearer;
-- browser removes capability before redemption;
-- reload redemption waits until existing auth listeners are registered, then reuses `requestSubmit()`;
-- M40 bootstrap fragment takes precedence over reload recovery;
-- successful manual/bootstrap/reload auth mints/rotates the next reload capability;
-- renewal is bounded and stops on lock;
-- lock clears local reload capability synchronously;
-- reload failure/expiry leaves manual unlock available and does not loop infinitely;
-- no localStorage/cookie/IndexedDB/Cache Storage/URL credential surface is introduced;
-- existing report/trace/manifest/lifecycle/snapshot clients still capture bearer before `app.js` clears the field;
-- M46 stream recovery behavior remains unchanged;
+- exact frozen M47 base and first-commit scope document;
+- M47 remains unchanged/unmerged;
+- >=256-bit cryptographic capability generation;
+- digest-only server memory, 300-second max TTL, expiry pruning, single-use redemption, bounded outstanding count, and server-restart invalidation;
+- generated/prior/outstanding digest collision rejection with bounded retries;
+- failed atomic rotation preserves the still-valid prior ticket;
+- independent multiple outstanding tickets and bounded-capacity behavior;
+- authenticated prior-ticket replacement and invalid-prior tolerance;
+- bearer + same-origin requirement for `/reload-ticket`;
+- same-origin requirement for `/reload`;
+- exact JSON shapes, no query parameters, inherited bounded bodies;
+- rejected Origin/query/shape/oversized requests do not consume a valid ticket;
+- malformed-text/unknown/expired/used tickets share generic `reload_rejected`;
+- pathological capability-generation failure returns structured `reload_unavailable`;
+- reload ticket cannot authorize normal App Server routes;
+- redemption returns the existing bearer once and consumes the ticket;
+- browser persists only one exact reload capability key and never persists the bearer;
+- remove-before-redeem ordering;
+- bootstrap-fragment precedence captured before M40 fragment scrubbing;
+- `DOMContentLoaded` restoration after listener registration;
+- auth-generation suppression of stale reload completion;
+- `requestSubmit()` reuse of the qualified auth chain;
+- successful manual/bootstrap/reload auth rotates the next capability;
+- 120-second renewal and 30-second network retry behavior;
+- lock clears local capability and timer synchronously;
+- no localStorage/cookie/IndexedDB/Cache Storage/Service Worker/SharedWorker/URL credential surface;
+- existing report/trace/manifest/lifecycle/snapshot auth listener ordering preserved;
+- M46 stream recovery remains unchanged;
 - no App Server store/service/protocol/runtime/task/verifier/model/tool/memory/budget/controller/control authority changes;
-- exact M47→M48 diff is confined to reload-auth transport/client/ticket store/routing/tests/docs;
-- exact-head Linux CI passes including installed `harness-x --help` and `validate-config`.
+- exact M47→M48 diff confined to reload-auth transport/store/client/routing/tests/docs;
+- exact-head Linux CI passes with installed `harness-x --help` and `validate-config`.
