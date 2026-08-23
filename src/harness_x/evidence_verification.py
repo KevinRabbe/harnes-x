@@ -68,7 +68,7 @@ def _bounded_regular_file(path: str | Path, *, maximum_bytes: int) -> BoundedEvi
         raise ValueError("maximum_bytes must be positive")
 
     supplied = Path(path).expanduser()
-    lexical = supplied.absolute()
+    lexical = Path(os.path.abspath(os.fspath(supplied)))
     try:
         final_metadata = os.lstat(lexical)
     except OSError as exc:
