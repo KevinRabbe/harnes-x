@@ -16,7 +16,6 @@ from .lifecycle_export import (
     build_lifecycle_ledger_export,
     render_lifecycle_ledger_export,
 )
-from .operator_http_server import LocalOperatorHTTPServer
 from .protocol import (
     AppEvent,
     AppEventKind,
@@ -33,6 +32,16 @@ from .report_projection import (
     build_coding_report_projection,
 )
 from .service import AppServerService, HarnessCodingRunner
+from .snapshot_export import (
+    MAX_SESSION_SNAPSHOT_EXPORT_BYTES,
+    PortableSessionSnapshot,
+    RenderedSessionSnapshot,
+    SnapshotExportCorruptionError,
+    SnapshotExportNotTerminalError,
+    SnapshotExportTooLargeError,
+    render_terminal_session_snapshot,
+)
+from .snapshot_operator_http_server import LocalOperatorHTTPServer
 from .store import AppSessionStore
 from .trace_projection import (
     TraceProjectionEvent,
@@ -61,8 +70,14 @@ __all__ = [
     "LifecycleLedgerExport",
     "LocalAppHTTPServer",
     "LocalOperatorHTTPServer",
+    "MAX_SESSION_SNAPSHOT_EXPORT_BYTES",
+    "PortableSessionSnapshot",
+    "RenderedSessionSnapshot",
     "ReportCorruptionError",
     "ReportUnavailableError",
+    "SnapshotExportCorruptionError",
+    "SnapshotExportNotTerminalError",
+    "SnapshotExportTooLargeError",
     "TerminalEvidenceManifest",
     "TraceProjectionEvent",
     "TraceProjectionPage",
@@ -73,4 +88,5 @@ __all__ = [
     "load_verified_trace_records",
     "render_lifecycle_ledger_export",
     "render_terminal_evidence_manifest",
+    "render_terminal_session_snapshot",
 ]
