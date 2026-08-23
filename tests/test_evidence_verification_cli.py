@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,6 +83,24 @@ def test_pre_m44_commands_delegate_to_legacy_dispatcher_unchanged(monkeypatch) -
     monkeypatch.setattr(cli_entry.legacy_cli, "main", fake_main)
     assert cli_entry.main(["verify-trace", "trace.jsonl"]) == 17
     assert calls == [["verify-trace", "trace.jsonl"]]
+
+
+def test_cli_wrapper_does_not_eagerly_import_evidence_verifier_for_legacy_surface() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import harness_x.cli_entry; "
+                "assert 'harness_x.evidence_verification' not in sys.modules"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_verifier_source_has_no_network_client_surface() -> None:
