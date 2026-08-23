@@ -26,11 +26,17 @@ def test_reload_capability_generation_retries_outstanding_and_previous_collision
     assert tickets.redeem(replacement)
 
 
-def test_reload_capability_generation_fails_closed_if_rng_never_produces_unique_value(
+def test_failed_rotation_preserves_the_still_valid_previous_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(reload_auth.secrets, "token_urlsafe", lambda _size: "A" * 43)
+    values = iter(["A" * 43] + ["A" * 43] * 8)
+    monkeypatch.setattr(reload_auth.secrets, "token_urlsafe", lambda _size: next(values))
     tickets = ReloadCapabilities(max_outstanding=2)
-    assert tickets.issue() == "A" * 43
+    previous = tickets.issue()
+    assert previous == "A" * 43
+
     with pytest.raises(RuntimeError, match="unique reload capability"):
-        tickets.issue()
+        tickets.issue(previous_ticket=previous)
+
+    assert tickets.redeem(previous)
+    assert not tickets.redeem(previous)
