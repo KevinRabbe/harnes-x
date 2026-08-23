@@ -52,9 +52,10 @@ def test_reload_auth_storage_network_rotation_and_bootstrap_boundaries_are_expli
     assert "if (reloadAuthBootstrapPresentAtLoad) return;" in javascript
     assert 'fetch("/v1/operator/reload-ticket"' in javascript
     assert 'fetch("/v1/operator/reload"' in javascript
+    assert 'fetch("/v1/operator/reload-revoke"' in javascript
     assert 'Authorization: `Bearer ${token}`' in javascript
-    assert javascript.count('credentials: "omit"') == 2
-    assert javascript.count('cache: "no-store"') == 2
+    assert javascript.count('credentials: "omit"') == 3
+    assert javascript.count('cache: "no-store"') == 3
     assert "const previousTicket = storedReloadCapability();" in javascript
     assert 'JSON.stringify({ previous_ticket: previousTicket })' in javascript
     assert 'JSON.stringify({ ticket })' in javascript
@@ -224,9 +225,14 @@ form.requestSubmit = () => {
   assert(token.value === "", "temporary DOM bearer field must be cleared");
   assert([...storage.values()].every((value) => !String(value).startsWith("bearer-")), "recovered bearer must never persist");
 
+  responses.push(fakeResponse(204, null));
   lock.handlers.get("click")({ preventDefault() {} });
   assert(!storage.has(key), "lock must synchronously clear reload capability");
   assert(timers.size === 0, "lock must cancel renewal timer");
+  assert(calls[3].url === "/v1/operator/reload-revoke", "lock must revoke the captured reload capability");
+  assert(calls[3].stored === null, "revocation must start only after local capability removal");
+  assert(calls[3].options.headers.Authorization === "Bearer bearer-restored", "revocation must use page-memory bearer");
+  assert(JSON.parse(calls[3].options.body).ticket === ticketC, "revocation must target the current tab capability");
 
   console.log = process.stdout.write.bind(process.stdout);
   console.log("ok");

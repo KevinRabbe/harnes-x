@@ -25,13 +25,13 @@ from .protocol import (
     AppSessionStatus,
     CodingSessionRequest,
 )
-from .reload_operator_http_server import LocalOperatorHTTPServer
 from .report_projection import (
     CodingReportProjection,
     ReportCorruptionError,
     ReportUnavailableError,
     build_coding_report_projection,
 )
+from .revocation_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService, HarnessCodingRunner
 from .snapshot_export import (
     MAX_SESSION_SNAPSHOT_EXPORT_BYTES,

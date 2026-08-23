@@ -105,7 +105,20 @@ async function mintReloadCapability(token) {
   } catch (_error) {
     payload = null;
   }
-  if (generation !== reloadAuthState.mintGeneration || reloadAuthState.token !== token) return;
+  if (generation !== reloadAuthState.mintGeneration || reloadAuthState.token !== token) {
+    if (
+      response.ok
+      && payload
+      && payload.schema_version === "app-operator-reload-ticket-v1"
+      && typeof payload.ticket === "string"
+      && reloadAuthTicketPattern.test(payload.ticket)
+    ) {
+      const staleTicket = payload.ticket;
+      payload.ticket = "";
+      void revokeReloadCapability(token, staleTicket);
+    }
+    return;
+  }
 
   if (
     !response.ok
@@ -132,6 +145,28 @@ async function mintReloadCapability(token) {
     payload.ticket = "";
   }
   scheduleReloadRenewal();
+}
+
+async function revokeReloadCapability(token, ticket) {
+  if (!token || !reloadAuthTicketPattern.test(ticket)) return;
+  try {
+    const response = await fetch("/v1/operator/reload-revoke", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ticket }),
+      cache: "no-store",
+      credentials: "omit",
+    });
+    if (!response.ok) {
+      console.warn("reload capability revocation rejected", response.status);
+    }
+  } catch (error) {
+    console.warn("reload capability revocation failed", error);
+  }
 }
 
 async function restoreOperatorAfterReload() {
@@ -200,11 +235,14 @@ reloadAuthById("auth-form").addEventListener("submit", () => {
 });
 
 reloadAuthById("lock-button").addEventListener("click", () => {
+  const token = reloadAuthState.token;
+  const ticket = storedReloadCapability();
   reloadAuthState.authGeneration += 1;
   reloadAuthState.mintGeneration += 1;
   reloadAuthState.token = null;
   cancelReloadRenewal();
   removeStoredReloadCapability();
+  if (token && ticket) void revokeReloadCapability(token, ticket);
 });
 
 window.addEventListener("DOMContentLoaded", () => {
