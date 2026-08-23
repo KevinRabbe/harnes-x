@@ -25,45 +25,72 @@ No session, stream, evidence, runtime, verifier, model/tool, memory, budget, con
 
 ## Revocation semantics
 
-`ReloadCapabilities.revoke(ticket)` must:
+`ReloadCapabilities.revoke(ticket)`:
 
-- derive only the SHA-256 digest of a text capability;
-- prune expired entries first;
-- remove at most one matching outstanding digest under the existing store lock;
-- use constant-time digest comparison consistent with issue/redeem behavior;
-- return whether an entry was removed for internal tests only;
-- expose no stored digests or expiry metadata;
-- leave other tabs' outstanding capabilities unchanged.
+- derives only the SHA-256 digest of a text capability;
+- prunes expired entries first;
+- removes at most one matching outstanding digest under the existing store lock;
+- uses constant-time digest comparison consistent with issue/redeem behavior;
+- returns whether an entry was removed for internal tests only;
+- exposes no stored digests or expiry metadata;
+- leaves other tabs' outstanding capabilities unchanged.
 
-The HTTP endpoint is intentionally idempotent from the caller's perspective. A syntactically valid text ticket that is unknown, expired, already redeemed, or already revoked receives the same successful no-content response as a currently outstanding ticket. This avoids turning the route into a capability-validity oracle.
+The HTTP endpoint is intentionally idempotent at the response boundary. An unknown, expired, already redeemed, or already revoked text ticket receives the same `204 No Content` response as a currently outstanding ticket. The route therefore does not expose a boolean capability-validity result.
 
-Malformed request shape, missing/cross-origin `Origin`, missing/invalid bearer, query parameters, and oversized/invalid JSON remain fail-closed under the existing App Server error envelope.
+Successful response headers are bounded and non-cacheable: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, connection close, and exact zero content length.
+
+Malformed request shape, missing/cross-origin `Origin`, missing/invalid bearer, query parameters, and oversized/invalid JSON remain fail-closed under the existing App Server error envelope and are rejected before `revoke()` is called.
 
 ## Browser lock boundary
 
-The browser must clear local state before awaiting network revocation. Explicit lock therefore remains immediate even when the server is unavailable.
+The browser clears local state before starting network revocation. Explicit lock therefore remains immediate even when the server is unavailable.
 
-Revocation is best-effort because a browser/process crash, abrupt tab close, network failure, or storage failure can prevent the cleanup request. In those cases M48's existing one-time/TTL/server-restart protections remain the fallback boundary.
-
-M50 does not attempt revocation during ordinary page reload, because the stored capability is precisely what enables M48 reload recovery. It also does not revoke on every visibility change, unload event, or stream disconnect.
-
-The request uses:
+The revocation request uses:
 
 - `POST /v1/operator/reload-revoke`;
-- `Authorization: Bearer <page-memory token>`;
+- `Authorization: Bearer <captured page-memory token>`;
 - `Content-Type: application/json`;
 - `Accept: application/json`;
 - `credentials: "omit"`;
 - `cache: "no-store"`;
 - exact body `{ "ticket": <captured capability> }`.
 
+A failed revocation request never recreates the capability, restores the page-memory bearer, or restarts renewal.
+
+M50 does not attempt revocation during ordinary page reload, because the stored capability is precisely what enables M48 reload recovery. It also does not revoke on visibility change, unload, pagehide, or stream disconnect.
+
 No bearer or capability is written to URLs, logs, localStorage, cookies, IndexedDB, Cache Storage, or server durable state.
+
+## In-flight issuance race
+
+Source audit identified a lock/renewal race after the first integrated implementation: an M48 `reload-ticket` request can already be in flight when the operator locks. The server may replace known ticket T with newly issued ticket U after the browser captured only T. Revoking T alone would then leave U outstanding until TTL expiry.
+
+M50 closes the successful-response form of that race using the existing M48 generation boundary rather than adding durable tab identity:
+
+1. lock increments `mintGeneration`, clears the page-memory bearer state, and revokes the currently known ticket;
+2. a later successful `reload-ticket` response is stale because its captured generation no longer matches;
+3. if that stale response contains a valid M48 ticket, the client clears the response field and best-effort revokes that returned ticket with the bearer captured by the original mint call;
+4. the stale ticket is never persisted or made current.
+
+The same stale-response cleanup also prevents overlapping authenticated mint attempts from silently leaving successful superseded tickets outstanding.
+
+There remains an unavoidable best-effort limit: if the server successfully mints U but the transport fails before the browser receives U, the browser does not know U's value and cannot target it for revocation. M48's five-minute TTL, single-use semantics, outstanding-count bound, and process-restart invalidation remain the fallback for that case.
 
 ## Multi-tab boundary
 
-M48 permits multiple outstanding capabilities so multiple operator tabs can coexist. M50 revokes only the exact capability captured from the tab being explicitly locked.
+M48 permits multiple outstanding capabilities so multiple operator tabs can coexist. M50 revokes only the exact capability captured from the tab being explicitly locked, plus any successful stale replacement returned to that tab's invalidated mint generation.
 
 Locking tab A must not revoke tab B's independent outstanding capability. Browser tab duplication can temporarily copy the same capability; revoking or redeeming that shared capability invalidates it for all copies, which is consistent with M48's single-use semantics.
+
+M50 does not add a global revocation namespace, tab identifier, revocation list, or cross-tab synchronization channel.
+
+## Layering / compatibility boundary
+
+The route is implemented in an M50 `LocalOperatorHTTPServer` subclass layered over the frozen M48 transport. Existing `/v1/operator/reload-ticket` and `/v1/operator/reload` handling remains inherited unchanged.
+
+The public App Server package and `harness-x-app-server` CLI change only their `LocalOperatorHTTPServer` import to the M50 subclass. M49's browser-only selection restoration remains unchanged.
+
+The existing M48 browser client is tightened in place because explicit-lock capability ownership already lives there; M50 does not add a second credential-state machine or a new browser storage key.
 
 ## Authority boundary
 
@@ -80,11 +107,11 @@ The persistent bearer remains the sole credential authorizing the revocation req
 
 ## Non-goals / limitations
 
-M50 cannot guarantee revocation if the browser or process disappears before the request is transmitted. The existing short TTL and one-time redemption semantics remain the fallback.
+M50 cannot guarantee revocation if the browser/process disappears before a cleanup request is transmitted, or if a successful server-side issuance loses its response before the browser learns the new ticket value. Existing M48 TTL/one-time/restart protections remain the fallback.
 
-M50 does not add a global "revoke all tabs" operation, enumerate outstanding capabilities, expose capability counts over HTTP, or add durable revocation state.
+M50 does not add a global "revoke all tabs" operation, enumerate outstanding capabilities, expose capability counts over HTTP, add durable revocation state, or persist tab identity.
 
-M50 does not change M49 selected-session restoration or any stream cursor behavior.
+M50 does not change M49 selected-session restoration or any lifecycle/trace stream cursor behavior.
 
 ## Deterministic acceptance
 
@@ -99,13 +126,14 @@ Before freeze, M50 must prove:
 - query parameters are rejected before revocation;
 - exact same-origin `Origin` and the persistent bearer are required before revocation;
 - malformed/oversized request bodies are rejected before revocation;
-- valid unknown/already-consumed tickets are indistinguishable from valid outstanding tickets at the HTTP response boundary;
+- valid unknown/already-consumed tickets receive the same HTTP status/body as valid outstanding tickets;
 - a revoked capability can no longer redeem through `/v1/operator/reload`;
 - a different tab's capability remains redeemable after revoking the first;
 - browser lock removes local capability and page-memory reload-auth state before starting network cleanup;
 - browser lock uses the captured bearer only in the Authorization header and the captured capability only in the JSON body;
 - failed revocation never restores local credential state or blocks explicit lock;
-- no revocation is attempted on ordinary reload/unload;
+- a successful mint response made stale by lock is immediately best-effort revoked and never persisted;
+- no revocation is attempted on ordinary reload/unload/pagehide;
 - M48 issuance/redemption/renewal and M49 selection restoration remain compatible;
 - no backend session/store/service/protocol/runtime/evidence/verifier/model/tool/memory/budget/controller/control authority changes;
 - exact M49→M50 diff remains narrow and source-audited;
