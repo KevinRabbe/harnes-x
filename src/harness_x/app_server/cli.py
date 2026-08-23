@@ -9,8 +9,8 @@ import webbrowser
 from pathlib import Path
 from typing import Sequence
 
+from .reload_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
-from .snapshot_operator_http_server import LocalOperatorHTTPServer
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -25,6 +25,7 @@ from .protocol import (
     AppSessionStatus,
     CodingSessionRequest,
 )
+from .reload_operator_http_server import LocalOperatorHTTPServer
 from .report_projection import (
     CodingReportProjection,
     ReportCorruptionError,
@@ -41,7 +42,6 @@ from .snapshot_export import (
     SnapshotExportTooLargeError,
     render_terminal_session_snapshot,
 )
-from .snapshot_operator_http_server import LocalOperatorHTTPServer
 from .store import AppSessionStore
 from .trace_projection import (
     TraceProjectionEvent,
