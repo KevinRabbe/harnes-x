@@ -24,6 +24,7 @@ from harness_x.evidence_signing import (
     sign_evidence_manifest,
     verify_portable_evidence_with_signature,
 )
+from harness_x.evidence_verification import PortableEvidenceVerificationError
 
 
 def _manifest(path: Path, *, session_char: str = "a") -> TerminalEvidenceManifest:
@@ -268,7 +269,7 @@ def test_symlink_inputs_are_rejected(tmp_path: Path) -> None:
 
     linked_signature = tmp_path / "linked.sig.json"
     linked_signature.symlink_to(signature_path)
-    with pytest.raises(EvidenceSigningError, match="symbolic link"):
+    with pytest.raises(PortableEvidenceVerificationError, match="symbolic link"):
         verify_portable_evidence_with_signature(
             manifest_path,
             signature_path=linked_signature,
@@ -277,7 +278,7 @@ def test_symlink_inputs_are_rejected(tmp_path: Path) -> None:
 
     linked_private = tmp_path / "linked.private.pem"
     linked_private.symlink_to(private_path)
-    with pytest.raises(EvidenceSigningError, match="symbolic link"):
+    with pytest.raises(PortableEvidenceVerificationError, match="symbolic link"):
         sign_evidence_manifest(
             manifest_path,
             private_key_path=linked_private,
