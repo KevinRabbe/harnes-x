@@ -131,17 +131,17 @@ class LocalOperatorHTTPServer(LocalAppHTTPServer):
                             str(exc)[:4000],
                         )
                         return
-                    except LifecycleExportCorruptionError as exc:
-                        self._error(
-                            HTTPStatus.CONFLICT,
-                            "lifecycle_corruption",
-                            str(exc)[:4000],
-                        )
-                        return
                     except LifecycleExportTooLargeError as exc:
                         self._error(
                             HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                             "lifecycle_export_too_large",
+                            str(exc)[:4000],
+                        )
+                        return
+                    except (LifecycleExportCorruptionError, RuntimeError) as exc:
+                        self._error(
+                            HTTPStatus.CONFLICT,
+                            "lifecycle_corruption",
                             str(exc)[:4000],
                         )
                         return
