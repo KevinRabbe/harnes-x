@@ -26,7 +26,7 @@ M47 also extends the installed portable verifier with one optional explicit loca
 harness-x verify-evidence MANIFEST [--snapshot PATH] [--lifecycle PATH] [--report PATH] [--trace PATH]
 ```
 
-Omitting `--snapshot` preserves M45 verification behavior except for one explicit deterministic `snapshot=not_supplied` result field. Supplying it activates independent snapshot-fingerprint recomputation and manifest/lifecycle correlation.
+Omitting `--snapshot` delegates through the frozen M45 verifier path directly. M47 adds only the explicit deterministic `snapshot=not_supplied snapshot_revision=none` result fields in that case; it performs no M47-specific manifest read or snapshot correlation. Supplying `--snapshot` activates independent snapshot-fingerprint recomputation and manifest correlation.
 
 ## Terminal-only export
 
@@ -69,20 +69,20 @@ M47 does not claim that `session-snapshot.json` is privacy-redacted evidence.
 
 ## Server-side snapshot validation
 
-Before rendering an export, M47 must validate the current terminal `AppSessionSnapshot` rather than blindly serialize an object supplied by a caller.
+The endpoint receives the authoritative typed `AppSessionSnapshot` already held by the App Server store. M47 validates that current terminal projection before serialization; it does not accept a caller-supplied snapshot object.
 
 It requires:
 
 - terminal status;
 - non-null completion timestamp;
 - exact requested session ID agreement;
-- complete snapshot round-trip through the existing `AppSessionSnapshot` model;
-- stored fingerprint equal to the independently rederived fingerprint;
-- trace ID/path presence parity retained by the existing protocol model;
-- schema version exactly `app-session-snapshot-v1`;
-- nested request schema exactly `app-coding-session-request-v1`.
+- stored fingerprint equal to SHA-256 of the canonical JSON material produced by `snapshot.model_dump(mode="json", exclude={"fingerprint"})`;
+- trace ID/path presence parity retained by the existing protocol object;
+- schema version exactly `app-session-snapshot-v1` and nested request schema exactly `app-coding-session-request-v1`, as already enforced by the typed store projection.
 
-M47 does not reopen workspace/report/trace paths merely to export the session snapshot. This endpoint transports the durable App Server projection only; report and trace source validation remain owned by M39/M41/M42/M43.
+The validation deliberately does **not** instantiate a fresh `AppSessionSnapshot` or `CodingSessionRequest`. The live request model resolves path fields during validation, so revalidating historical request material at export time could reinterpret persisted path strings after filesystem changes. M47 instead recomputes the fingerprint directly from the already-authoritative snapshot JSON values. A regression physically replaces a persisted workspace path with a symlink after terminalization and proves export retains the committed path string/fingerprint rather than resolving it again.
+
+M47 also does not reopen workspace/report/trace paths merely to export the session snapshot. Report and trace source validation remain owned by M39/M41/M42/M43.
 
 ## Deterministic rendering
 
@@ -116,7 +116,9 @@ X-Harness-X-Snapshot-Fingerprint: <snapshot fingerprint>
 X-Harness-X-Snapshot-Revision: <revision>
 ```
 
-Bearer authentication remains mandatory. Query parameters and extra path segments must fail. No arbitrary local or package file reader is introduced.
+Bearer authentication remains mandatory. Query parameters and extra path segments fail. No arbitrary local or package file reader is introduced.
+
+The M47 route is layered in a subclass over the frozen M46 `LocalOperatorHTTPServer`. Existing report, trace, manifest, lifecycle, UI, bootstrap, session, and stream routes continue through the inherited qualified implementation.
 
 ## Offline fingerprint verification
 
@@ -131,24 +133,24 @@ The verifier reads one exact local regular file with:
 - pre-open `lstat` and post-open `fstat` regular-file checks;
 - a 2 MiB hard ceiling checked before and during one descriptor read.
 
-The verifier requires strict UTF-8 JSON, rejects duplicate object keys at every level, requires a JSON object root, and rejects unknown/missing/ill-typed snapshot/request fields through an M47 portable schema mirroring `app-session-snapshot-v1` while treating persisted path strings as data rather than re-resolving them against the verifier machine.
+The verifier requires strict UTF-8 JSON, rejects duplicate object keys at every level, requires a JSON object root, and rejects unknown/missing/ill-typed snapshot/request fields through an M47 portable schema mirroring `app-session-snapshot-v1` while treating persisted path strings as inert data rather than re-resolving them against the verifier machine.
 
 ### Raw canonical fingerprint recomputation
 
-The existing `CodingSessionRequest` model intentionally resolves filesystem paths when a live App Server request is created/revalidated. An offline verifier must not reinterpret downloaded path strings through a different machine's filesystem and then claim it verified the original fingerprint.
+The existing `CodingSessionRequest` model intentionally resolves filesystem paths when a live App Server request is validated. An offline verifier must not reinterpret downloaded path strings through a different machine's filesystem and then claim it verified the original fingerprint.
 
 M47 therefore recomputes the snapshot fingerprint from the exact parsed JSON values supplied in the downloaded snapshot:
 
-1. retain the untrusted supplied `fingerprint` string before any model normalization;
+1. retain the untrusted supplied `fingerprint` string before model normalization;
 2. remove only the top-level `fingerprint` field from the parsed JSON object;
 3. canonicalize the remaining JSON with the exact App Server canonicalization contract (`sort_keys=True`, compact separators, UTF-8, no ASCII escaping);
 4. compute SHA-256 over that canonical JSON;
 5. require exact equality with the supplied fingerprint;
-6. structurally validate the snapshot/request through an M47 portable schema that does not resolve path values.
+6. structurally validate the snapshot/request through an M47 portable schema whose path fields are inert strings.
 
-This independently proves that the downloaded complete snapshot material recomputes to its claimed App Server fingerprint without consulting the local verifier filesystem.
+This independently proves that the downloaded complete snapshot material recomputes to its claimed App Server fingerprint without consulting the verifier machine's filesystem.
 
-## Manifest correlation
+## Manifest correlation and cross-read identity
 
 A verified snapshot must exactly match the M43 manifest lifecycle section for:
 
@@ -161,38 +163,40 @@ A verified snapshot must exactly match the M43 manifest lifecycle section for:
 - created timestamp;
 - completed timestamp.
 
-The nested snapshot/request data gives the missing fingerprint preimage, but M47 does not alter the M43 manifest schema.
+M47 leaves the frozen M45 verifier implementation unchanged. When `--snapshot` is supplied, the wrapper first captures one bounded manifest identity for M47 correlation, runs the existing M45 verifier independently, and then requires the M45 result's manifest byte count and SHA-256 to equal the M47-captured identity. A combined success therefore cannot silently correlate the snapshot against manifest A while M45 verified manifest B under concurrent replacement.
+
+When `--snapshot` is omitted, this additional read is not performed: the wrapper delegates directly through M45.
 
 ## Lifecycle-export correlation
 
-If both `--snapshot` and `--lifecycle` are supplied, each is independently checked against the manifest by its own verifier path. Because both must match the same manifest session/revision/fingerprint/event-count/head/timestamps, disagreement between them fails closed.
+If both `--snapshot` and `--lifecycle` are supplied, each is independently checked against the same manifest identity. Both must agree on the session/revision/fingerprint/event-count/head metadata committed by the manifest.
 
-M47 does not make `--lifecycle` mandatory merely because `--snapshot` is supplied and does not make `--snapshot` mandatory for legacy M44/M45 portable evidence verification.
+M47 does not make `--lifecycle` mandatory merely because `--snapshot` is supplied and does not make `--snapshot` mandatory for M44/M45 portable evidence verification.
 
 ## Operator UI
 
-M47 adds `Download session snapshot` as a terminal-only evidence action.
+M47 adds `Download session snapshot` as a terminal-only evidence action. The new action is placed below the existing lifecycle panel heading so the qualified M45 lifecycle/manifest action row is not widened with a third long button.
 
-The dependency-free client must:
+The dependency-free client:
 
-- capture the existing page-memory bearer through the already-qualified auth-listener ordering;
-- enable only for terminal selected sessions;
-- perform authenticated same-origin `GET` with `cache: "no-store"` and `credentials: "omit"`;
-- require exact JSON content type and fixed attachment filename;
-- read one `ArrayBuffer`;
-- require exact `Content-Length` equality;
-- recompute response SHA-256 with Web Crypto and compare it with `X-Harness-X-Snapshot-SHA256`;
-- validate fingerprint/revision response headers;
-- parse exact bytes as fatal UTF-8 JSON;
-- require `app-session-snapshot-v1`, selected session ID, terminal status, matching fingerprint header, matching numeric revision header, and nested `app-coding-session-request-v1`;
-- save only through a temporary object URL with fixed filename `session-snapshot.json`;
-- revoke the object URL immediately;
-- abort in-flight download on selection change, lock, or unload;
-- generation-guard completion/status;
-- render status/errors only through `textContent`;
-- store neither bearer nor snapshot bytes in cookies, `localStorage`, or `sessionStorage`.
+- captures the existing page-memory bearer through the already-qualified auth-listener ordering;
+- enables only for terminal selected sessions;
+- performs authenticated same-origin `GET` with `cache: "no-store"` and `credentials: "omit"`;
+- requires exact JSON content type and fixed attachment filename;
+- reads one `ArrayBuffer`;
+- requires exact `Content-Length` equality;
+- recomputes response SHA-256 with Web Crypto and compares it with `X-Harness-X-Snapshot-SHA256`;
+- validates fingerprint/revision response headers;
+- parses exact bytes as fatal UTF-8 JSON;
+- requires `app-session-snapshot-v1`, selected session ID, terminal status, matching fingerprint header, matching numeric revision header, and nested `app-coding-session-request-v1`;
+- saves only through a temporary object URL with fixed filename `session-snapshot.json`;
+- revokes the object URL;
+- aborts in-flight download on selection change, lock, or unload;
+- generation-guards completion/status;
+- renders status/errors only through `textContent`;
+- stores neither bearer nor snapshot bytes in cookies, `localStorage`, or `sessionStorage`.
 
-The M47 client must be exact-allowlisted and must preserve the qualified M40 bootstrap listener ordering.
+The M47 client is exact-allowlisted and remains before `app.js`/M46 stream recovery/`bootstrap.js`, preserving the M40 auth-listener ordering.
 
 ## CLI result contract
 
@@ -205,7 +209,7 @@ M47 adds:
 
 Existing lifecycle/report/trace status meanings remain unchanged.
 
-Malformed snapshot JSON, duplicate keys, schema mismatch, stale fingerprint, session/status/revision/event-count/head/timestamp disagreement, non-regular/symlink/oversized file input, or unexpected path normalization behavior must fail visibly with no `valid:` result.
+Malformed snapshot JSON, duplicate keys, schema mismatch, stale fingerprint, session/status/revision/event-count/head/timestamp disagreement, non-regular/symlink/oversized file input, or unexpected path reinterpretation fail visibly with no `valid:` result.
 
 ## Authority and provenance boundary
 
@@ -232,6 +236,20 @@ M47 does not add signatures, certificates, remote trust, timestamping, transpare
 
 The exported snapshot intentionally contains the complete request/projection preimage and should be handled as potentially sensitive local evidence.
 
+## Qualification history before freeze
+
+Qualification remains fail-visible. Provisional CI #1188 ran on an earlier integrated M47 candidate and produced `570 passed, 1 failed in 96.22s`; the single failure compared a correctly exported JSON path string with an in-memory `Path` object. The implementation output was correct and the test was corrected to compare the persisted string. Because subsequent source-audit hardening moved the branch head, #1188 is not a freeze gate.
+
+Later source audit also:
+
+- replaced server-side model round-trip revalidation with direct canonical fingerprint recomputation to avoid path reinterpretation;
+- pinned manifest identity across M45 and M47 reads when `--snapshot` is supplied;
+- preserved direct frozen-M45 delegation with no M47-specific manifest read when `--snapshot` is omitted;
+- moved the new snapshot action out of the existing M45 lifecycle action row;
+- removed newline-only diff noise from existing files.
+
+The final freeze gate must be Linux CI on the exact documented head after all of those changes.
+
 ## Deterministic acceptance
 
 Before freeze, M47 must prove:
@@ -241,7 +259,7 @@ Before freeze, M47 must prove:
 - authenticated terminal-only fixed-name snapshot export;
 - query parameters and extra path segments rejected;
 - no caller-selected path/revision/field/format surface;
-- server independently revalidates snapshot fingerprint before export;
+- server independently recomputes the current typed snapshot fingerprint before export without re-resolving persisted request paths;
 - deterministic UTF-8 JSON plus newline, 2 MiB cap, exact length/SHA/fingerprint/revision headers;
 - export does not reopen report/trace/workspace paths;
 - disclosure of complete task/request/path/project-memory/failure material is explicit and tested/documented rather than silently redacted;
@@ -249,13 +267,14 @@ Before freeze, M47 must prove:
 - browser cancellation/generation guards on session change, lock, and unload;
 - exact UI asset allowlisting and qualified script ordering;
 - installed `harness-x verify-evidence --help` exposes optional `--snapshot`;
-- omitting `--snapshot` preserves M45 verification behavior except the explicit new snapshot summary field;
+- omitting `--snapshot` delegates through frozen M45 without an M47-specific manifest read and adds only explicit snapshot summary state;
 - supplied snapshot uses the existing bounded regular-file/symlink-resistant input boundary;
 - strict UTF-8/JSON object input and duplicate-key rejection;
 - raw supplied fingerprint is retained and independently recomputed from exact parsed JSON values excluding only `fingerprint`;
 - portable schema validation does not resolve downloaded path strings through the verifier machine;
 - snapshot session/status/revision/fingerprint/event-count/head/created/completed metadata exactly match the manifest;
-- supplying both snapshot and lifecycle requires both independent verifier paths to agree with the same manifest;
+- supplied-snapshot verification pins M45 and M47 manifest byte identity across their independent reads;
+- supplying both snapshot and lifecycle requires both verifier paths to agree with the same manifest identity;
 - lifecycle/report/trace M45/M44 verification remains unchanged;
 - no App Server mutation/runtime/task/verifier/model/tool/memory/controller/control authority changes;
 - exact M46→M47 diff remains confined to snapshot export/transport/UI, offline verifier extension, focused tests, and this document;
