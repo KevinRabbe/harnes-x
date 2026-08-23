@@ -59,7 +59,7 @@ class ReloadCapabilities:
         ]
 
     def issue(self, *, previous_ticket: object = None) -> str:
-        """Issue one bounded capability, removing a supplied previous ticket when present."""
+        """Issue one bounded capability and atomically replace a supplied previous ticket."""
 
         now = self._clock()
         expires_at = now + self._ttl_seconds
@@ -67,12 +67,6 @@ class ReloadCapabilities:
 
         with self._lock:
             self._prune_locked(now)
-            if previous_digest is not None:
-                self._entries = [
-                    (stored, expiry)
-                    for stored, expiry in self._entries
-                    if not hmac.compare_digest(previous_digest, stored)
-                ]
 
             ticket: str | None = None
             digest: bytes | None = None
@@ -94,6 +88,12 @@ class ReloadCapabilities:
             if ticket is None or digest is None:
                 raise RuntimeError("failed to generate a unique reload capability")
 
+            if previous_digest is not None:
+                self._entries = [
+                    (stored, expiry)
+                    for stored, expiry in self._entries
+                    if not hmac.compare_digest(previous_digest, stored)
+                ]
             if len(self._entries) >= self._max_outstanding:
                 oldest_index = min(
                     range(len(self._entries)),
