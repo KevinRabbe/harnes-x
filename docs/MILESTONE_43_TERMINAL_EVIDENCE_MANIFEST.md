@@ -32,12 +32,13 @@ Before producing a manifest, M43 independently checks the supplied lifecycle eve
 - every `previous_hash` exactly matches the preceding event hash;
 - every event recomputes to its recorded `event_hash`;
 - event count exactly equals `snapshot.event_count`;
-- the final event hash exactly equals `snapshot.latest_event_hash`.
+- the final event hash exactly equals `snapshot.latest_event_hash`;
+- the snapshot is round-trip revalidated through `AppSessionSnapshot`, and its stored fingerprint must equal the fingerprint recomputed from the snapshot contents.
 
 The lifecycle section records:
 
 - terminal session status;
-- snapshot revision and fingerprint;
+- snapshot revision and independently revalidated fingerprint;
 - event count;
 - current lifecycle ledger head hash and kind;
 - created/completed timestamps.
@@ -92,7 +93,9 @@ M43 distinguishes absence from disagreement.
 
 If the snapshot says no coding report exists but the lifecycle ledger contains a coding-report artifact event, manifest generation fails as corruption. Likewise, if the snapshot has no trace identity/path but the lifecycle ledger contains a `TRACE_ATTACHED` event, manifest generation fails as corruption.
 
-This prevents inconsistent durable evidence from being silently flattened into a benign `not_available` component.
+A stale or tampered in-memory `snapshot.fingerprint` also fails as corruption even when the caller supplies an already-instantiated Pydantic model. The builder recomputes snapshot identity from the snapshot contents rather than trusting that field merely because construction previously succeeded.
+
+This prevents inconsistent durable evidence from being silently flattened into a benign `not_available` component or stale projection identity from being exported as verified correlation metadata.
 
 ## Manifest identity
 
@@ -196,6 +199,7 @@ Before freeze, M43 must prove:
 - exact frozen M42 base;
 - terminal-only manifest availability;
 - lifecycle event sequence/hash-chain/head agreement with the snapshot;
+- snapshot fingerprint is independently recomputed and stale/tampered fingerprint fields are rejected;
 - explicit report `not_available` versus validated available report;
 - explicit trace `not_available` versus validated available trace;
 - contradictory snapshot/event report or trace evidence fails closed;
