@@ -176,7 +176,6 @@ async function mintReloadCapability(token, family) {
       const staleTicket = payload.ticket;
       payload.ticket = "";
       void revokeReloadCapability(token, staleTicket);
-      void revokeReloadFamily(token, family);
     }
     return;
   }
