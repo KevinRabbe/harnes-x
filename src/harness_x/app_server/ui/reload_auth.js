@@ -188,10 +188,22 @@ async function mintReloadCapability(token, family) {
     || typeof payload.ticket !== "string"
     || !reloadAuthTicketPattern.test(payload.ticket)
   ) {
+    const possibleTicket = (
+      payload
+      && typeof payload.ticket === "string"
+      && reloadAuthTicketPattern.test(payload.ticket)
+    ) ? payload.ticket : null;
+    if (payload && typeof payload.ticket === "string") payload.ticket = "";
     removeStoredReloadCapability();
-    if (response.status === 401) reloadAuthState.token = null;
-    if (response.status === 409) removeStoredReloadFamily();
     cancelReloadRenewal();
+    if (response.ok) {
+      removeStoredReloadFamily();
+      if (possibleTicket) void revokeReloadCapability(token, possibleTicket);
+      void revokeReloadFamily(token, family);
+    } else {
+      if (response.status === 401) reloadAuthState.token = null;
+      if (response.status === 409) removeStoredReloadFamily();
+    }
     console.warn("reload capability issuance rejected", response.status);
     return;
   }
