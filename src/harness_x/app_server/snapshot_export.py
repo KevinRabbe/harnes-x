@@ -142,7 +142,7 @@ def validate_terminal_session_snapshot(
     snapshot: AppSessionSnapshot,
     expected_session_id: str | None = None,
 ) -> AppSessionSnapshot:
-    """Revalidate a terminal durable snapshot and require its stored fingerprint to agree."""
+    """Validate one terminal durable snapshot without re-resolving persisted paths."""
 
     if not snapshot.status.terminal:
         raise SnapshotExportNotTerminalError(
@@ -155,20 +155,12 @@ def validate_terminal_session_snapshot(
             "session snapshot identity does not match the requested session"
         )
 
-    supplied_fingerprint = snapshot.fingerprint
-    raw = snapshot.model_dump(mode="json")
-    try:
-        revalidated = AppSessionSnapshot.model_validate(raw)
-    except Exception as exc:
-        raise SnapshotExportCorruptionError(
-            f"session snapshot cannot be revalidated: {exc}"
-        ) from exc
-    if supplied_fingerprint != revalidated.fingerprint:
+    material = snapshot.model_dump(mode="json", exclude={"fingerprint"})
+    recomputed = hashlib.sha256(canonical_snapshot_material(material)).hexdigest()
+    if snapshot.fingerprint != recomputed:
         raise SnapshotExportCorruptionError(
             "session snapshot fingerprint does not match snapshot contents"
         )
-    if revalidated.session_id != snapshot.session_id:
-        raise SnapshotExportCorruptionError("session snapshot identity changed during revalidation")
     return snapshot
 
 
