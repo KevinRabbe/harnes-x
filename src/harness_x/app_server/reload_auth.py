@@ -121,6 +121,24 @@ class ReloadCapabilities:
             self._entries.pop(matched_index)
             return True
 
+    def revoke(self, ticket: object) -> bool:
+        """Remove one matching unexpired capability without exposing validity over HTTP."""
+
+        candidate = self._digest(ticket)
+        if candidate is None:
+            return False
+        now = self._clock()
+        with self._lock:
+            self._prune_locked(now)
+            matched_index: int | None = None
+            for index, (stored, _) in enumerate(self._entries):
+                if hmac.compare_digest(candidate, stored):
+                    matched_index = index
+            if matched_index is None:
+                return False
+            self._entries.pop(matched_index)
+            return True
+
     @property
     def outstanding_count(self) -> int:
         """Return the number of currently unexpired digests without exposing them."""
