@@ -128,7 +128,9 @@ M51 specifically closes successful server-side issuance whose ticket response is
 
 A successful HTTP response whose body is unreadable, has the wrong schema, or otherwise fails the M51 ticket-response contract is handled differently from a transport exception because the server may already have issued a ticket. For a current-generation successful-but-invalid response, the browser clears local ticket/family state, cancels renewal, revokes any canonical ticket value it did receive through M50's exact-ticket route, and best-effort revokes the known family. Ordinary bearer authority remains page-memory available; only reload recovery for that retired family is disabled.
 
-Generation-stale successful responses are intentionally **ticket-scoped**, not family-scoped. A stale response can mean an older overlapping issuance was superseded by a newer valid issuance in the same family, not only that the operator locked. Therefore the browser revokes the exact stale returned ticket through M50 but does not independently tombstone the family from the stale-response branch. Explicit lock already sends the authoritative family-revoke request after clearing local state. This prevents an older response from invalidating a newer legitimate same-family ticket.
+Generation-stale successful responses are intentionally **ticket-scoped**, not family-scoped. A stale response can mean an older overlapping issuance was superseded by a newer valid issuance in the same family, not only that the operator locked. Therefore the browser revokes the exact stale returned ticket through M50 but does not independently tombstone the family from the stale-response branch. Explicit lock already sends the authoritative family-revoke request after clearing local state.
+
+M51 additionally reconciles adverse same-family response ordering. Because the store permits exactly one current ticket per family, an older browser request can be processed last by the server after a newer browser generation has already stored its response. When a stale successful response arrives while the **same bearer and same family are still current**, the browser coalesces an immediate zero-delay family-aware renewal after exact stale-ticket cleanup. That renewal rotates whatever ticket is actually server-current and restores one browser-current ticket before returning to the normal two-minute cadence. If lock or a family change caused the stale response, reconciliation is suppressed because the original bearer/family are no longer current.
 
 M51 still cannot guarantee network cleanup if the browser/process disappears before family revocation is transmitted or if the family-revoke request itself never reaches the server. In those cases M48's five-minute ticket TTL, single-use redemption, bounded outstanding-ticket set, and process-restart invalidation remain the fallback. M51 does not claim crash-proof or network-independent revocation.
 
@@ -164,7 +166,7 @@ The persistent bearer remains the sole credential authorizing issuance/revocatio
 
 The first integrated candidate passed CI but was not frozen because source audit found a successful-response ambiguity: a `200 OK` with an unreadable or invalid body can still follow server-side issuance. M51 therefore retires the current family on an invalid successful current-generation response rather than treating that case like a simple non-success response.
 
-A later audit found an overcorrection: family-revoking every generation-stale successful response can invalidate a newer valid ticket in the same family when two issuance attempts overlap. The final client limits stale-response cleanup to the exact returned ticket; family tombstoning remains tied to explicit lock and current-generation successful-response failure. Both findings are preserved fail-visibly in qualification history rather than treating earlier green CI as a freeze gate.
+A later audit found an overcorrection: family-revoking every generation-stale successful response can invalidate a newer valid ticket in the same family when two issuance attempts overlap. The client was narrowed to ticket-only stale cleanup. A final compatibility audit then found that one-current-ticket family semantics plus adverse server/response ordering could leave the browser holding a superseded ticket after stale cleanup. The final client therefore schedules same-family reconciliation only while that original bearer/family remain current. These findings are preserved fail-visibly rather than treating earlier green CI as a freeze gate.
 
 ## Non-goals / limitations
 
@@ -195,7 +197,8 @@ Before freeze, M51 must prove:
 - browser lock clears bearer/ticket/family locally before network cleanup;
 - browser lock performs family cleanup even when no current ticket value is known;
 - a current-generation invalid successful issuance response retires the family and exact returned ticket when available;
-- a generation-stale successful issuance response cleans only its exact returned ticket and cannot tombstone a family that may contain a newer valid ticket;
+- a generation-stale successful issuance response cannot tombstone a family that may contain a newer valid ticket;
+- a stale successful response for the still-current bearer/family schedules an immediate family-aware reconciliation, while lock/family changes suppress reissue;
 - ordinary reload preserves the family and performs no family revocation;
 - failed cleanup never restores local credential state or blocks explicit lock;
 - no backend session/store/service/protocol/runtime/evidence/verifier/model/tool/memory/budget/controller/control authority changes;
