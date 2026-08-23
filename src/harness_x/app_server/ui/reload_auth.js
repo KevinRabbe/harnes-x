@@ -166,6 +166,10 @@ async function mintReloadCapability(token, family) {
     payload = null;
   }
   if (generation !== reloadAuthState.mintGeneration || reloadAuthState.token !== token) {
+    const sameFamilyStillCurrent = (
+      reloadAuthState.token === token
+      && storedReloadFamily() === family
+    );
     if (
       response.ok
       && payload
@@ -176,6 +180,9 @@ async function mintReloadCapability(token, family) {
       const staleTicket = payload.ticket;
       payload.ticket = "";
       void revokeReloadCapability(token, staleTicket);
+    }
+    if (response.ok && sameFamilyStillCurrent) {
+      scheduleReloadRenewal(0);
     }
     return;
   }
