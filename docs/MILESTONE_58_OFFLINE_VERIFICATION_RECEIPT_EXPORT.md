@@ -96,7 +96,7 @@ The authoritative cryptographic claim remains frozen M52 verification of the exa
 
 M58 intentionally does not add a second read/hash of the source capsule merely to place a capsule SHA in the receipt. Doing so would introduce a cross-read substitution boundary after frozen M56/M57 and could falsely imply that the receipt identifies the exact capsule bytes validated earlier.
 
-The receipt therefore records only `capsule_status=validated` and the verified embedded manifest/signature identity. It does not claim a portable SHA-256 identity for the outer M55 capsule file.
+The receipt therefore records only `capsule_status=validated`, the verified manifest identity, the verified public-key fingerprint, and `signature_status=verified`. It does not record or claim a portable SHA-256 identity for the outer M55 capsule file or the detached-signature envelope file.
 
 ## Output semantics
 
