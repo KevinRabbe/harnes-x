@@ -62,7 +62,7 @@ def test_signed_manifest_pair_client_pins_exact_correlation_and_m52_envelope_sha
     assert 'envelope.manifest_sha256 !== manifestSha256' in javascript
     assert 'envelope.key_fingerprint !== keyFingerprint' in javascript
     assert 'envelopeText !== signedManifestPairCanonicalEnvelope(envelope)' in javascript
-    assert 'signedManifestPairSignaturePattern = /^[A-Za-z0-9_-]{85}[AEIMQUYcgkosw048]$/' in javascript
+    assert 'signedManifestPairSignaturePattern = /^[A-Za-z0-9_-]{85}[AQgw]$/' in javascript
     assert 'JSON.stringify({' in javascript
     assert ') + "\\n";' in javascript
     assert javascript.index("signedManifestPairFetchManifest(") < javascript.index("signedManifestPairFetchSignature(")
@@ -308,11 +308,11 @@ function select(sessionId, status = "succeeded") {
   downloads.length = 0;
   const noncanonicalSignatureQueue = [
     manifest.response,
-    makeSignature(manifest.hash, { signatureText: "B".repeat(86) }),
+    makeSignature(manifest.hash, { signatureText: "A".repeat(85) + "E" }),
   ];
   fetchImpl = async () => noncanonicalSignatureQueue.shift();
   await downloadSignedManifestPair();
-  assert(downloads.length === 0, "non-canonical Ed25519 base64url text must suppress both downloads");
+  assert(downloads.length === 0, "non-canonical Ed25519 base64url pad bits must suppress both downloads");
   assert(document.getElementById("signed-manifest-pair-status").textContent.includes("non-canonical Ed25519 signature text"), "non-canonical signature text must fail visibly");
 
   downloads.length = 0;
