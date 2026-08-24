@@ -1,0 +1,99 @@
+# Milestone 65 — Windows WebView2 Desktop Host
+
+## Authority
+
+M65 is stacked exactly on frozen M64:
+
+`9d03153cd5e90806211988c1033b7ceb8a006756`
+
+M64 remains frozen. M65 may not rewrite its portability qualification record or product semantics.
+
+## Objective
+
+Make Harness X usable as a normal local Windows desktop application for the single operator:
+
+1. launch one Windows executable;
+2. start the existing local Harness X App Server as a managed child process;
+3. obtain one short-lived single-use UI bootstrap URL over private redirected stdio;
+4. display the existing authenticated operator UI inside a WebView2 window;
+5. keep navigation confined to the exact loopback App Server origin;
+6. shut the App Server down cleanly when the desktop host exits.
+
+The desktop host is a thin shell around the frozen App Server/UI. It does not introduce a second session engine, second authentication system, or second browser UI.
+
+## Chosen desktop stack
+
+- Windows-only C# WinForms host targeting .NET 8.
+- Microsoft Edge WebView2 control.
+- Pin the stable `Microsoft.Web.WebView2` SDK package used by this milestone rather than a prerelease package.
+- Reuse the existing Harness X HTML/CSS/JavaScript operator UI unchanged unless a narrowly required desktop compatibility defect is found.
+
+## App Server desktop handshake
+
+M65 may add one explicit private-host mode to `harness-x-app-server` for the desktop parent process.
+
+Required properties:
+
+- loopback-only server behavior remains unchanged;
+- port `0` is used so the OS chooses the port;
+- the persistent bearer token is never placed in a URL or emitted by the handshake;
+- the only URL handed to the desktop host is the existing short-lived single-use bootstrap URL;
+- desktop handshake output is allowed only when stdout is redirected, so the bootstrap URL is not printed to an interactive terminal;
+- stdin is redirected and acts as the parent-lifetime channel;
+- stdin EOF requests `server.shutdown()`, allowing normal `server_close()` and service cleanup;
+- if the desktop parent crashes, pipe closure should cause the same shutdown path;
+- existing `--open-ui` browser behavior remains available and unchanged.
+
+## Desktop process ownership
+
+The Windows host must:
+
+- start `harness-x-app-server` without shell interpolation;
+- redirect stdin/stdout/stderr;
+- parse exactly one structured startup handshake;
+- fail visibly if the child exits before a valid handshake;
+- create WebView2 only after a valid loopback bootstrap URL is obtained;
+- use a persistent WebView2 user-data directory under the operator's local application-data directory;
+- cancel or open externally any navigation that leaves the exact App Server loopback origin;
+- close child stdin on normal window shutdown and wait for graceful server exit before falling back to process-tree termination;
+- never read or inject the persistent bearer token itself.
+
+## Local paths
+
+Default personal-use state should live under the current operator's local application-data directory rather than the repository checkout. The desktop shell should derive its App Server root and WebView2 user-data root from `%LOCALAPPDATA%`.
+
+## Distribution boundary
+
+M65 is **not** the installer milestone.
+
+It does not yet:
+
+- bundle Python;
+- bundle Harness X wheels/dependencies;
+- install Start Menu/Desktop shortcuts;
+- install or update the WebView2 Evergreen Runtime;
+- provide automatic updates;
+- provide MSI/MSIX/Inno/WiX packaging;
+- sign Windows binaries;
+- modify GPU/model dependency installation.
+
+A later distribution objective may package the qualified M65 desktop executable together with a managed Harness X runtime.
+
+## Qualification
+
+Freeze requires one exact head with:
+
+- full existing pytest on Ubuntu;
+- full existing pytest on Windows;
+- existing `harness-x --help` and default-config validation on both OS lanes;
+- focused tests for desktop handshake security and stdin-EOF shutdown behavior;
+- Windows `.NET 8` restore/build/publish of the desktop host;
+- a non-interactive Windows desktop-host smoke test that validates startup-handshake parsing and child-process lifetime logic without requiring an interactive GUI session;
+- source/diff audit proving the desktop host remains a shell over the existing App Server/UI;
+- final PR review and review-thread recheck.
+
+## Freeze claim
+
+A qualified M65 may claim that Harness X has a native Windows WebView2 desktop host that launches and owns the existing local App Server/UI stack.
+
+It may not claim that Harness X has a production installer, bundled runtime, code-signed release, auto-updater, or public distribution package.
