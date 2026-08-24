@@ -195,6 +195,7 @@
               <div class="session-actions">
                 <button id="download-lifecycle-ledger" type="button" class="secondary" disabled>Download lifecycle ledger</button>
                 <button id="download-evidence-manifest" type="button" class="secondary" disabled>Download evidence manifest</button>
+                <button id="download-signed-manifest-pair" type="button" class="secondary" disabled>Download signed manifest pair</button>
                 <span id="lifecycle-state" class="pill pill--muted">Idle</span>
               </div>
             </div>
@@ -202,6 +203,7 @@
             <p id="snapshot-export-status" class="mono muted small" aria-live="polite"></p>
             <p id="lifecycle-export-status" class="mono muted small" aria-live="polite"></p>
             <p id="evidence-manifest-status" class="mono muted small" aria-live="polite"></p>
+            <p id="signed-manifest-pair-status" class="mono muted small" aria-live="polite"></p>
             <div id="lifecycle-events" class="timeline timeline--compact" aria-live="polite"></div>
           </section>
         </div>
@@ -214,6 +216,7 @@
   <script src="/ui/report_export.js" defer></script>
   <script src="/ui/trace_export.js" defer></script>
   <script src="/ui/evidence_manifest.js" defer></script>
+  <script src="/ui/signed_manifest_pair.js" defer></script>
   <script src="/ui/lifecycle_export.js" defer></script>
   <script src="/ui/snapshot_export.js" defer></script>
   <script src="/ui/reload_auth.js" defer></script>
