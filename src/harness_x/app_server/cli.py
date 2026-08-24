@@ -11,8 +11,8 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
+from .capsule_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
-from .signed_evidence_operator_http_server import LocalOperatorHTTPServer
 
 
 def build_parser() -> argparse.ArgumentParser:
