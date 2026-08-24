@@ -24,9 +24,12 @@ class LocalOperatorHTTPServer(M55LocalOperatorHTTPServer):
     """Add one serialized authenticated product API without acquiring execution authority."""
 
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.product_store = ProjectChatStore(self.service.root / "product")
+        service = args[0] if args else kwargs.get("service")
+        if service is None:
+            raise TypeError("LocalOperatorHTTPServer requires an AppServerService")
+        self.product_store = ProjectChatStore(service.root / "product")
         self._product_lock = threading.RLock()
+        super().__init__(*args, **kwargs)
 
     def _handler_type(self):
         base_handler = super()._handler_type()
@@ -92,7 +95,11 @@ class LocalOperatorHTTPServer(M55LocalOperatorHTTPServer):
                         or "belongs to another project" in detail
                         else HTTPStatus.BAD_REQUEST
                     )
-                    self._error(status, "product_conflict" if status == HTTPStatus.CONFLICT else "invalid_product_request", detail)
+                    self._error(
+                        status,
+                        "product_conflict" if status == HTTPStatus.CONFLICT else "invalid_product_request",
+                        detail,
+                    )
 
             def _product_get(self, path: str, query_string: str) -> None:
                 parts = self._product_parts(path)
@@ -253,7 +260,11 @@ class LocalOperatorHTTPServer(M55LocalOperatorHTTPServer):
 
             @staticmethod
             def _is_product_path(path: str) -> bool:
-                return path == "/v1/projects" or path.startswith("/v1/projects/") or path == "/v1/product/restoration"
+                return (
+                    path == "/v1/projects"
+                    or path.startswith("/v1/projects/")
+                    or path == "/v1/product/restoration"
+                )
 
             @staticmethod
             def _product_parts(path: str) -> tuple[str, ...]:
