@@ -18,6 +18,7 @@ _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/trace_export.js": ("trace_export.js", "text/javascript; charset=utf-8"),
     "/ui/evidence_manifest.js": ("evidence_manifest.js", "text/javascript; charset=utf-8"),
     "/ui/signed_manifest_pair.js": ("signed_manifest_pair.js", "text/javascript; charset=utf-8"),
+    "/ui/signed_manifest_capsule.js": ("signed_manifest_capsule.js", "text/javascript; charset=utf-8"),
     "/ui/lifecycle_export.js": ("lifecycle_export.js", "text/javascript; charset=utf-8"),
     "/ui/snapshot_export.js": ("snapshot_export.js", "text/javascript; charset=utf-8"),
     "/ui/reload_auth.js": ("reload_auth.js", "text/javascript; charset=utf-8"),

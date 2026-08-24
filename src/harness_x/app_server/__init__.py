@@ -1,5 +1,13 @@
 """Local single-user Harness X App Server foundation and operator UI."""
 
+from .capsule_operator_http_server import LocalOperatorHTTPServer
+from .evidence_capsule import (
+    CAPSULE_FILENAME,
+    CAPSULE_SCHEMA_VERSION,
+    EvidenceCapsuleRenderError,
+    RenderedEvidenceCapsule,
+    render_signed_manifest_capsule,
+)
 from .evidence_manifest import (
     EvidenceManifestCorruptionError,
     EvidenceManifestNotTerminalError,
@@ -32,7 +40,6 @@ from .report_projection import (
     build_coding_report_projection,
 )
 from .service import AppServerService, HarnessCodingRunner
-from .signed_evidence_operator_http_server import LocalOperatorHTTPServer
 from .snapshot_export import (
     MAX_SESSION_SNAPSHOT_EXPORT_BYTES,
     PortableSessionSnapshot,
@@ -59,8 +66,11 @@ __all__ = [
     "AppSessionSnapshot",
     "AppSessionStatus",
     "AppSessionStore",
+    "CAPSULE_FILENAME",
+    "CAPSULE_SCHEMA_VERSION",
     "CodingReportProjection",
     "CodingSessionRequest",
+    "EvidenceCapsuleRenderError",
     "EvidenceManifestCorruptionError",
     "EvidenceManifestNotTerminalError",
     "HarnessCodingRunner",
@@ -72,6 +82,7 @@ __all__ = [
     "LocalOperatorHTTPServer",
     "MAX_SESSION_SNAPSHOT_EXPORT_BYTES",
     "PortableSessionSnapshot",
+    "RenderedEvidenceCapsule",
     "RenderedSessionSnapshot",
     "ReportCorruptionError",
     "ReportUnavailableError",
@@ -87,6 +98,7 @@ __all__ = [
     "build_trace_projection_page",
     "load_verified_trace_records",
     "render_lifecycle_ledger_export",
+    "render_signed_manifest_capsule",
     "render_terminal_evidence_manifest",
     "render_terminal_session_snapshot",
 ]
