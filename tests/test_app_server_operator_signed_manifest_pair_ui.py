@@ -65,7 +65,10 @@ def test_signed_manifest_pair_client_pins_exact_correlation_and_m52_envelope_sha
     assert 'JSON.stringify({' in javascript
     assert ') + "\\n";' in javascript
     assert javascript.index("signedManifestPairFetchManifest(") < javascript.index("signedManifestPairFetchSignature(")
-    assert javascript.index("const signature = await signedManifestPairFetchSignature(") < javascript.index("signedManifestPairClickDownload(")
+    assert (
+        javascript.index("const signature = await signedManifestPairFetchSignature(")
+        < javascript.index("signedManifestPairClickDownload(\n      manifest.bytes")
+    )
 
     for forbidden in (
         "localStorage",
