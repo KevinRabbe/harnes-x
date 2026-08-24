@@ -110,9 +110,13 @@ Before either file download is initiated, the browser requires:
 - canonical 86-character base64url-without-padding encoding for one 64-byte Ed25519 signature;
 - exact raw response text equal to the frozen M52 sorted compact envelope serialization plus one terminal newline.
 
-The canonical 64-byte signature-text boundary is stricter than a generic 86-character URL-safe regex. Since 64 bytes leave four unused base64 pad bits, the last unpadded base64url character must be one of:
+For a 64-byte value, the first 85 base64url characters encode 510 data bits. The final character therefore contains only the remaining 2 data bits followed by 4 required zero pad bits. The only legal final unpadded base64url characters are:
 
-`AEIMQUYcgkosw048`
+`A`, `Q`, `g`, `w`
+
+Accordingly, the frozen M54 signature-text pattern is:
+
+`^[A-Za-z0-9_-]{85}[AQgw]$`
 
 The raw-envelope equality check additionally rejects duplicate JSON object keys, reordering, inserted whitespace, omitted terminal newline, and other non-M52 serializations even if ordinary `JSON.parse()` would otherwise accept them.
 
@@ -173,7 +177,7 @@ It proves:
 - success status exposes the correlated SHA and key identifier without a trust claim;
 - signature response-header SHA mismatch suppresses both downloads and fails visibly;
 - duplicate/non-canonical envelope serialization suppresses both downloads;
-- syntactically URL-safe but non-canonical 64-byte base64url signature text suppresses both downloads;
+- an otherwise URL-safe 86-character signature ending in `E`—which the earlier 16-character terminal set incorrectly admitted—now fails the exact 64-byte pad-bit rule and suppresses both downloads;
 - selected-session change while the signature request is outstanding suppresses stale downloads;
 - HTTP 401 suppresses downloads and clears M54-local bearer eligibility;
 - unload cleanup is installed.
@@ -221,18 +225,18 @@ M54 does not add:
 
 ## Exact source-complete M53 → M54 diff
 
-Source-complete candidate head:
+Final source/test candidate before this documentation-only commit:
 
-`d6bdc5e6522b533ae6f524b08fd0babde7edd04b`
+`5abdffd86b265b0a30905c7a6362742a989e8e86`
 
 Against exact frozen M53 `cc0ba28199005144906dda39837d1ca7828f1da3`:
 
 - status: ahead;
 - exact merge base: frozen M53;
-- commits ahead: 10;
+- commits ahead: 13;
 - commits behind: 0;
 - changed files: 5;
-- additions: 970;
+- additions: 1111;
 - deletions: 0.
 
 Changed files are exactly:
@@ -245,17 +249,17 @@ Changed files are exactly:
 
 No App Server HTTP/server/service/store/protocol/session/runtime, M43 evidence builder/renderer, M44–M54 offline verifier/signing implementation, report/trace/snapshot generation, coding runtime/verifier, model/tool, memory, budget, controller, or control implementation changed.
 
-The final documentation-only contract commit will move the M54 head once more; the PR freeze record must therefore use a fresh exact-head compare and exact-head CI rather than treating this source-complete SHA as the frozen SHA.
+This documentation-only contract commit moves the M54 head once more; the PR freeze record must therefore use a fresh exact-head compare and exact-head CI rather than treating the source/test candidate SHA as the frozen SHA.
 
 ## Source-audit findings
 
 Qualification deliberately kept the following findings visible:
 
 1. The initial signature-body validation used `JSON.parse()` plus an exact key set. Duplicate keys could still survive JSON parsing. The final client requires the raw body to equal the canonical frozen M52 sorted compact serialization plus terminal newline, rejecting duplicates and alternate serialization.
-2. The initial signature text check accepted any 86 URL-safe characters. The final client enforces the legal last-character set for canonical base64url encoding of exactly 64 bytes.
+2. The initial signature text check accepted any 86 URL-safe characters. It was then narrowed to a 16-character terminal set, but final bit-level review showed that a 64-byte value has only 2 data bits in the last base64url symbol. The frozen client therefore permits only `A`, `Q`, `g`, or `w` as the final character.
 3. A static test initially banned the literal word `Ed25519`, overreaching beyond the actual authority boundary. The final test forbids the trust operation (`crypto.subtle.verify`) and public-key fetch surfaces instead.
 4. One source-order assertion compared the helper function definition against the later signature-fetch call and failed despite correct runtime order. The final assertion pins the actual manifest-download call site.
-5. The canonical-signature hardening received an explicit Node behavioral regression using an 86-character URL-safe value with illegal trailing pad bits; both downloads must be suppressed.
+5. The final pad-bit regression deliberately uses `"A".repeat(85) + "E"`: `E` was accepted by the superseded 16-character terminal set but is non-canonical for a 64-byte value. Both downloads must be suppressed.
 
 No backend production change was required by these source-audit findings.
 
@@ -290,7 +294,7 @@ Head `b118eaa5a05eac94bbbc21537ee914f9d3534a16`.
 - `harness-x --help`: PASS;
 - config validation: PASS, `valid: system_version=0.1.0-alpha.0`.
 
-This run was superseded by the canonical 64-byte base64url hardening.
+This run was superseded by canonical signature-text hardening.
 
 ### CI #1397 — provisional green
 
@@ -306,7 +310,7 @@ Head `ee38dbdf0d65249e9c2e041c94bf0df72a9bcb0c`.
 - `harness-x --help`: PASS;
 - config validation: PASS.
 
-This run proved the canonical signature-text implementation but was superseded by adding a dedicated behavioral non-canonical-pad-bits regression.
+This run was superseded by a dedicated non-canonical signature-text behavioral regression.
 
 ### CI #1399 — source-complete green candidate
 
@@ -326,11 +330,30 @@ Head `d6bdc5e6522b533ae6f524b08fd0babde7edd04b`.
 - `harness-x validate-config configs/default.yaml`: PASS;
 - config output: `valid: system_version=0.1.0-alpha.0`.
 
-CI #1399 is source-complete qualification, not the freeze gate, because this final contract documentation commit moves the PR head.
+This run was superseded first by final contract documentation and then by the final pad-bit source audit.
+
+### CI #1401 — green but superseded by source audit
+
+Head `628d758a5ab817a2df24004ab7766b42e85112ca`.
+
+- run number: `1401`;
+- run id: `32679213651`;
+- job id: `97292785839`;
+- synthetic merge: `149f427ec803972e48e59cfa18c6eb4c5c769c15`;
+- exact checkout: `Merge 628d758a5ab817a2df24004ab7766b42e85112ca into cc0ba28199005144906dda39837d1ca7828f1da3`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- `cryptography 46.0.7`;
+- pytest: `675 passed in 95.68s (0:01:35)`;
+- `harness-x --help`: PASS;
+- config validation: PASS, `valid: system_version=0.1.0-alpha.0`.
+
+CI #1401 is **not** freeze evidence. Post-run bit-level source audit found the 16-character terminal base64url set too permissive for a 64-byte value, so source and regression tests moved again.
 
 ## Freeze gate
 
-M54 is freeze-eligible only after the documentation-only final head has:
+M54 is freeze-eligible only after this final documentation head has:
 
 - exact frozen-M53 merge base and zero commits behind;
 - the same five-file authority boundary;
