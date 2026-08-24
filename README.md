@@ -116,7 +116,7 @@ Unsloth is an alternative execution backend for the same prepared bundle:
 
 ```bash
 python -m pip install -e ".[unsloth-training]"
-harness-x train-self-model-adapter .harness-x/self-model-training --backend unsloth --output .harness-x/self-model-adapter-unsloth/adapter
+harness-x train-self-model-adapter .harness-x/self-model-training --backend unsloth --output .harness-x/self-model-adapter-unsloth
 harness-x benchmark-context-compression .harness-x/self-model-training/cohort --base-model <model> --adapter .harness-x/self-model-adapter-unsloth/adapter --output .harness-x/context-compression
 ```
 
