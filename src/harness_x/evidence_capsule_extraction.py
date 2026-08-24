@@ -280,6 +280,16 @@ def _safe_output_target(path: Path) -> Path:
         raise EvidenceCapsuleExtractionError(str(exc)) from exc
 
 
+def _rollback_created_manifest(path: str, original: BaseException) -> None:
+    try:
+        os.unlink(path)
+    except OSError as rollback_exc:
+        raise EvidenceCapsuleExtractionError(
+            f"{original}; additionally failed to roll back newly created manifest output: "
+            f"{path}: {rollback_exc}"
+        ) from rollback_exc
+
+
 def extract_evidence_capsule(
     capsule_path: str | Path,
     *,
@@ -313,18 +323,12 @@ def extract_evidence_capsule(
         )
     except PortableEvidenceVerificationError as exc:
         if manifest_created is not None:
-            try:
-                os.unlink(manifest_created)
-            except OSError:
-                pass
+            _rollback_created_manifest(manifest_created, exc)
         raise EvidenceCapsuleExtractionError(str(exc)) from exc
-    except Exception:
+    except Exception as exc:
         if manifest_created is not None:
-            try:
-                os.unlink(manifest_created)
-            except OSError:
-                pass
-        raise
+            _rollback_created_manifest(manifest_created, exc)
+        raise EvidenceCapsuleExtractionError(f"capsule extraction failed: {exc}") from exc
 
     return ExtractedEvidenceCapsule(
         manifest_path=manifest_created,
