@@ -181,6 +181,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local causal-trace.jsonl export when the manifest marks it available",
     )
+
+    sign_receipt = subparsers.add_parser(
+        "sign-evidence-receipt",
+        help="Sign exact verification-receipt bytes with an Ed25519 private key",
+    )
+    sign_receipt.add_argument("receipt", type=Path)
+    sign_receipt.add_argument("--private-key", type=Path, required=True)
+    sign_receipt.add_argument("--output", type=Path, required=True)
+
+    verify_receipt_signature = subparsers.add_parser(
+        "verify-evidence-receipt-signature",
+        help="Verify a detached M60 Ed25519 signature over exact receipt bytes",
+    )
+    verify_receipt_signature.add_argument("receipt", type=Path)
+    verify_receipt_signature.add_argument("--signature", type=Path, required=True)
+    verify_receipt_signature.add_argument("--public-key", type=Path, required=True)
     return parser
 
 
@@ -214,6 +230,40 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.manifest,
                 private_key_path=args.private_key,
                 output_path=args.output,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "sign-evidence-receipt":
+        from .evidence_verification import PortableEvidenceVerificationError
+        from .evidence_verification_receipt_signing import (
+            sign_evidence_verification_receipt,
+        )
+
+        try:
+            result = sign_evidence_verification_receipt(
+                args.receipt,
+                private_key_path=args.private_key,
+                output_path=args.output,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "verify-evidence-receipt-signature":
+        from .evidence_verification import PortableEvidenceVerificationError
+        from .evidence_verification_receipt_signing import (
+            verify_evidence_verification_receipt_signature,
+        )
+
+        try:
+            result = verify_evidence_verification_receipt_signature(
+                args.receipt,
+                signature_path=args.signature,
+                public_key_path=args.public_key,
             )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
