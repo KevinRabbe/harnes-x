@@ -88,7 +88,21 @@ def _decode_base64url(text: str) -> bytes:
 def test_capsule_renderer_preserves_exact_manifest_and_signature_bytes() -> None:
     manifest_payload = b'{"manifest":true}\n'
     manifest_sha256 = hashlib.sha256(manifest_payload).hexdigest()
-    signature_payload = b'{"signature":"opaque"}\n'
+    key_fingerprint = "sha256:" + "a" * 64
+    signature_payload = (
+        json.dumps(
+            {
+                "algorithm": "ed25519",
+                "key_fingerprint": key_fingerprint,
+                "manifest_sha256": manifest_sha256,
+                "schema_version": "app-evidence-signature-v1",
+                "signature": "A" * 86,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
     manifest = RenderedEvidenceManifest(
         payload=manifest_payload,
         source_bytes=len(manifest_payload),
@@ -98,7 +112,7 @@ def test_capsule_renderer_preserves_exact_manifest_and_signature_bytes() -> None
         payload=signature_payload,
         source_bytes=len(signature_payload),
         manifest_sha256=manifest_sha256,
-        key_fingerprint="sha256:" + "a" * 64,
+        key_fingerprint=key_fingerprint,
     )
 
     rendered = render_signed_manifest_capsule(manifest, signature)
@@ -121,14 +135,23 @@ def test_capsule_renderer_preserves_exact_manifest_and_signature_bytes() -> None
     assert _decode_base64url(capsule["manifest_payload"]) == manifest_payload
     assert _decode_base64url(capsule["signature_payload"]) == signature_payload
 
-    mismatched = RenderedEvidenceSignature(
+    mismatched_manifest = RenderedEvidenceSignature(
         payload=signature_payload,
         source_bytes=len(signature_payload),
         manifest_sha256="f" * 64,
         key_fingerprint=signature.key_fingerprint,
     )
     with pytest.raises(EvidenceCapsuleRenderError, match="different manifest bytes"):
-        render_signed_manifest_capsule(manifest, mismatched)
+        render_signed_manifest_capsule(manifest, mismatched_manifest)
+
+    mismatched_metadata = RenderedEvidenceSignature(
+        payload=signature_payload,
+        source_bytes=len(signature_payload),
+        manifest_sha256=manifest_sha256,
+        key_fingerprint="sha256:" + "b" * 64,
+    )
+    with pytest.raises(EvidenceCapsuleRenderError, match="key fingerprint disagrees"):
+        render_signed_manifest_capsule(manifest, mismatched_metadata)
 
 
 def test_capsule_route_requires_auth_before_disclosing_signer_configuration(tmp_path: Path) -> None:
