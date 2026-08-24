@@ -78,6 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
     sign.add_argument("manifest", type=Path)
     sign.add_argument("--private-key", type=Path, required=True)
     sign.add_argument("--output", type=Path, required=True)
+
+    extract = subparsers.add_parser(
+        "extract-evidence-capsule",
+        help="Validate and extract exact manifest/signature bytes from an M55 capsule",
+    )
+    extract.add_argument("capsule", type=Path)
+    extract.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Existing local directory for the two fixed M43/M52 output filenames",
+    )
     return parser
 
 
@@ -111,6 +123,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.manifest,
                 private_key_path=args.private_key,
                 output_path=args.output,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "extract-evidence-capsule":
+        from .evidence_capsule_extraction import extract_evidence_capsule
+        from .evidence_verification import PortableEvidenceVerificationError
+
+        try:
+            result = extract_evidence_capsule(
+                args.capsule,
+                output_dir=args.output_dir,
             )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
