@@ -197,6 +197,61 @@ def build_parser() -> argparse.ArgumentParser:
     verify_receipt_signature.add_argument("receipt", type=Path)
     verify_receipt_signature.add_argument("--signature", type=Path, required=True)
     verify_receipt_signature.add_argument("--public-key", type=Path, required=True)
+
+    verify_authenticated_receipt = subparsers.add_parser(
+        "verify-authenticated-evidence-receipt",
+        help="Require M60 receipt authentication and M59 fresh reconciliation for the same bytes",
+    )
+    verify_authenticated_receipt.add_argument("receipt", type=Path)
+    verify_authenticated_receipt.add_argument("capsule", type=Path)
+    verify_authenticated_receipt.add_argument(
+        "--receipt-signature",
+        type=Path,
+        required=True,
+        help="Detached M60 signature envelope for the exact receipt bytes",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--receipt-public-key",
+        type=Path,
+        required=True,
+        help="Externally trusted Ed25519 public key for receipt-byte authentication",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--evidence-public-key",
+        type=Path,
+        required=True,
+        help="Externally trusted Ed25519 public key for frozen evidence verification",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Existing directory that will retain fresh fixed extracted evidence files",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    verify_authenticated_receipt.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     return parser
 
 
@@ -264,6 +319,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.receipt,
                 signature_path=args.signature,
                 public_key_path=args.public_key,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "verify-authenticated-evidence-receipt":
+        from .evidence_authenticated_receipt_verification import (
+            verify_authenticated_evidence_receipt,
+        )
+        from .evidence_verification import PortableEvidenceVerificationError
+
+        try:
+            result = verify_authenticated_evidence_receipt(
+                args.receipt,
+                args.capsule,
+                receipt_signature_path=args.receipt_signature,
+                receipt_public_key_path=args.receipt_public_key,
+                evidence_public_key_path=args.evidence_public_key,
+                output_dir=args.output_dir,
+                snapshot_path=args.snapshot,
+                lifecycle_path=args.lifecycle,
+                report_path=args.report,
+                trace_path=args.trace,
             )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
