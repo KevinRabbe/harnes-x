@@ -1,6 +1,10 @@
 namespace HarnessX.Desktop;
 
-internal sealed record DesktopPaths(string AppServerRoot, string WebViewUserDataRoot)
+internal sealed record DesktopPaths(
+    string Root,
+    string AppServerRoot,
+    string WebViewUserDataRoot,
+    string AppServerExecutablePathFile)
 {
     public static DesktopPaths Create()
     {
@@ -13,8 +17,13 @@ internal sealed record DesktopPaths(string AppServerRoot, string WebViewUserData
         var root = Path.Combine(localAppData, "Harness X");
         var appServer = Path.Combine(root, "AppServer");
         var webView = Path.Combine(root, "WebView2");
+        Directory.CreateDirectory(root);
         Directory.CreateDirectory(appServer);
         Directory.CreateDirectory(webView);
-        return new DesktopPaths(appServer, webView);
+        return new DesktopPaths(
+            root,
+            appServer,
+            webView,
+            Path.Combine(root, "app-server-executable.txt"));
     }
 }
