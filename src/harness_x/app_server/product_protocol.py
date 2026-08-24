@@ -93,3 +93,7 @@ class AppendUserMessageRequest(BaseModel):
     )
     role: Literal["user"] = "user"
     content: ChatTextContent
+
+    @property
+    def text(self) -> str:
+        return self.content.text
