@@ -4,6 +4,8 @@ M55 is stacked directly on frozen M54 and closes the remaining transport/save bo
 
 M55 adds one **server-atomic, single-response, single-save signed-manifest capsule**. The App Server renders one M43 terminal evidence manifest exactly once, signs those exact bytes through the frozen M53/M52 Ed25519 path, wraps the exact manifest bytes plus exact detached-signature-envelope bytes in one deterministic byte-preserving JSON capsule, and returns that capsule through one authenticated endpoint. The browser validates the capsule and initiates one fixed-name download.
 
+Here **server-atomic** is deliberately narrow: manifest rendering, signature generation, capsule construction, and HTTP delivery happen in one request without a manifest/signature inter-request race. M55 does not turn the pre-existing M43 reads of snapshot/lifecycle/report/trace evidence into an operating-system or database transaction, and it does not claim that a browser-initiated file save is durable or filesystem-transactional.
+
 M55 does not make the browser a signature-trust authority. The capsule contains no public key, certificate, identity assertion, timestamp authority, or trust-on-first-use state. Offline cryptographic verification remains the frozen M52 verifier with a public key obtained through an external trusted channel.
 
 ## Stack
@@ -55,7 +57,7 @@ For one successful request M55 performs exactly one authoritative terminal evide
 6. retain the exact frozen M52 detached-signature envelope bytes returned by that signer;
 7. build one deterministic capsule from those two already-retained byte strings.
 
-The manifest is not regenerated between signing and capsule construction. The signature therefore names and covers the exact manifest bytes embedded in the same response.
+The manifest is not regenerated between signing and capsule construction. The signature therefore names and covers the exact manifest bytes embedded in the same response. Before wrapping, the M55 renderer also revalidates that the retained signature bytes are the canonical frozen M52 envelope and that its algorithm, key fingerprint, and manifest SHA agree with the retained signature metadata and exact manifest bytes.
 
 M55 adds no signature persistence and no second signing key. It reuses the one M53 signer loaded at process startup.
 
@@ -149,8 +151,9 @@ It does **not** establish:
 - host/server/network identity;
 - signature or completion time;
 - uncompromised private-key custody;
+- transactional atomicity of the upstream M43 snapshot/lifecycle/report/trace reads;
 - semantic truth of report/trace/lifecycle claims;
-- immutable filesystem persistence after the browser initiates the save.
+- successful, durable, or transactionally atomic filesystem persistence after the browser initiates the save.
 
 Anyone holding the configured private key can create indistinguishable valid M52 signatures. Public-key trust remains external.
 
