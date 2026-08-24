@@ -18,6 +18,7 @@ from harness_x.app_server.evidence_capsule import CAPSULE_SCHEMA_VERSION
 from harness_x.app_server.evidence_manifest import render_terminal_evidence_manifest
 
 from .evidence_signing import (
+    MAX_EVIDENCE_SIGNATURE_BYTES,
     EvidenceSignatureEnvelope,
     EvidenceSigningError,
     _envelope_bytes,
@@ -26,6 +27,7 @@ from .evidence_signing import (
     _signature_bytes,
 )
 from .evidence_verification import (
+    MAX_EVIDENCE_MANIFEST_BYTES,
     BoundedEvidenceSource,
     PortableEvidenceVerificationError,
     _bounded_regular_file,
@@ -209,6 +211,15 @@ def validate_evidence_capsule(
         raw["signature_payload"],
         field="signature_payload",
     )
+    if len(manifest_payload) > MAX_EVIDENCE_MANIFEST_BYTES:
+        raise EvidenceCapsuleExtractionError(
+            f"embedded manifest exceeds {MAX_EVIDENCE_MANIFEST_BYTES} byte limit"
+        )
+    if len(signature_payload) > MAX_EVIDENCE_SIGNATURE_BYTES:
+        raise EvidenceCapsuleExtractionError(
+            f"embedded signature exceeds {MAX_EVIDENCE_SIGNATURE_BYTES} byte limit"
+        )
+
     observed_manifest_sha256 = hashlib.sha256(manifest_payload).hexdigest()
     if observed_manifest_sha256 != manifest_sha256:
         raise EvidenceCapsuleExtractionError(
@@ -262,6 +273,13 @@ def load_evidence_capsule(path: str | Path) -> ValidatedEvidenceCapsule:
     return validate_evidence_capsule(source)
 
 
+def _safe_output_target(path: Path) -> Path:
+    try:
+        return _safe_output_path(path)
+    except PortableEvidenceVerificationError as exc:
+        raise EvidenceCapsuleExtractionError(str(exc)) from exc
+
+
 def extract_evidence_capsule(
     capsule_path: str | Path,
     *,
@@ -271,8 +289,8 @@ def extract_evidence_capsule(
 
     validated = load_evidence_capsule(capsule_path)
     output_root = Path(output_dir).expanduser()
-    manifest_target = _safe_output_path(output_root / MANIFEST_FILENAME)
-    signature_target = _safe_output_path(output_root / SIGNATURE_FILENAME)
+    manifest_target = _safe_output_target(output_root / MANIFEST_FILENAME)
+    signature_target = _safe_output_target(output_root / SIGNATURE_FILENAME)
     if manifest_target == signature_target:
         raise EvidenceCapsuleExtractionError("capsule output targets must be distinct")
     for target in (manifest_target, signature_target):
