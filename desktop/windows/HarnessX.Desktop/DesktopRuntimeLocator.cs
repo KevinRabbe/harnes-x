@@ -9,7 +9,7 @@ internal static class DesktopRuntimeLocator
         var resolved = TryResolve(paths);
         if (resolved is not null)
         {
-            Persist(paths, resolved);
+            TryRemember(paths, resolved);
             return resolved;
         }
 
@@ -25,22 +25,22 @@ internal static class DesktopRuntimeLocator
         if (dialog.ShowDialog(owner) != DialogResult.OK)
         {
             throw new OperationCanceledException(
-                "Harness X needs the existing harness-x-app-server.exe from your Python environment. "
-                + "Select it once and Harness X will remember the location.");
+                "Harness X needs the existing harness-x-app-server.exe from your Python environment.");
         }
 
-        var selected = Path.GetFullPath(dialog.FileName);
-        if (!string.Equals(Path.GetFileName(selected), AppServerName, StringComparison.OrdinalIgnoreCase))
+        var selected = ExistingAppServerFile(dialog.FileName);
+        if (selected is null)
         {
             throw new InvalidOperationException(
                 "Select harness-x-app-server.exe from the Python environment where Harness X is installed.");
         }
-        Persist(paths, selected);
+        TryRemember(paths, selected);
         return selected;
     }
 
     internal static string? TryResolve(DesktopPaths paths)
     {
+        // Explicit operator configuration is authoritative and may intentionally use a wrapper name.
         var configured = ExistingFile(Environment.GetEnvironmentVariable("HARNESS_X_APP_SERVER_EXECUTABLE"));
         if (configured is not null)
         {
@@ -53,7 +53,7 @@ internal static class DesktopRuntimeLocator
             return remembered;
         }
 
-        var adjacent = ExistingFile(Path.Combine(AppContext.BaseDirectory, AppServerName));
+        var adjacent = ExistingAppServerFile(Path.Combine(AppContext.BaseDirectory, AppServerName));
         if (adjacent is not null)
         {
             return adjacent;
@@ -63,7 +63,7 @@ internal static class DesktopRuntimeLocator
         {
             foreach (var environmentName in new[] { ".venv", "venv" })
             {
-                var candidate = ExistingFile(
+                var candidate = ExistingAppServerFile(
                     Path.Combine(root, environmentName, "Scripts", AppServerName));
                 if (candidate is not null)
                 {
@@ -75,13 +75,41 @@ internal static class DesktopRuntimeLocator
         var pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = ExistingFile(Path.Combine(directory.Trim(), AppServerName));
+            var normalizedDirectory = directory.Trim().Trim('"');
+            var candidate = ExistingAppServerFile(Path.Combine(normalizedDirectory, AppServerName));
             if (candidate is not null)
             {
                 return candidate;
             }
         }
         return null;
+    }
+
+    internal static bool TryRemember(DesktopPaths paths, string executable)
+    {
+        var normalized = ExistingAppServerFile(executable);
+        if (normalized is null)
+        {
+            return false;
+        }
+
+        var temporary = paths.AppServerExecutablePathFile + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, normalized + Environment.NewLine);
+            File.Move(temporary, paths.AppServerExecutablePathFile, overwrite: true);
+            return true;
+        }
+        catch (IOException)
+        {
+            DeleteTemporaryBestEffort(temporary);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            DeleteTemporaryBestEffort(temporary);
+            return false;
+        }
     }
 
     private static IEnumerable<string> CandidateRoots()
@@ -117,9 +145,9 @@ internal static class DesktopRuntimeLocator
             {
                 return null;
             }
-            return ExistingFile(File.ReadAllText(path).Trim());
+            return ExistingAppServerFile(File.ReadAllText(path).Trim());
         }
-        catch (OSError)
+        catch (IOException)
         {
             return null;
         }
@@ -127,6 +155,17 @@ internal static class DesktopRuntimeLocator
         {
             return null;
         }
+    }
+
+    private static string? ExistingAppServerFile(string? path)
+    {
+        var existing = ExistingFile(path);
+        if (existing is null
+            || !string.Equals(Path.GetFileName(existing), AppServerName, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return existing;
     }
 
     private static string? ExistingFile(string? path)
@@ -137,7 +176,7 @@ internal static class DesktopRuntimeLocator
         }
         try
         {
-            var full = Path.GetFullPath(path.Trim());
+            var full = Path.GetFullPath(path.Trim().Trim('"'));
             return File.Exists(full) ? full : null;
         }
         catch (Exception exc) when (exc is ArgumentException or NotSupportedException or PathTooLongException)
@@ -146,10 +185,14 @@ internal static class DesktopRuntimeLocator
         }
     }
 
-    private static void Persist(DesktopPaths paths, string executable)
+    private static void DeleteTemporaryBestEffort(string path)
     {
-        var temporary = paths.AppServerExecutablePathFile + ".tmp";
-        File.WriteAllText(temporary, executable + Environment.NewLine);
-        File.Move(temporary, paths.AppServerExecutablePathFile, overwrite: true);
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 }
