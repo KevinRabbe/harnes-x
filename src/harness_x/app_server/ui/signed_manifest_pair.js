@@ -11,7 +11,7 @@ const signedManifestPairButton = signedManifestPairById("download-signed-manifes
 const signedManifestPairStatus = signedManifestPairById("signed-manifest-pair-status");
 const signedManifestPairShaPattern = /^[0-9a-f]{64}$/;
 const signedManifestPairKeyPattern = /^sha256:[0-9a-f]{64}$/;
-const signedManifestPairSignaturePattern = /^[A-Za-z0-9_-]{86}$/;
+const signedManifestPairSignaturePattern = /^[A-Za-z0-9_-]{85}[AEIMQUYcgkosw048]$/;
 const signedManifestPairTerminalStates = new Set(["succeeded", "failed", "cancelled"]);
 const signedManifestPairAvailabilityStates = new Set(["available", "not_available"]);
 const signedManifestPairEnvelopeKeys = [
@@ -269,7 +269,7 @@ async function signedManifestPairFetchSignature(
     throw new Error("evidence signature envelope refers to different manifest bytes");
   }
   if (!signedManifestPairSignaturePattern.test(envelope.signature || "")) {
-    throw new Error("evidence signature envelope contains invalid Ed25519 signature text");
+    throw new Error("evidence signature envelope contains non-canonical Ed25519 signature text");
   }
   if (envelopeText !== signedManifestPairCanonicalEnvelope(envelope)) {
     throw new Error("evidence signature body is not the canonical M52 envelope serialization");
