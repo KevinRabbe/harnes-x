@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from harness_x.product import ChatTextContent
+
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
@@ -90,12 +92,4 @@ class AppendUserMessageRequest(BaseModel):
         "append-user-message-request-v1"
     )
     role: Literal["user"] = "user"
-    content_type: Literal["text"] = "text"
-    text: str = Field(min_length=1, max_length=120_000)
-
-    @field_validator("text")
-    @classmethod
-    def require_nonblank_text(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("chat message text cannot be blank")
-        return value
+    content: ChatTextContent
