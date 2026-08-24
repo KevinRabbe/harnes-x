@@ -22,7 +22,51 @@ internal static class Program
             $"harness-x-desktop-smoke-{Guid.NewGuid():N}");
         try
         {
-            await using var server = await AppServerChild.StartAsync(root);
+            Directory.CreateDirectory(root);
+            var paths = new DesktopPaths(
+                root,
+                Path.Combine(root, "AppServer"),
+                Path.Combine(root, "WebView2"),
+                Path.Combine(root, "app-server-executable.txt"));
+
+            var appServerExecutable = DesktopRuntimeLocator.TryResolve(paths);
+            if (appServerExecutable is null)
+            {
+                return 4;
+            }
+
+            if (string.Equals(
+                    Path.GetFileName(appServerExecutable),
+                    "harness-x-app-server.exe",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                if (!DesktopRuntimeLocator.TryRemember(paths, appServerExecutable))
+                {
+                    return 5;
+                }
+
+                var configured = Environment.GetEnvironmentVariable("HARNESS_X_APP_SERVER_EXECUTABLE");
+                var pathValue = Environment.GetEnvironmentVariable("PATH");
+                try
+                {
+                    Environment.SetEnvironmentVariable("HARNESS_X_APP_SERVER_EXECUTABLE", null);
+                    Environment.SetEnvironmentVariable("PATH", string.Empty);
+                    var remembered = DesktopRuntimeLocator.TryResolve(paths);
+                    if (!string.Equals(remembered, appServerExecutable, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return 6;
+                    }
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable("HARNESS_X_APP_SERVER_EXECUTABLE", configured);
+                    Environment.SetEnvironmentVariable("PATH", pathValue);
+                }
+            }
+
+            await using var server = await AppServerChild.StartAsync(
+                appServerExecutable,
+                paths.AppServerRoot);
             if (!DesktopUriPolicy.IsAllowedNavigation(server.BootstrapUri.AbsoluteUri, server.BaseUri))
             {
                 return 2;
