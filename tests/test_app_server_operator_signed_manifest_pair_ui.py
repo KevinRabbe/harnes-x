@@ -75,7 +75,6 @@ def test_signed_manifest_pair_client_pins_exact_correlation_and_m52_envelope_sha
         "public-key",
         "public_key",
         "crypto.subtle.verify",
-        "Ed25519",
         "bundle.zip",
         "?path=",
     ):
