@@ -50,7 +50,8 @@ internal sealed class MainForm : Form
         try
         {
             var paths = DesktopPaths.Create();
-            _server = await AppServerChild.StartAsync(paths.AppServerRoot);
+            var appServerExecutable = DesktopRuntimeLocator.ResolveOrPrompt(this, paths);
+            _server = await AppServerChild.StartAsync(appServerExecutable, paths.AppServerRoot);
             var environment = await CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: null,
                 userDataFolder: paths.WebViewUserDataRoot,
@@ -60,6 +61,10 @@ internal sealed class MainForm : Form
             _status.Visible = false;
             _webView.Visible = true;
             _webView.Source = _server.BootstrapUri;
+        }
+        catch (OperationCanceledException)
+        {
+            Close();
         }
         catch (Exception exc)
         {
