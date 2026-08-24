@@ -132,6 +132,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local causal-trace.jsonl export when the manifest marks it available",
     )
+    verify_capsule.add_argument(
+        "--receipt",
+        type=Path,
+        default=None,
+        help="Optional exclusive output path for an unsigned deterministic M58 verification receipt",
+    )
     return parser
 
 
@@ -199,6 +205,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report_path=args.report,
                 trace_path=args.trace,
             )
+            if args.receipt is not None:
+                from .evidence_verification_receipt import persist_verification_receipt
+
+                result = persist_verification_receipt(
+                    result,
+                    receipt_path=args.receipt,
+                )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
         print(result.summary())
