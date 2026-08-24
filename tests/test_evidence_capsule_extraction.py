@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -28,10 +28,12 @@ from harness_x.evidence_capsule_extraction import (
     load_evidence_capsule,
 )
 from harness_x.evidence_signing import (
+    MAX_EVIDENCE_SIGNATURE_BYTES,
     EvidenceSigningError,
     generate_evidence_keypair,
     verify_portable_evidence_with_signature,
 )
+from harness_x.evidence_verification import MAX_EVIDENCE_MANIFEST_BYTES
 
 
 def _request(workspace: Path) -> CodingSessionRequest:
@@ -143,7 +145,7 @@ def test_extract_capsule_preserves_exact_m43_m52_bytes_and_verifies_with_frozen_
 def test_capsule_parser_rejects_duplicate_unknown_noncanonical_and_mismatched_content(
     tmp_path: Path,
 ) -> None:
-    service, _generated, _public_key, capsule_path, capsule_payload, _manifest, _signature = (
+    service, _generated, _public_key, _capsule_path, capsule_payload, _manifest, _signature = (
         _valid_capsule(tmp_path)
     )
     try:
@@ -211,8 +213,6 @@ def test_capsule_parser_rejects_duplicate_unknown_noncanonical_and_mismatched_co
             + b"\n"
         )
         bad_manifest["manifest_payload"] = _encode(bad_manifest_bytes)
-        import hashlib
-
         bad_manifest["manifest_sha256"] = hashlib.sha256(bad_manifest_bytes).hexdigest()
         signature_original = json.loads(_decode(str(raw["signature_payload"])))
         signature_original["manifest_sha256"] = bad_manifest["manifest_sha256"]
@@ -221,6 +221,32 @@ def test_capsule_parser_rejects_duplicate_unknown_noncanonical_and_mismatched_co
         bad_manifest_path.write_bytes(_canonical(bad_manifest))
         with pytest.raises(EvidenceCapsuleExtractionError, match="fingerprint does not match"):
             load_evidence_capsule(bad_manifest_path)
+    finally:
+        service.close()
+
+
+def test_embedded_payloads_must_fit_frozen_m44_m52_byte_limits(tmp_path: Path) -> None:
+    service, _generated, _public_key, _capsule_path, capsule_payload, _manifest, _signature = (
+        _valid_capsule(tmp_path)
+    )
+    try:
+        raw = json.loads(capsule_payload)
+
+        large_manifest = dict(raw)
+        large_manifest["manifest_payload"] = _encode(b"m" * (MAX_EVIDENCE_MANIFEST_BYTES + 1))
+        large_manifest_path = tmp_path / "large-manifest.json"
+        large_manifest_path.write_bytes(_canonical(large_manifest))
+        with pytest.raises(EvidenceCapsuleExtractionError, match="embedded manifest exceeds"):
+            load_evidence_capsule(large_manifest_path)
+
+        large_signature = dict(raw)
+        large_signature["signature_payload"] = _encode(
+            b"s" * (MAX_EVIDENCE_SIGNATURE_BYTES + 1)
+        )
+        large_signature_path = tmp_path / "large-signature.json"
+        large_signature_path.write_bytes(_canonical(large_signature))
+        with pytest.raises(EvidenceCapsuleExtractionError, match="embedded signature exceeds"):
+            load_evidence_capsule(large_signature_path)
     finally:
         service.close()
 
@@ -292,7 +318,7 @@ def test_extraction_rejects_symlink_output_parent(tmp_path: Path) -> None:
         real.mkdir()
         linked = tmp_path / "linked-output"
         linked.symlink_to(real, target_is_directory=True)
-        with pytest.raises(EvidenceSigningError, match="output parent is not a directory"):
+        with pytest.raises(EvidenceCapsuleExtractionError, match="output parent is not a directory"):
             extract_evidence_capsule(capsule_path, output_dir=linked)
         assert list(real.iterdir()) == []
     finally:
@@ -351,3 +377,5 @@ def test_extraction_module_contains_no_network_or_public_key_trust_surface() -> 
     assert "_bounded_regular_file" in source
     assert "_exclusive_write" in source
     assert "_load_manifest" in source
+    assert "MAX_EVIDENCE_MANIFEST_BYTES" in source
+    assert "MAX_EVIDENCE_SIGNATURE_BYTES" in source
