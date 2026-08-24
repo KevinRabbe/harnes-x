@@ -252,6 +252,66 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local causal-trace.jsonl export when the manifest marks it available",
     )
+
+    export_signed_receipt = subparsers.add_parser(
+        "export-signed-evidence-receipt",
+        help="Freshly verify a capsule, persist its M58 receipt, and sign those receipt bytes",
+    )
+    export_signed_receipt.add_argument("capsule", type=Path)
+    export_signed_receipt.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Existing directory that will retain fresh fixed extracted evidence files",
+    )
+    export_signed_receipt.add_argument(
+        "--evidence-public-key",
+        type=Path,
+        required=True,
+        help="Externally trusted Ed25519 public key for frozen evidence verification",
+    )
+    export_signed_receipt.add_argument(
+        "--receipt",
+        type=Path,
+        required=True,
+        help="Exclusive output path for the canonical frozen M58 receipt",
+    )
+    export_signed_receipt.add_argument(
+        "--receipt-private-key",
+        type=Path,
+        required=True,
+        help="Operator-managed Ed25519 private key for frozen M60 receipt signing",
+    )
+    export_signed_receipt.add_argument(
+        "--receipt-signature",
+        type=Path,
+        required=True,
+        help="Exclusive output path for the detached frozen M60 receipt signature",
+    )
+    export_signed_receipt.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    export_signed_receipt.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    export_signed_receipt.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    export_signed_receipt.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     return parser
 
 
@@ -339,6 +399,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 receipt_public_key_path=args.receipt_public_key,
                 evidence_public_key_path=args.evidence_public_key,
                 output_dir=args.output_dir,
+                snapshot_path=args.snapshot,
+                lifecycle_path=args.lifecycle,
+                report_path=args.report,
+                trace_path=args.trace,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "export-signed-evidence-receipt":
+        from .evidence_signed_receipt_export import export_signed_evidence_receipt
+        from .evidence_verification import PortableEvidenceVerificationError
+
+        try:
+            result = export_signed_evidence_receipt(
+                args.capsule,
+                output_dir=args.output_dir,
+                evidence_public_key_path=args.evidence_public_key,
+                receipt_path=args.receipt,
+                receipt_private_key_path=args.receipt_private_key,
+                receipt_signature_path=args.receipt_signature,
                 snapshot_path=args.snapshot,
                 lifecycle_path=args.lifecycle,
                 report_path=args.report,
