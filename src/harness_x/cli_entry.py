@@ -90,6 +90,48 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Existing local directory for the two fixed M43/M52 output filenames",
     )
+
+    verify_capsule = subparsers.add_parser(
+        "verify-evidence-capsule",
+        help="Extract an M55 capsule and verify its exact M43/M52 pair with a public key",
+    )
+    verify_capsule.add_argument("capsule", type=Path)
+    verify_capsule.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Existing directory that will retain the two fixed extracted evidence files",
+    )
+    verify_capsule.add_argument(
+        "--public-key",
+        type=Path,
+        required=True,
+        help="Externally trusted Ed25519 public-key PEM for frozen M52 verification",
+    )
+    verify_capsule.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    verify_capsule.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    verify_capsule.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    verify_capsule.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     return parser
 
 
@@ -137,6 +179,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = extract_evidence_capsule(
                 args.capsule,
                 output_dir=args.output_dir,
+            )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "verify-evidence-capsule":
+        from .evidence_capsule_verification import verify_evidence_capsule
+        from .evidence_verification import PortableEvidenceVerificationError
+
+        try:
+            result = verify_evidence_capsule(
+                args.capsule,
+                output_dir=args.output_dir,
+                public_key_path=args.public_key,
+                snapshot_path=args.snapshot,
+                lifecycle_path=args.lifecycle,
+                report_path=args.report,
+                trace_path=args.trace,
             )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
