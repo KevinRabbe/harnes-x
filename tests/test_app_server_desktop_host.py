@@ -75,7 +75,9 @@ def test_desktop_host_emits_private_bootstrap_handshake_and_stops_on_stdin_eof(
             base.hostname,
             base.port,
         )
-        assert bootstrap.query
+        assert bootstrap.query == ""
+        assert bootstrap.fragment.startswith("bootstrap=")
+        assert len(bootstrap.fragment) > len("bootstrap=")
         assert bootstrap.path.startswith("/ui")
 
         process.stdin.close()
