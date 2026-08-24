@@ -84,11 +84,20 @@ function signedManifestPairLength(response, label) {
   return declaredLength;
 }
 
-function signedManifestPairJson(bytes, label) {
+function signedManifestPairText(bytes, label) {
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (_error) {
-    throw new Error(`${label} body is not valid UTF-8 JSON`);
+    throw new Error(`${label} body is not valid UTF-8`);
+  }
+}
+
+function signedManifestPairJson(bytes, label) {
+  const text = signedManifestPairText(bytes, label);
+  try {
+    return { value: JSON.parse(text), text };
+  } catch (_error) {
+    throw new Error(`${label} body is not valid JSON`);
   }
 }
 
@@ -97,6 +106,16 @@ function signedManifestPairHasExactKeys(value, expected) {
   const observed = Object.keys(value).sort();
   if (observed.length !== expected.length) return false;
   return observed.every((key, index) => key === expected[index]);
+}
+
+function signedManifestPairCanonicalEnvelope(envelope) {
+  return JSON.stringify({
+    algorithm: envelope.algorithm,
+    key_fingerprint: envelope.key_fingerprint,
+    manifest_sha256: envelope.manifest_sha256,
+    schema_version: envelope.schema_version,
+    signature: envelope.signature,
+  }) + "\n";
 }
 
 async function signedManifestPairFetchManifest(sessionId, token, generation, controller) {
@@ -146,7 +165,7 @@ async function signedManifestPairFetchManifest(sessionId, token, generation, con
     throw new Error("evidence manifest bytes do not match the declared SHA-256");
   }
 
-  const manifest = signedManifestPairJson(bytes, "evidence manifest");
+  const { value: manifest } = signedManifestPairJson(bytes, "evidence manifest");
   if (manifest.schema_version !== "app-terminal-evidence-manifest-v1") {
     throw new Error("evidence manifest returned an unexpected schema version");
   }
@@ -233,7 +252,7 @@ async function signedManifestPairFetchSignature(
     throw new Error("evidence signature byte count does not match Content-Length");
   }
 
-  const envelope = signedManifestPairJson(bytes, "evidence signature");
+  const { value: envelope, text: envelopeText } = signedManifestPairJson(bytes, "evidence signature");
   if (!signedManifestPairHasExactKeys(envelope, signedManifestPairEnvelopeKeys)) {
     throw new Error("evidence signature returned unexpected envelope fields");
   }
@@ -251,6 +270,9 @@ async function signedManifestPairFetchSignature(
   }
   if (!signedManifestPairSignaturePattern.test(envelope.signature || "")) {
     throw new Error("evidence signature envelope contains invalid Ed25519 signature text");
+  }
+  if (envelopeText !== signedManifestPairCanonicalEnvelope(envelope)) {
+    throw new Error("evidence signature body is not the canonical M52 envelope serialization");
   }
   return { bytes, keyFingerprint };
 }
