@@ -121,9 +121,12 @@ internal sealed class AppServerChild : IAsyncDisposable
             {
                 throw new InvalidOperationException("Harness X App Server returned an unsupported desktop handshake.");
             }
-            if (handshake.Pid != process.Id)
+            // On Windows, pip's console-script .exe may hand execution to a Python process.
+            // The redirected stdio pipe is the ownership/authentication boundary, so the server
+            // PID can legitimately differ from the launcher PID started by this process.
+            if (handshake.Pid <= 0)
             {
-                throw new InvalidOperationException("Harness X App Server desktop handshake PID mismatch.");
+                throw new InvalidOperationException("Harness X App Server returned an invalid server PID.");
             }
 
             var baseUri = RequireLoopbackHttp(handshake.BaseUrl, "base_url", allowFragment: false);
