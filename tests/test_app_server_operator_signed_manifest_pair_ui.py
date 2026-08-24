@@ -12,7 +12,7 @@ from harness_x.app_server.ui_assets import load_ui_asset
 def _asset_text(path: str) -> str:
     asset = load_ui_asset(path)
     assert asset is not None
-    return asset[1].decode("utf-8")
+    return asset[1].decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def test_signed_manifest_pair_is_packaged_without_replacing_standalone_manifest_export() -> None:

@@ -483,6 +483,8 @@ class TaskWorkspaceIsolationManager:
                 "--local",
                 "--no-hardlinks",
                 "--no-checkout",
+                "--config",
+                "core.autocrlf=false",
                 str(self.source_root),
                 str(workspace_root),
             ),

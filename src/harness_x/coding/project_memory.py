@@ -613,9 +613,10 @@ class ProjectMemoryStore:
         self._write_state()
 
     def _write_state(self) -> None:
-        payload = self.state.model_dump_json(indent=2) + "\n"
+        payload = (self.state.model_dump_json(indent=2) + "\n").encode("utf-8")
         temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        temporary.write_text(payload, encoding="utf-8")
-        with temporary.open("rb") as handle:
+        with temporary.open("wb") as handle:
+            handle.write(payload)
+            handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, self.state_path)
