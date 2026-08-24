@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .evidence_capsule_extraction import MANIFEST_FILENAME, SIGNATURE_FILENAME
-from .evidence_capsule_verification import VerifiedEvidenceCapsule, verify_evidence_capsule
+from .evidence_capsule_verification import VerifiedEvidenceCapsule
 from .evidence_signing import _exclusive_write
 from .evidence_verification import PortableEvidenceVerificationError
 
@@ -110,32 +110,17 @@ def render_verification_receipt(
     )
 
 
-def verify_evidence_capsule_with_receipt(
-    capsule_path: str | Path,
+def persist_verification_receipt(
+    result: VerifiedEvidenceCapsule,
     *,
-    output_dir: str | Path,
-    public_key_path: str | Path,
     receipt_path: str | Path,
-    snapshot_path: str | Path | None = None,
-    lifecycle_path: str | Path | None = None,
-    report_path: str | Path | None = None,
-    trace_path: str | Path | None = None,
 ) -> VerifiedEvidenceCapsuleWithReceipt:
-    """Run frozen M57 first, then persist one unsigned receipt only after success."""
+    """Persist one unsigned receipt after the caller has obtained frozen M57 success."""
 
-    verification = verify_evidence_capsule(
-        capsule_path,
-        output_dir=output_dir,
-        public_key_path=public_key_path,
-        snapshot_path=snapshot_path,
-        lifecycle_path=lifecycle_path,
-        report_path=report_path,
-        trace_path=trace_path,
-    )
-    rendered = render_verification_receipt(verification)
+    rendered = render_verification_receipt(result)
     output = _exclusive_write(receipt_path, rendered.payload, mode=0o644)
     return VerifiedEvidenceCapsuleWithReceipt(
-        verification=verification,
+        verification=result,
         receipt_path=output,
         receipt_sha256=rendered.source_sha256,
     )
