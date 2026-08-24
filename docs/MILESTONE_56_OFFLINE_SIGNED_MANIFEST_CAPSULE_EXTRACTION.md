@@ -41,9 +41,11 @@ The command:
 
 Existing `harness-x verify-evidence` remains unchanged and remains the sole installed cryptographic signature-verification path.
 
+The extraction implementation is imported only after the new command is selected. Existing help and legacy command dispatch therefore do not eagerly acquire the M56/App Server capsule parsing stack.
+
 ## Capsule input boundary
 
-The capsule input must use the established bounded regular-file/no-follow semantics from the portable-evidence tooling:
+The capsule input uses the established bounded regular-file/no-follow semantics from the portable-evidence tooling:
 
 - lexical absolute normalization without following the supplied leaf;
 - final-component symlink rejection;
@@ -51,7 +53,7 @@ The capsule input must use the established bounded regular-file/no-follow semant
 - `O_NOFOLLOW` where available;
 - pre-open `lstat` and post-open `fstat` regular-file checks;
 - one bounded descriptor read;
-- a dedicated capsule byte ceiling large enough for the bounded M43 manifest plus M52 signature envelope and base64url expansion.
+- a dedicated 4 MiB capsule byte ceiling, which is larger than the frozen M44 manifest plus M52 signature ceilings after base64url expansion and capsule metadata overhead.
 
 The exact retained bytes from that descriptor are the only capsule bytes parsed and validated.
 
@@ -62,16 +64,21 @@ Before creating either output M56 requires:
 1. strict UTF-8 JSON object input;
 2. duplicate JSON object keys rejected at every object level;
 3. exact `app-signed-manifest-capsule-v1` top-level field set;
-4. canonical lowercase 64-hex `manifest_sha256`;
-5. canonical `sha256:<64 lowercase hex>` key fingerprint;
-6. exact `ed25519` algorithm;
-7. canonical base64url-without-padding `manifest_payload` and `signature_payload`;
-8. decoded manifest bytes hash exactly to `manifest_sha256`;
-9. decoded manifest bytes are strict UTF-8 JSON and satisfy the frozen M43 `app-terminal-evidence-manifest-v1` schema/self-fingerprint contract;
-10. decoded signature bytes are strict UTF-8 JSON with the exact frozen M52 envelope fields;
-11. decoded signature envelope has exact `app-evidence-signature-v1` schema, `ed25519` algorithm, canonical key fingerprint, canonical Ed25519 signature text, and exact manifest SHA;
-12. decoded signature bytes equal the frozen M52 canonical envelope serialization including its trailing newline;
-13. capsule metadata, decoded manifest identity, and decoded signature-envelope metadata agree exactly.
+4. exact deterministic M55 sorted compact JSON plus one trailing newline for the capsule itself;
+5. canonical lowercase 64-hex `manifest_sha256`;
+6. canonical `sha256:<64 lowercase hex>` key fingerprint;
+7. exact `ed25519` algorithm;
+8. canonical base64url-without-padding `manifest_payload` and `signature_payload`;
+9. decoded manifest length no greater than frozen M44 `MAX_EVIDENCE_MANIFEST_BYTES` (2 MiB);
+10. decoded signature-envelope length no greater than frozen M52 `MAX_EVIDENCE_SIGNATURE_BYTES` (64 KiB);
+11. decoded manifest bytes hash exactly to `manifest_sha256`;
+12. decoded manifest bytes are strict UTF-8 JSON, satisfy the frozen M43 `app-terminal-evidence-manifest-v1` schema/self-fingerprint contract, and equal the frozen M43 canonical renderer output including its trailing newline;
+13. decoded signature bytes are strict UTF-8 JSON with the exact frozen M52 envelope fields;
+14. decoded signature envelope has exact `app-evidence-signature-v1` schema, `ed25519` algorithm, canonical key fingerprint, canonical Ed25519 signature text, and exact manifest SHA;
+15. decoded signature bytes equal the frozen M52 canonical envelope serialization including its trailing newline;
+16. capsule metadata, decoded manifest identity, and decoded signature-envelope metadata agree exactly.
+
+The M44/M52 embedded byte ceilings are enforced before output so a successful extraction cannot materialize an otherwise structurally accepted pair that the frozen verifier rejects immediately only because one extracted file exceeds its established input limit.
 
 M56 intentionally does **not** verify the Ed25519 signature because no trusted public key is supplied to extraction. Successful extraction proves deterministic capsule structure and byte correlation only.
 
@@ -88,21 +95,21 @@ The output directory is explicit. M56 derives only the two frozen filenames with
 - exact byte write, flush, and fsync;
 - no overwrite.
 
-Both targets are preflighted before writes. Extraction then creates the manifest followed by the signature. If the second creation fails during the ordinary command execution, the newly created manifest is removed before the error is returned.
+Both targets are preflighted before writes. Extraction then creates the manifest followed by the signature. If signature creation fails after the manifest was created, M56 attempts to remove that newly created manifest before returning the extraction error. If rollback itself fails, that failure is surfaced explicitly together with the original extraction failure; M56 does not silently claim cleanup succeeded.
 
-This is **not** claimed to be crash-atomic or a filesystem transaction. A process/OS crash between the two exclusive writes can leave the first file present. M56 does not weaken that boundary with temporary-directory renames, archive formats, or replacement of existing files.
+This is **not** claimed to be crash-atomic or a filesystem transaction. A process/OS crash between the two exclusive writes can leave the first file present, and an OS/filesystem failure can prevent rollback. M56 does not weaken that boundary with temporary-directory renames, archive formats, or replacement of existing files.
 
 ## Exact-byte preservation
 
-Extraction never reconstructs the manifest or signature payload from parsed models.
+Extraction parses reconstructed models only for validation. It never writes reconstructed manifest or signature serialization.
 
-The validated decoded byte strings are written exactly as embedded in the M55 capsule. Therefore, for a valid capsule produced by M55:
+The validated decoded byte strings retained from the capsule are written exactly as embedded. Therefore, for a valid capsule produced by M55:
 
 - extracted `session-evidence-manifest.json` is byte-for-byte the frozen M43 manifest response body that M55 signed;
 - extracted `session-evidence-manifest.sig.json` is byte-for-byte the frozen M52 detached signature envelope embedded by M55;
 - the extracted pair can be supplied directly to frozen `harness-x verify-evidence ... --signature ... --public-key ...`.
 
-Focused integration qualification must prove the extracted files verify successfully through the existing M52 verifier with the matching external public key.
+Focused integration qualification proves the extracted files verify successfully through the existing M52 verifier with the matching external public key.
 
 ## Authority / trust boundary
 
@@ -129,6 +136,15 @@ It does **not** prove:
 
 The operator must still obtain the public key through an external trusted channel and use frozen M52 verification for the cryptographic claim.
 
+## Source-audit hardening
+
+M56 source audit deliberately tightened two boundaries after the first source-complete implementation:
+
+1. the extractor originally bounded only the outer capsule file; it now also enforces the exact frozen M44 2 MiB manifest ceiling and M52 64 KiB signature-envelope ceiling before output, so successful extraction remains directly compatible with the frozen verifier's file boundary;
+2. ordinary second-output failure originally attempted rollback but swallowed an `unlink` failure; final M56 surfaces rollback failure explicitly and has a regression proving that a remaining partial manifest is never misreported as successfully cleaned up.
+
+Neither hardening changes trust semantics or App Server behavior.
+
 ## Explicit non-goals
 
 M56 does not add:
@@ -147,12 +163,12 @@ M56 does not add:
 
 ## Intended changed surface
 
-M56 should remain confined to:
+M56 remains confined to:
 
 1. this milestone document;
 2. one offline capsule extraction/validation module;
 3. one narrow installed CLI wrapper extension for `extract-evidence-capsule`;
-4. focused extraction, boundary, compatibility, and M52 round-trip verification tests.
+4. focused extraction, rollback, boundary, compatibility, and M52 round-trip verification tests.
 
 Frozen M43 manifest generation, M52 signing/verifier implementation, M53/M55 App Server signing/capsule implementations, M54 browser pair client, M55 browser capsule client, App Server HTTP/UI/store/service/protocol/runtime, report/trace/snapshot/lifecycle generation, coding runtime/verifier, model/tool, memory, budget, controller, and control implementation are outside the intended diff.
 
