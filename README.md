@@ -12,7 +12,11 @@ The initial goal is **not** to train a new foundation model. The goal is to buil
 
 ## Project status
 
-**Milestones 0–19B implemented on the current development stack.**
+**The qualified stacked development tree is complete through Milestone 62; Milestone 63 is the documentation-only primary-stack completion audit.**
+
+This status describes the stacked development tree, not the repository default branch or a released product. The milestone PR chain remains draft/open/unmerged unless separately authorized.
+
+Optional research tracks and the open questions in the architecture documents remain non-blocking future experiments. Real-model and GPU-dependent empirical claims still must be earned by their corresponding experiments rather than inferred from the qualified software boundaries.
 
 The implementation now contains:
 
