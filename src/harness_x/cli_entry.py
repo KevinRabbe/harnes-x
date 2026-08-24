@@ -192,35 +192,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "verify-evidence-capsule":
+        from .evidence_capsule_verification import verify_evidence_capsule
         from .evidence_verification import PortableEvidenceVerificationError
 
         try:
-            if args.receipt is None:
-                from .evidence_capsule_verification import verify_evidence_capsule
+            result = verify_evidence_capsule(
+                args.capsule,
+                output_dir=args.output_dir,
+                public_key_path=args.public_key,
+                snapshot_path=args.snapshot,
+                lifecycle_path=args.lifecycle,
+                report_path=args.report,
+                trace_path=args.trace,
+            )
+            if args.receipt is not None:
+                from .evidence_verification_receipt import persist_verification_receipt
 
-                result = verify_evidence_capsule(
-                    args.capsule,
-                    output_dir=args.output_dir,
-                    public_key_path=args.public_key,
-                    snapshot_path=args.snapshot,
-                    lifecycle_path=args.lifecycle,
-                    report_path=args.report,
-                    trace_path=args.trace,
-                )
-            else:
-                from .evidence_verification_receipt import (
-                    verify_evidence_capsule_with_receipt,
-                )
-
-                result = verify_evidence_capsule_with_receipt(
-                    args.capsule,
-                    output_dir=args.output_dir,
-                    public_key_path=args.public_key,
+                result = persist_verification_receipt(
+                    result,
                     receipt_path=args.receipt,
-                    snapshot_path=args.snapshot,
-                    lifecycle_path=args.lifecycle,
-                    report_path=args.report,
-                    trace_path=args.trace,
                 )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
