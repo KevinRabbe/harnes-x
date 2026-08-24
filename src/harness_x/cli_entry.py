@@ -132,6 +132,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local causal-trace.jsonl export when the manifest marks it available",
     )
+    verify_capsule.add_argument(
+        "--receipt",
+        type=Path,
+        default=None,
+        help="Optional exclusive output path for an unsigned deterministic M58 verification receipt",
+    )
     return parser
 
 
@@ -186,19 +192,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "verify-evidence-capsule":
-        from .evidence_capsule_verification import verify_evidence_capsule
         from .evidence_verification import PortableEvidenceVerificationError
 
         try:
-            result = verify_evidence_capsule(
-                args.capsule,
-                output_dir=args.output_dir,
-                public_key_path=args.public_key,
-                snapshot_path=args.snapshot,
-                lifecycle_path=args.lifecycle,
-                report_path=args.report,
-                trace_path=args.trace,
-            )
+            if args.receipt is None:
+                from .evidence_capsule_verification import verify_evidence_capsule
+
+                result = verify_evidence_capsule(
+                    args.capsule,
+                    output_dir=args.output_dir,
+                    public_key_path=args.public_key,
+                    snapshot_path=args.snapshot,
+                    lifecycle_path=args.lifecycle,
+                    report_path=args.report,
+                    trace_path=args.trace,
+                )
+            else:
+                from .evidence_verification_receipt import (
+                    verify_evidence_capsule_with_receipt,
+                )
+
+                result = verify_evidence_capsule_with_receipt(
+                    args.capsule,
+                    output_dir=args.output_dir,
+                    public_key_path=args.public_key,
+                    receipt_path=args.receipt,
+                    snapshot_path=args.snapshot,
+                    lifecycle_path=args.lifecycle,
+                    report_path=args.report,
+                    trace_path=args.trace,
+                )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
         print(result.summary())
