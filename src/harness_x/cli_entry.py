@@ -10,33 +10,6 @@ from typing import Sequence
 from . import cli as legacy_cli
 
 
-def _add_portable_evidence_inputs(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--snapshot",
-        type=Path,
-        default=None,
-        help="Optional local session-snapshot.json export for M47 fingerprint verification",
-    )
-    parser.add_argument(
-        "--lifecycle",
-        type=Path,
-        default=None,
-        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
-    )
-    parser.add_argument(
-        "--report",
-        type=Path,
-        default=None,
-        help="Local coding-task-report.json export when the manifest marks it available",
-    )
-    parser.add_argument(
-        "--trace",
-        type=Path,
-        default=None,
-        help="Local causal-trace.jsonl export when the manifest marks it available",
-    )
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Extend the qualified legacy parser with portable evidence commands."""
 
@@ -54,7 +27,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     verify.add_argument("manifest", type=Path)
-    _add_portable_evidence_inputs(verify)
+    verify.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    verify.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    verify.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    verify.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     verify.add_argument(
         "--signature",
         type=Path,
@@ -112,7 +108,30 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Externally trusted Ed25519 public-key PEM for frozen M52 verification",
     )
-    _add_portable_evidence_inputs(verify_capsule)
+    verify_capsule.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    verify_capsule.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    verify_capsule.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    verify_capsule.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     return parser
 
 
