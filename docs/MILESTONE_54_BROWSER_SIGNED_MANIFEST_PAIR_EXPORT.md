@@ -1,10 +1,10 @@
 # Milestone 54 — Browser Signed-Manifest Pair Export
 
-M54 is stacked directly on frozen M53 and closes the narrow operator-UI usability gap left by M53: the server can now produce a detached Ed25519 signature over its current terminal evidence manifest, but the browser offers no safe way to obtain a manifest/signature pair while checking that both downloads refer to the same exact manifest bytes.
+M54 is stacked directly on frozen M53 and closes one narrow operator-UI usability gap left by M53: the local App Server can produce a detached Ed25519 signature over its current terminal evidence manifest, but the browser previously offered no fail-closed way to obtain a manifest/signature pair while checking that both responses refer to the same exact manifest bytes.
 
-M54 adds **one authenticated operator-UI action that fetches the existing M43 manifest and M53 detached signature, validates their byte/header/schema correlation, and only then initiates downloads for the two frozen portable files**.
+M54 adds **one authenticated operator-UI action that fetches the existing M43 manifest and M53 detached signature, validates their exact byte/header/schema correlation, and only then initiates downloads for the two frozen portable files**.
 
-M54 is not browser-side signature trust. The UI has no trusted public key and does not claim that the displayed fingerprint identifies an operator, installation, or server. Cryptographic signature verification remains the frozen M52 offline verifier with an externally obtained public key.
+M54 is not browser-side signature trust. The UI has no trusted public key and does not claim that the displayed key fingerprint identifies an operator, installation, host, or server. Cryptographic signature verification remains the frozen M52 offline verifier with a public key obtained through an external trusted channel.
 
 ## Stack
 
@@ -12,13 +12,17 @@ Exact frozen M53 base:
 
 `cc0ba28199005144906dda39837d1ca7828f1da3`
 
-M54 must remain stacked directly on that SHA and PR #60 must remain unchanged, draft/open/unmerged.
+First M54 commit / scope document:
 
-This scope document must be the first M54 commit.
+`635f4a232f252568641df0ae305a54afdcde7e33`
 
-## Scope
+M54 remains stacked directly on that M53 SHA. Frozen M53 PR #60 must remain unchanged, draft/open/unmerged.
 
-M54 adds one new operator action:
+This document was the first M54 commit and is updated only to record the qualified implementation and acceptance boundary before the final exact-head freeze gate.
+
+## Frozen implementation contract
+
+M54 adds one operator action:
 
 `Download signed manifest pair`
 
@@ -31,26 +35,29 @@ It uses only existing authenticated endpoints:
 
 M54 adds no App Server HTTP route, signing semantics, key management, evidence generation, session mutation, or offline verifier change.
 
-The existing standalone `Download evidence manifest` action remains unchanged and available even when M53 signing is not configured.
+The existing standalone `Download evidence manifest` action is preserved and remains available even when M53 signing is not configured.
 
 ## Browser state boundary
 
 The M54 client follows the existing operator-download state pattern:
 
-- bearer token retained only in page memory;
-- no localStorage, cookies, IndexedDB, Cache Storage, query parameters, or URL fragments for credentials/evidence;
+- bearer token retained only in M54 page memory;
+- no `localStorage` credential/evidence storage;
+- no `sessionStorage` credential/evidence storage;
+- no cookie use;
+- no credential/evidence URL query or fragment state;
 - one generation counter tied to selected-session identity;
 - one active `AbortController` for the pair operation;
-- terminal states are exactly `succeeded`, `failed`, `cancelled`;
-- selection mutation cancels the active pair operation and invalidates stale async work;
+- terminal states exactly `succeeded`, `failed`, `cancelled`;
+- selected-session mutation cancels active work and invalidates stale async completion;
 - explicit lock clears the M54-local token, cancels active work, and clears status;
-- an observed transition to global `Locked` does the same;
+- an observed transition to global `Locked` performs the same cleanup;
 - `beforeunload` cancels active work;
-- a 401 from either request clears only M54's page-memory token and fails visibly.
+- HTTP 401 from either request clears only M54's page-memory token and fails visibly.
 
-No session selection, lifecycle state, or server state is mutated by M54.
+No session selection, lifecycle state, durable evidence, or server state is mutated by M54.
 
-## Manifest validation
+## Manifest request and validation
 
 The pair flow fetches the manifest first using:
 
@@ -61,102 +68,134 @@ The pair flow fetches the manifest first using:
 - `credentials: omit`;
 - the operation abort signal.
 
-Before retaining it for download, the browser requires:
+Before retaining the response for a possible download, the browser requires:
 
 - HTTP success;
 - exact `Content-Type: application/json; charset=utf-8`;
 - exact `Content-Disposition: attachment; filename="session-evidence-manifest.json"`;
 - canonical lowercase 64-hex `X-Harness-X-Evidence-Manifest-SHA256`;
-- decimal Content-Length;
-- one `arrayBuffer()` read;
-- exact byte-count equality with Content-Length;
-- Web Crypto SHA-256 of the exact bytes equal to the response SHA header;
+- decimal safe-integer `Content-Length`;
+- one `arrayBuffer()` body read;
+- exact body byte-count equality with Content-Length;
+- Web Crypto SHA-256 of the exact body bytes equal to the response SHA header;
 - fatal UTF-8 decode plus JSON parse;
 - exact manifest schema `app-terminal-evidence-manifest-v1`;
 - exact selected `session_id`;
-- terminal lifecycle status;
-- canonical manifest self-fingerprint and lifecycle ledger-head hash;
-- valid report/trace availability values.
+- canonical manifest self-fingerprint;
+- terminal lifecycle status plus canonical ledger-head hash;
+- valid coding-report and causal-trace availability values.
 
-This is deliberately the same current consistency boundary as the existing M43 browser manifest download; M54 must not weaken that action.
+This intentionally mirrors the current validation boundary of the existing M43 browser manifest download. M54 does not replace or weaken that standalone action.
 
-## Signature validation and correlation
+## Signature request and exact correlation
 
-Only after the manifest passes all checks does M54 fetch the M53 signature using the same bearer/no-store/credentials/abort boundary.
+Only after the manifest passes all checks does M54 fetch the M53 signature with the same bearer/no-store/credentials/abort boundary.
 
-Before either file is offered for download, the browser requires:
+Before either file download is initiated, the browser requires:
 
 - HTTP success;
 - exact `Content-Type: application/json; charset=utf-8`;
 - exact `Content-Disposition: attachment; filename="session-evidence-manifest.sig.json"`;
-- decimal Content-Length;
-- one `arrayBuffer()` read and exact length equality;
-- canonical lowercase `X-Harness-X-Evidence-Manifest-SHA256` exactly equal to the already observed manifest SHA-256;
+- decimal safe-integer Content-Length;
+- one `arrayBuffer()` body read and exact length equality;
+- canonical lowercase `X-Harness-X-Evidence-Manifest-SHA256` exactly equal to the SHA-256 already observed from the manifest bytes;
 - canonical `X-Harness-X-Evidence-Signature-Key` of `sha256:<64 lowercase hex>`;
 - exact `X-Harness-X-Evidence-Signature-Algorithm: ed25519`;
 - fatal UTF-8 decode plus JSON parse;
-- root object with exactly the frozen M52 envelope fields;
+- root object with exactly the frozen M52 fields `algorithm`, `key_fingerprint`, `manifest_sha256`, `schema_version`, `signature`;
 - exact `schema_version: app-evidence-signature-v1`;
 - exact `algorithm: ed25519`;
 - body key fingerprint exactly equal to the response key-fingerprint header;
 - body `manifest_sha256` exactly equal to the already observed manifest SHA-256;
-- canonical 86-character base64url-without-padding Ed25519 signature text.
+- canonical 86-character base64url-without-padding encoding for one 64-byte Ed25519 signature;
+- exact raw response text equal to the frozen M52 sorted compact envelope serialization plus one terminal newline.
 
-If M53 independently regenerates a different manifest between the two requests, the SHA correlation fails visibly and **neither download is initiated**.
+The canonical 64-byte signature-text boundary is stricter than a generic 86-character URL-safe regex. Since 64 bytes leave four unused base64 pad bits, the last unpadded base64url character must be one of:
 
-M54 does not fetch or infer a public key and does not call Web Crypto Ed25519 verification. The key fingerprint shown in status text is an identifier supplied by the signed envelope/response, not a trust decision.
+`AEIMQUYcgkosw048`
+
+The raw-envelope equality check additionally rejects duplicate JSON object keys, reordering, inserted whitespace, omitted terminal newline, and other non-M52 serializations even if ordinary `JSON.parse()` would otherwise accept them.
+
+If M53 independently regenerates different manifest bytes between the two requests, the response/header/body SHA correlation fails visibly and **neither download is initiated**.
+
+M54 does not fetch or infer a public key and does not call `crypto.subtle.verify`. The key fingerprint shown in status text is an identifier carried by the M52/M53 envelope and response, not a trust decision.
 
 ## Download boundary
 
-Only after both response bodies pass validation does M54 create temporary object URLs and initiate downloads with fixed names:
+Only after both response bodies pass all checks does M54 create temporary object URLs and initiate downloads with fixed names:
 
 - `session-evidence-manifest.json`
 - `session-evidence-manifest.sig.json`
 
-The exact response bytes are used for both Blobs; the UI does not reconstruct either JSON file.
+The exact response bytes are passed to both Blobs. The UI does not reconstruct either portable file for download.
 
-Object URLs are revoked in `finally` cleanup and temporary anchors are removed after click.
+Temporary anchors are removed after click and object URLs are revoked in `finally` cleanup.
 
-The browser cannot guarantee filesystem-level atomicity for two user-agent downloads. M54's claim is narrower: **it does not initiate either download until it has validated that both fetched bodies form one SHA-correlated pair**. Browser download policy may still prompt, block, rename, or independently complete one of the two saves.
+The browser cannot guarantee filesystem-level atomicity for two user-agent downloads. M54's claim is deliberately narrower: **it does not initiate either download until it has validated that both fetched bodies form one SHA-correlated pair**. Browser policy may still prompt, block, rename, or independently complete only one of the two file saves.
 
 ## Status disclosure
 
-On success, status text may show:
+Successful status text reports only:
 
-- that a signed pair download was initiated;
-- the exact manifest SHA-256;
-- the M52/M53 key fingerprint.
+- that the signed pair download was **initiated**;
+- the exact correlated manifest SHA-256;
+- the M52/M53 key fingerprint identifier.
 
-It must not say `trusted`, `verified signer`, `authentic server`, or equivalent language implying public-key trust.
+It does not claim the downloads completed, that a signature was cryptographically verified in the browser, that the signer is trusted, or that the App Server has a remotely authenticated identity.
 
-Failures remain text-only and fail-visible; no response body or server error is injected as HTML.
+Failures remain text-only and fail-visible; response/server strings are never injected through HTML.
 
 ## UI integration
 
-M54 adds only:
+M54 changes only the packaged operator UI surface:
 
-- one button and one status element in the existing lifecycle/evidence panel;
-- one packaged JavaScript asset for the pair-download client;
-- one exact `ui_assets.py` allowlist entry;
-- focused static/Node qualification tests.
+1. one `Download signed manifest pair` button in the existing lifecycle/evidence action row;
+2. one `signed-manifest-pair-status` text surface;
+3. one packaged `/ui/signed_manifest_pair.js` asset;
+4. one exact `ui_assets.py` allowlist entry;
+5. focused static/Node qualification tests.
 
-Script ordering must preserve the existing M40 bootstrap/auth-submit listener behavior. The M54 client must register its auth listener before `app.js` clears the token field and before bootstrap-triggered submit is dispatched.
+Final script ordering places `/ui/signed_manifest_pair.js` immediately after `/ui/evidence_manifest.js` and before `/ui/lifecycle_export.js`, `reload_auth.js`, `app.js`, and `bootstrap.js`.
 
-No CSS change is required unless exact existing layout behavior proves insufficient.
+This preserves the established M40 submit-listener ordering: M54 captures the page-memory bearer on auth submit before `app.js` clears the token input and before bootstrap-triggered submit is dispatched.
+
+No CSS change was required.
+
+## Behavioral qualification
+
+The Node behavioral harness exercises the packaged M54 asset rather than a rewritten test implementation.
+
+It proves:
+
+- a valid manifest followed by a matching canonical M52 signature performs exactly two authenticated fetches in manifest→signature order;
+- no download click occurs until both fetches and all validations have completed;
+- success initiates exactly the frozen manifest and signature filenames;
+- success status exposes the correlated SHA and key identifier without a trust claim;
+- signature response-header SHA mismatch suppresses both downloads and fails visibly;
+- duplicate/non-canonical envelope serialization suppresses both downloads;
+- syntactically URL-safe but non-canonical 64-byte base64url signature text suppresses both downloads;
+- selected-session change while the signature request is outstanding suppresses stale downloads;
+- HTTP 401 suppresses downloads and clears M54-local bearer eligibility;
+- unload cleanup is installed.
+
+A separate Node `--check` regression validates the packaged JavaScript syntax when Node is available.
 
 ## Authority boundary
 
-M54 proves only browser-side **current byte correlation** between one successfully validated M43 manifest response and one M53 signature response whose envelope/header names the same manifest SHA-256.
+M54 establishes only browser-side **current byte correlation** between:
 
-It does not prove:
+1. one successfully validated M43 manifest response whose exact bytes hash to SHA `H`; and
+2. one M53 signature response whose response header and canonical M52 envelope both name the same `H`.
 
-- the Ed25519 signature cryptographically verifies;
-- ownership/trust of the named public-key fingerprint;
+It does not establish:
+
+- that the Ed25519 signature cryptographically verifies;
+- ownership or trust of the named public-key fingerprint;
 - App Server identity outside the current authenticated loopback interaction;
 - atomic server-side generation of the two responses;
-- trusted completion/signature time;
-- durable filesystem atomicity of the two downloads;
-- semantic truth of evidence contents.
+- signature time or completion time;
+- durable filesystem atomicity of the two browser downloads;
+- semantic truth of the evidence contents.
 
 Offline cryptographic verification remains:
 
@@ -164,7 +203,7 @@ Offline cryptographic verification remains:
 
 with the public key obtained through an external trusted channel.
 
-## Non-goals
+## Explicit non-goals
 
 M54 does not add:
 
@@ -172,31 +211,133 @@ M54 does not add:
 - browser Ed25519 verification;
 - certificate/PKI trust;
 - trusted timestamping;
-- automatic browser trust-on-first-use;
+- browser trust-on-first-use;
 - a ZIP/tar/session bundle;
 - one-file wrapper format;
-- server-side atomic pair endpoint;
+- a server-side atomic pair endpoint;
 - signature persistence;
 - key rotation/revocation;
-- remote access or network trust service.
+- remote access or a network trust service.
 
-## Deterministic acceptance
+## Exact source-complete M53 → M54 diff
 
-Before freeze, M54 must prove:
+Source-complete candidate head:
 
-- exact frozen M53 base `cc0ba28199005144906dda39837d1ca7828f1da3`;
-- this document is the first M54 commit;
-- frozen M53 PR #60 remains unchanged, draft/open/unmerged;
-- standalone M43 manifest download remains present/unchanged;
-- new pair action is terminal/auth gated;
-- manifest exact-byte length/SHA/schema/session checks;
-- signature exact-byte length/header/envelope checks;
-- exact manifest-SHA equality across observed manifest bytes, M53 response header, and M52 envelope body;
-- mismatch prevents both download clicks;
-- fixed filenames and exact response bytes saved only after both checks pass;
-- selection/lock/401/unload cancellation and stale-generation rejection;
-- no persistent browser credential/evidence storage;
-- no public-key fetch or browser trust claim;
-- no App Server/session/runtime/evidence/verifier/signing implementation changes;
-- exact M53→M54 diff remains narrow;
-- exact-head Linux CI passes pytest, installed `harness-x --help`, config validation, and Node syntax qualification where Node is available.
+`d6bdc5e6522b533ae6f524b08fd0babde7edd04b`
+
+Against exact frozen M53 `cc0ba28199005144906dda39837d1ca7828f1da3`:
+
+- status: ahead;
+- exact merge base: frozen M53;
+- commits ahead: 10;
+- commits behind: 0;
+- changed files: 5;
+- additions: 970;
+- deletions: 0.
+
+Changed files are exactly:
+
+1. `docs/MILESTONE_54_BROWSER_SIGNED_MANIFEST_PAIR_EXPORT.md`;
+2. `src/harness_x/app_server/ui/index.html`;
+3. `src/harness_x/app_server/ui/signed_manifest_pair.js`;
+4. `src/harness_x/app_server/ui_assets.py`;
+5. `tests/test_app_server_operator_signed_manifest_pair_ui.py`.
+
+No App Server HTTP/server/service/store/protocol/session/runtime, M43 evidence builder/renderer, M44–M54 offline verifier/signing implementation, report/trace/snapshot generation, coding runtime/verifier, model/tool, memory, budget, controller, or control implementation changed.
+
+The final documentation-only contract commit will move the M54 head once more; the PR freeze record must therefore use a fresh exact-head compare and exact-head CI rather than treating this source-complete SHA as the frozen SHA.
+
+## Source-audit findings
+
+Qualification deliberately kept the following findings visible:
+
+1. The initial signature-body validation used `JSON.parse()` plus an exact key set. Duplicate keys could still survive JSON parsing. The final client requires the raw body to equal the canonical frozen M52 sorted compact serialization plus terminal newline, rejecting duplicates and alternate serialization.
+2. The initial signature text check accepted any 86 URL-safe characters. The final client enforces the legal last-character set for canonical base64url encoding of exactly 64 bytes.
+3. A static test initially banned the literal word `Ed25519`, overreaching beyond the actual authority boundary. The final test forbids the trust operation (`crypto.subtle.verify`) and public-key fetch surfaces instead.
+4. One source-order assertion compared the helper function definition against the later signature-fetch call and failed despite correct runtime order. The final assertion pins the actual manifest-download call site.
+5. The canonical-signature hardening received an explicit Node behavioral regression using an 86-character URL-safe value with illegal trailing pad bits; both downloads must be suppressed.
+
+No backend production change was required by these source-audit findings.
+
+## Fail-visible qualification history
+
+### CI #1391 — provisional failure
+
+Head `0356583c1c3eb4b5aa0fe4f1138a431d465b1556`.
+
+- run id: `32678618405`;
+- job id: `97291212402`;
+- synthetic merge: `d03138b6cef5aaa98ea5cafe73d6c02da9f5d56e`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- pytest: `1 failed, 674 passed in 125.25s`;
+- help/config skipped after pytest failure.
+
+The sole failure was the source-order test comparing the first occurrence of the download helper name—its function definition—against the later signature-fetch call. The runtime implementation order was not the defect.
+
+### CI #1395 — provisional green
+
+Head `b118eaa5a05eac94bbbc21537ee914f9d3534a16`.
+
+- run id: `32678811718`;
+- job id: `97291722132`;
+- synthetic merge: `daa9788bebe07d0d6f4391f1dd87e750c41002ba`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- pytest: `675 passed in 118.98s (0:01:58)`;
+- `harness-x --help`: PASS;
+- config validation: PASS, `valid: system_version=0.1.0-alpha.0`.
+
+This run was superseded by the canonical 64-byte base64url hardening.
+
+### CI #1397 — provisional green
+
+Head `ee38dbdf0d65249e9c2e041c94bf0df72a9bcb0c`.
+
+- run id: `32678876353`;
+- job id: `97291883663`;
+- synthetic merge: `3ffd72cd2198a6af690aafa51080434d662eafa5`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- pytest: `675 passed in 122.35s (0:02:02)`;
+- `harness-x --help`: PASS;
+- config validation: PASS.
+
+This run proved the canonical signature-text implementation but was superseded by adding a dedicated behavioral non-canonical-pad-bits regression.
+
+### CI #1399 — source-complete green candidate
+
+Head `d6bdc5e6522b533ae6f524b08fd0babde7edd04b`.
+
+- run number: `1399`;
+- run id: `32678956102`;
+- job id: `97292091380`;
+- synthetic merge: `d3ec7f983abe72c19b99d0efe0cf0f5e5a166a05`;
+- exact checkout: `Merge d6bdc5e6522b533ae6f524b08fd0babde7edd04b into cc0ba28199005144906dda39837d1ca7828f1da3`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- `cryptography 46.0.7`;
+- pytest: `675 passed in 113.75s (0:01:53)`;
+- `harness-x --help`: PASS;
+- `harness-x validate-config configs/default.yaml`: PASS;
+- config output: `valid: system_version=0.1.0-alpha.0`.
+
+CI #1399 is source-complete qualification, not the freeze gate, because this final contract documentation commit moves the PR head.
+
+## Freeze gate
+
+M54 is freeze-eligible only after the documentation-only final head has:
+
+- exact frozen-M53 merge base and zero commits behind;
+- the same five-file authority boundary;
+- no submitted reviews or unresolved review threads requiring work;
+- one fresh pull-request Linux CI success on that exact final head;
+- full pytest success;
+- installed `harness-x --help` success;
+- default config validation success.
+
+The exact frozen head, synthetic merge, final run/job identifiers, final diff totals, and final PR state belong in the PR freeze record after that exact-head run completes.
