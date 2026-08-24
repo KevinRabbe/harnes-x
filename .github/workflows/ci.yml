@@ -19,8 +19,26 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - uses: actions/setup-dotnet@v4
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: "8.0.x"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: pytest
       - run: harness-x --help
       - run: harness-x validate-config configs/default.yaml
+      - if: runner.os == 'Windows'
+        run: dotnet restore desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj
+      - if: runner.os == 'Windows'
+        run: dotnet build desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release --no-restore
+      - if: runner.os == 'Windows'
+        run: dotnet run --project desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release --no-build -- --smoke-test
+      - if: runner.os == 'Windows'
+        run: dotnet publish desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release -r win-x64 --self-contained false -o artifacts/windows-desktop
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: harness-x-windows-desktop
+          path: artifacts/windows-desktop
+          if-no-files-found: error
