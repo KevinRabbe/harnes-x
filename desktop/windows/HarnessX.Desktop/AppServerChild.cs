@@ -126,18 +126,23 @@ internal sealed class AppServerChild : IAsyncDisposable
                 throw new InvalidOperationException("Harness X App Server desktop handshake PID mismatch.");
             }
 
-            var baseUri = RequireLoopbackHttp(handshake.BaseUrl, "base_url");
-            var uiUri = RequireLoopbackHttp(handshake.UiUrl, "ui_url");
-            var bootstrapUri = RequireLoopbackHttp(handshake.UiBootstrapUrl, "ui_bootstrap_url");
+            var baseUri = RequireLoopbackHttp(handshake.BaseUrl, "base_url", allowFragment: false);
+            var uiUri = RequireLoopbackHttp(handshake.UiUrl, "ui_url", allowFragment: false);
+            var bootstrapUri = RequireLoopbackHttp(
+                handshake.UiBootstrapUrl,
+                "ui_bootstrap_url",
+                allowFragment: true);
             var origin = baseUri.GetLeftPart(UriPartial.Authority);
             if (!string.Equals(uiUri.GetLeftPart(UriPartial.Authority), origin, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(bootstrapUri.GetLeftPart(UriPartial.Authority), origin, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Harness X desktop handshake URLs do not share one loopback origin.");
             }
-            if (string.IsNullOrEmpty(bootstrapUri.Query))
+            if (!string.IsNullOrEmpty(bootstrapUri.Query)
+                || !bootstrapUri.Fragment.StartsWith("#bootstrap=", StringComparison.Ordinal)
+                || bootstrapUri.Fragment.Length <= "#bootstrap=".Length)
             {
-                throw new InvalidOperationException("Harness X desktop bootstrap URL is missing its one-time ticket.");
+                throw new InvalidOperationException("Harness X desktop bootstrap URL is missing its one-time fragment ticket.");
             }
 
             return new AppServerChild(process, stderrTask, baseUri, uiUri, bootstrapUri);
@@ -206,14 +211,14 @@ internal sealed class AppServerChild : IAsyncDisposable
         return File.Exists(adjacent) ? adjacent : "harness-x-app-server";
     }
 
-    private static Uri RequireLoopbackHttp(string value, string field)
+    private static Uri RequireLoopbackHttp(string value, string field, bool allowFragment)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttp
             || !string.Equals(uri.Host, "127.0.0.1", StringComparison.Ordinal)
             || uri.Port <= 0
             || !string.IsNullOrEmpty(uri.UserInfo)
-            || !string.IsNullOrEmpty(uri.Fragment))
+            || (!allowFragment && !string.IsNullOrEmpty(uri.Fragment)))
         {
             throw new InvalidOperationException($"Harness X desktop handshake {field} is not a valid loopback HTTP URL.");
         }
