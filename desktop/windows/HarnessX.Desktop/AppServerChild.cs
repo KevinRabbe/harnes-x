@@ -49,13 +49,22 @@ internal sealed class AppServerChild : IAsyncDisposable
     public Uri BootstrapUri { get; }
 
     public static async Task<AppServerChild> StartAsync(
+        string appServerExecutable,
         string appServerRoot,
         CancellationToken cancellationToken = default)
     {
+        var executable = Path.GetFullPath(appServerExecutable);
+        if (!File.Exists(executable))
+        {
+            throw new FileNotFoundException(
+                "Harness X App Server executable does not exist.",
+                executable);
+        }
+
         Directory.CreateDirectory(appServerRoot);
         var startInfo = new ProcessStartInfo
         {
-            FileName = ResolveAppServerExecutable(),
+            FileName = executable,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -197,21 +206,6 @@ internal sealed class AppServerChild : IAsyncDisposable
     {
         await StopAsync().ConfigureAwait(false);
         _process.Dispose();
-    }
-
-    private static string ResolveAppServerExecutable()
-    {
-        var configured = Environment.GetEnvironmentVariable("HARNESS_X_APP_SERVER_EXECUTABLE");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return configured;
-        }
-
-        var adjacentName = OperatingSystem.IsWindows()
-            ? "harness-x-app-server.exe"
-            : "harness-x-app-server";
-        var adjacent = Path.Combine(AppContext.BaseDirectory, adjacentName);
-        return File.Exists(adjacent) ? adjacent : "harness-x-app-server";
     }
 
     private static Uri RequireLoopbackHttp(string value, string field, bool allowFragment)
