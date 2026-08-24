@@ -138,6 +138,49 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional exclusive output path for an unsigned deterministic M58 verification receipt",
     )
+
+    reconcile_receipt = subparsers.add_parser(
+        "reconcile-evidence-receipt",
+        help="Reconcile exact M58 receipt bytes against a fresh frozen capsule verification",
+    )
+    reconcile_receipt.add_argument("receipt", type=Path)
+    reconcile_receipt.add_argument("capsule", type=Path)
+    reconcile_receipt.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Existing directory that will retain fresh fixed extracted evidence files",
+    )
+    reconcile_receipt.add_argument(
+        "--public-key",
+        type=Path,
+        required=True,
+        help="Externally trusted Ed25519 public-key PEM for frozen M52 verification",
+    )
+    reconcile_receipt.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="Optional local session-snapshot.json export for M47 fingerprint verification",
+    )
+    reconcile_receipt.add_argument(
+        "--lifecycle",
+        type=Path,
+        default=None,
+        help="Optional local session-lifecycle-ledger.json export for M45 event-chain verification",
+    )
+    reconcile_receipt.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Local coding-task-report.json export when the manifest marks it available",
+    )
+    reconcile_receipt.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Local causal-trace.jsonl export when the manifest marks it available",
+    )
     return parser
 
 
@@ -212,6 +255,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                     result,
                     receipt_path=args.receipt,
                 )
+        except PortableEvidenceVerificationError as exc:
+            parser.error(str(exc))
+        print(result.summary())
+        return 0
+
+    if args.command == "reconcile-evidence-receipt":
+        from .evidence_verification import PortableEvidenceVerificationError
+        from .evidence_verification_receipt_reconciliation import (
+            reconcile_evidence_verification_receipt,
+        )
+
+        try:
+            result = reconcile_evidence_verification_receipt(
+                args.receipt,
+                args.capsule,
+                output_dir=args.output_dir,
+                public_key_path=args.public_key,
+                snapshot_path=args.snapshot,
+                lifecycle_path=args.lifecycle,
+                report_path=args.report,
+                trace_path=args.trace,
+            )
         except PortableEvidenceVerificationError as exc:
             parser.error(str(exc))
         print(result.summary())
