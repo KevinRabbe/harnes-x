@@ -6,7 +6,7 @@ M54 adds **one authenticated operator-UI action that fetches the existing M43 ma
 
 M54 is not browser-side signature trust. The UI has no trusted public key and does not claim that the displayed key fingerprint identifies an operator, installation, host, or server. Cryptographic signature verification remains the frozen M52 offline verifier with a public key obtained through an external trusted channel.
 
-## Stack
+## Frozen stack
 
 Exact frozen M53 base:
 
@@ -16,9 +16,15 @@ First M54 commit / scope document:
 
 `635f4a232f252568641df0ae305a54afdcde7e33`
 
-M54 remains stacked directly on that M53 SHA. Frozen M53 PR #60 must remain unchanged, draft/open/unmerged.
+Frozen M54 head:
 
-This document was the first M54 commit and is updated only to record the qualified implementation and acceptance boundary before the final exact-head freeze gate.
+`72846287bd5fe0732572d3f0b6e3f3c5291b45a5`
+
+Final qualified synthetic merge:
+
+`88d30d8a1ab0643b8a8278b45f41489c4c0df4aa`
+
+M54 remains stacked directly on frozen M53. Frozen M53 PR #60 must remain unchanged, draft/open/unmerged. M54 PR #61 must remain draft/open/unmerged. No merge is authorized.
 
 ## Frozen implementation contract
 
@@ -223,20 +229,22 @@ M54 does not add:
 - key rotation/revocation;
 - remote access or a network trust service.
 
-## Exact source-complete M53 → M54 diff
+## Exact frozen M53 → M54 diff
 
-Final source/test candidate before this documentation-only commit:
+Base:
 
-`5abdffd86b265b0a30905c7a6362742a989e8e86`
+`cc0ba28199005144906dda39837d1ca7828f1da3`
 
-Against exact frozen M53 `cc0ba28199005144906dda39837d1ca7828f1da3`:
+Head:
+
+`72846287bd5fe0732572d3f0b6e3f3c5291b45a5`
 
 - status: ahead;
 - exact merge base: frozen M53;
-- commits ahead: 13;
+- commits ahead: 14;
 - commits behind: 0;
 - changed files: 5;
-- additions: 1111;
+- additions: 1134;
 - deletions: 0.
 
 Changed files are exactly:
@@ -248,8 +256,6 @@ Changed files are exactly:
 5. `tests/test_app_server_operator_signed_manifest_pair_ui.py`.
 
 No App Server HTTP/server/service/store/protocol/session/runtime, M43 evidence builder/renderer, M44–M54 offline verifier/signing implementation, report/trace/snapshot generation, coding runtime/verifier, model/tool, memory, budget, controller, or control implementation changed.
-
-This documentation-only contract commit moves the M54 head once more; the PR freeze record must therefore use a fresh exact-head compare and exact-head CI rather than treating the source/test candidate SHA as the frozen SHA.
 
 ## Source-audit findings
 
@@ -312,7 +318,7 @@ Head `ee38dbdf0d65249e9c2e041c94bf0df72a9bcb0c`.
 
 This run was superseded by a dedicated non-canonical signature-text behavioral regression.
 
-### CI #1399 — source-complete green candidate
+### CI #1399 — green provisional
 
 Head `d6bdc5e6522b533ae6f524b08fd0babde7edd04b`.
 
@@ -349,18 +355,33 @@ Head `628d758a5ab817a2df24004ab7766b42e85112ca`.
 - `harness-x --help`: PASS;
 - config validation: PASS, `valid: system_version=0.1.0-alpha.0`.
 
-CI #1401 is **not** freeze evidence. Post-run bit-level source audit found the 16-character terminal base64url set too permissive for a 64-byte value, so source and regression tests moved again.
+CI #1401 is not freeze evidence. Post-run bit-level source audit found the 16-character terminal base64url set too permissive for a 64-byte value, so source and regression tests moved again.
 
-## Freeze gate
+### FINAL exact-head qualification — CI #1407
 
-M54 is freeze-eligible only after this final documentation head has:
+Exact frozen M54 head:
 
-- exact frozen-M53 merge base and zero commits behind;
-- the same five-file authority boundary;
-- no submitted reviews or unresolved review threads requiring work;
-- one fresh pull-request Linux CI success on that exact final head;
-- full pytest success;
-- installed `harness-x --help` success;
-- default config validation success.
+`72846287bd5fe0732572d3f0b6e3f3c5291b45a5`
 
-The exact frozen head, synthetic merge, final run/job identifiers, final diff totals, and final PR state belong in the PR freeze record after that exact-head run completes.
+- run number: `1407`;
+- run id: `32679431002`;
+- job id: `97293368819`;
+- workflow conclusion: success;
+- synthetic merge: `88d30d8a1ab0643b8a8278b45f41489c4c0df4aa`;
+- exact checkout: `Merge 72846287bd5fe0732572d3f0b6e3f3c5291b45a5 into cc0ba28199005144906dda39837d1ca7828f1da3`;
+- Ubuntu 24.04.4 LTS;
+- Python 3.12.14;
+- Actions Node 24;
+- `cryptography 46.0.7`;
+- pytest: `675 passed in 99.68s (0:01:39)`;
+- `harness-x --help`: PASS;
+- `harness-x validate-config configs/default.yaml`: PASS;
+- config output: `valid: system_version=0.1.0-alpha.0`.
+
+CI #1407 is the M54 freeze gate.
+
+## Frozen PR state
+
+M54 PR #61 must remain **draft / open / unmerged** on exact frozen M53 base `cc0ba28199005144906dda39837d1ca7828f1da3` and exact frozen M54 head `72846287bd5fe0732572d3f0b6e3f3c5291b45a5`.
+
+No merge was performed or authorized.
