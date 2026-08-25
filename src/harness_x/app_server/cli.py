@@ -13,7 +13,9 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .conversation_context_operator_http_server import LocalOperatorHTTPServer
+from .approval_runner import ApprovalAwareHarnessCodingRunner
+from .sensitive_approval import SensitiveActionApprovalBroker
+from .sensitive_approval_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
@@ -142,8 +144,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _require_desktop_redirects(parser)
 
     root = args.root.resolve()
+    approval_broker = SensitiveActionApprovalBroker(root / "data" / "sensitive-approvals")
     service = AppServerService(
         root / "data",
+        runner=ApprovalAwareHarnessCodingRunner(approval_broker),
         server_version="0.1.0a0+app-server40-one-time-ui-bootstrap",
     )
     try:
