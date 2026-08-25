@@ -78,9 +78,7 @@ class HarnessCodingRunner:
         if not request.baseline_verification:
             argv.append("--no-baseline-verify")
         if request.browser_application_spec_path is not None:
-            argv.extend(
-                ("--application-spec", str(request.browser_application_spec_path))
-            )
+            argv.extend(("--application-spec", str(request.browser_application_spec_path)))
         if request.browser_verification_plan_path is not None:
             argv.extend(
                 (
@@ -143,6 +141,11 @@ class AppServerService:
         with self._condition:
             return self._active_session_id
 
+    @property
+    def stopping(self) -> bool:
+        with self._condition:
+            return self._stopping
+
     def health(self) -> AppServerHealth:
         sessions = self.store.sessions
         active = sum(
@@ -157,21 +160,56 @@ class AppServerService:
         )
 
     def create_session(self, request: CodingSessionRequest) -> AppSessionSnapshot:
-        self._validate_launch_request(request)
         run_root = self.run_root / f"run_{uuid.uuid4().hex}"
-        snapshot = self.store.create_session(request, output_root=run_root)
+        return self.create_session_at_output_root(request, output_root=run_root)
+
+    def create_session_at_output_root(
+        self,
+        request: CodingSessionRequest,
+        *,
+        output_root: str | Path,
+    ) -> AppSessionSnapshot:
+        """Create one session at a caller-stable run root, then enqueue it exactly once.
+
+        M69 uses this public boundary so a durable conversation plan can recover a session by
+        its exact output-root identity without reaching into scheduler internals. The output
+        root must remain a direct child of the service-owned run directory.
+        """
+
+        self._validate_launch_request(request)
+        resolved_output_root = Path(output_root).resolve()
+        if resolved_output_root.parent != self.run_root:
+            raise ValueError("app-server output root must be a direct child of run root")
+        if any(
+            Path(item.output_root).resolve() == resolved_output_root
+            for item in self.store.sessions
+        ):
+            raise ValueError("app-server output root is already assigned to another session")
+        snapshot = self.store.create_session(request, output_root=resolved_output_root)
+        return self.enqueue_created_session(snapshot.session_id)
+
+    def enqueue_created_session(self, session_id: str) -> AppSessionSnapshot:
+        """Idempotently enqueue one durable CREATED session after restart reconciliation."""
+
+        snapshot = self.store.session(session_id)
+        if snapshot.status != AppSessionStatus.CREATED:
+            return snapshot
         with self._condition:
+            snapshot = self.store.session(session_id)
+            if snapshot.status != AppSessionStatus.CREATED:
+                return snapshot
             if self._stopping:
                 self.store.transition(
-                    snapshot.session_id,
+                    session_id,
                     status=AppSessionStatus.FAILED,
                     kind=AppEventKind.SESSION_FAILED,
                     failure_reason="app_server_is_stopping",
                 )
-                return self.store.session(snapshot.session_id)
-            self._queue.append(snapshot.session_id)
-            self._condition.notify_all()
-        return snapshot
+                return self.store.session(session_id)
+            if session_id != self._active_session_id and session_id not in self._queue:
+                self._queue.append(session_id)
+                self._condition.notify_all()
+        return self.store.session(session_id)
 
     def session(self, session_id: str) -> AppSessionSnapshot:
         return self.store.session(session_id)
