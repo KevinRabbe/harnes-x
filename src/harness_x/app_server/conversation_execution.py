@@ -159,12 +159,16 @@ class ConversationExecutionStore:
         self.bindings_path = self.root / "conversation-execution-bindings.jsonl"
         self._plans: dict[str, ConversationExecutionPlan] = {}
         self._submission_ids: dict[str, str] = {}
-        self._bindings: dict[tuple[str, ConversationExecutionBindingKind], ConversationExecutionBinding] = {}
+        self._bindings: dict[
+            tuple[str, ConversationExecutionBindingKind], ConversationExecutionBinding
+        ] = {}
         self._load()
 
     @property
     def plans(self) -> tuple[ConversationExecutionPlan, ...]:
-        return tuple(sorted(self._plans.values(), key=lambda item: (item.created_at, item.execution_id)))
+        return tuple(
+            sorted(self._plans.values(), key=lambda item: (item.created_at, item.execution_id))
+        )
 
     def plan(self, execution_id: str) -> ConversationExecutionPlan:
         try:
@@ -176,7 +180,9 @@ class ConversationExecutionStore:
         execution_id = self._submission_ids.get(submission_id)
         return None if execution_id is None else self.plan(execution_id)
 
-    def plans_for_chat(self, project_id: str, chat_id: str) -> tuple[ConversationExecutionPlan, ...]:
+    def plans_for_chat(
+        self, project_id: str, chat_id: str
+    ) -> tuple[ConversationExecutionPlan, ...]:
         return tuple(
             item
             for item in self.plans
@@ -355,7 +361,9 @@ class ConversationExecutionCoordinator:
                 task=request.text,
                 reserved_user_sequence=chat.message_count + 1,
                 request=coding_request,
-                output_root=str((self.service.run_root / f"conversation_{execution_id}").resolve()),
+                output_root=str(
+                    (self.service.run_root / f"conversation_{execution_id}").resolve()
+                ),
                 created_at=_now(),
             )
             plan = self.store.append_plan(plan)
@@ -387,7 +395,9 @@ class ConversationExecutionCoordinator:
             self.product_store.project(project_id)
             for plan in self.store.plans:
                 if plan.project_id == project_id and self._is_active_locked(plan):
-                    raise ValueError("cannot archive a project with active conversation execution")
+                    raise ValueError(
+                        "cannot archive a project with active conversation execution"
+                    )
 
     def assert_chat_archivable(self, project_id: str, chat_id: str) -> None:
         with self.product_lock:
@@ -397,15 +407,21 @@ class ConversationExecutionCoordinator:
                     raise ValueError("cannot archive a chat with active conversation execution")
 
     def _is_active_locked(self, plan: ConversationExecutionPlan) -> bool:
-        session_binding = self.store.binding(plan.execution_id, ConversationExecutionBindingKind.SESSION)
+        session_binding = self.store.binding(
+            plan.execution_id, ConversationExecutionBindingKind.SESSION
+        )
         if session_binding is None:
             return True
         try:
-            return not self.service.store.session(session_binding.record_id).status.terminal
-        except KeyError:
-            raise RuntimeError("conversation execution session binding points to missing session")
+            return not self.service.session(session_binding.record_id).status.terminal
+        except KeyError as exc:
+            raise RuntimeError(
+                "conversation execution session binding points to missing session"
+            ) from exc
 
-    def _reconcile_locked(self, plan: ConversationExecutionPlan) -> ConversationExecutionProjection:
+    def _reconcile_locked(
+        self, plan: ConversationExecutionPlan
+    ) -> ConversationExecutionProjection:
         self._require_plan_identity(plan)
         user_message_id = self._ensure_user_message_locked(plan)
         snapshot = self._ensure_session_locked(plan)
@@ -418,7 +434,9 @@ class ConversationExecutionCoordinator:
         if chat.project_id != project.project_id:
             raise RuntimeError("conversation execution plan project/chat identity mismatch")
         if Path(plan.request.workspace_root).resolve() != Path(project.workspace_root).resolve():
-            raise RuntimeError("conversation execution plan workspace no longer matches project identity")
+            raise RuntimeError(
+                "conversation execution plan workspace no longer matches project identity"
+            )
         if plan.request.task != plan.task:
             raise RuntimeError("conversation execution plan task/request mismatch")
 
@@ -429,12 +447,18 @@ class ConversationExecutionCoordinator:
             raise ValueError("chat belongs to another project")
 
     def _ensure_user_message_locked(self, plan: ConversationExecutionPlan) -> str:
-        binding = self.store.binding(plan.execution_id, ConversationExecutionBindingKind.USER_MESSAGE)
+        binding = self.store.binding(
+            plan.execution_id, ConversationExecutionBindingKind.USER_MESSAGE
+        )
         messages = self.product_store.messages(plan.chat_id)
         if binding is not None:
-            message = next((item for item in messages if item.message_id == binding.record_id), None)
+            message = next(
+                (item for item in messages if item.message_id == binding.record_id), None
+            )
             if message is None:
-                raise RuntimeError("conversation user-message binding points to missing message")
+                raise RuntimeError(
+                    "conversation user-message binding points to missing message"
+                )
             self._verify_user_message(plan, message)
             return message.message_id
 
@@ -450,7 +474,9 @@ class ConversationExecutionCoordinator:
             )
             self._verify_user_message(plan, message)
         else:
-            raise RuntimeError("conversation execution reserved user sequence is ahead of chat ledger")
+            raise RuntimeError(
+                "conversation execution reserved user sequence is ahead of chat ledger"
+            )
         self.store.bind(
             plan.execution_id,
             ConversationExecutionBindingKind.USER_MESSAGE,
@@ -468,28 +494,37 @@ class ConversationExecutionCoordinator:
             or getattr(message.content, "type", None) != "text"
             or getattr(message.content, "text", None) != plan.task
         ):
-            raise RuntimeError("conversation execution reserved user message does not match plan")
+            raise RuntimeError(
+                "conversation execution reserved user message does not match plan"
+            )
 
-    def _ensure_session_locked(self, plan: ConversationExecutionPlan) -> AppSessionSnapshot:
-        binding = self.store.binding(plan.execution_id, ConversationExecutionBindingKind.SESSION)
+    def _ensure_session_locked(
+        self, plan: ConversationExecutionPlan
+    ) -> AppSessionSnapshot:
+        binding = self.store.binding(
+            plan.execution_id, ConversationExecutionBindingKind.SESSION
+        )
         if binding is not None:
-            snapshot = self.service.store.session(binding.record_id)
+            snapshot = self.service.session(binding.record_id)
             self._verify_session(plan, snapshot)
-            self._ensure_created_session_queued(snapshot)
-            return snapshot
+            return self.service.enqueue_created_session(snapshot.session_id)
 
         matches = tuple(
             item
-            for item in self.service.store.sessions
-            if str(Path(item.output_root).resolve()) == str(Path(plan.output_root).resolve())
+            for item in self.service.sessions()
+            if str(Path(item.output_root).resolve())
+            == str(Path(plan.output_root).resolve())
         )
         if len(matches) > 1:
-            raise RuntimeError("multiple App Sessions use one conversation execution output root")
+            raise RuntimeError(
+                "multiple App Sessions use one conversation execution output root"
+            )
         if matches:
             snapshot = matches[0]
             self._verify_session(plan, snapshot)
+            snapshot = self.service.enqueue_created_session(snapshot.session_id)
         else:
-            snapshot = self.service.store.create_session(
+            snapshot = self.service.create_session_at_output_root(
                 plan.request,
                 output_root=plan.output_root,
             )
@@ -499,28 +534,16 @@ class ConversationExecutionCoordinator:
             ConversationExecutionBindingKind.SESSION,
             snapshot.session_id,
         )
-        self._ensure_created_session_queued(snapshot)
         return snapshot
 
     @staticmethod
-    def _verify_session(plan: ConversationExecutionPlan, snapshot: AppSessionSnapshot) -> None:
+    def _verify_session(
+        plan: ConversationExecutionPlan, snapshot: AppSessionSnapshot
+    ) -> None:
         if snapshot.request != plan.request:
             raise RuntimeError("conversation execution App Session request mismatch")
         if str(Path(snapshot.output_root).resolve()) != str(Path(plan.output_root).resolve()):
             raise RuntimeError("conversation execution App Session output-root mismatch")
-
-    def _ensure_created_session_queued(self, snapshot: AppSessionSnapshot) -> None:
-        if snapshot.status != AppSessionStatus.CREATED:
-            return
-        with self.service._condition:
-            if self.service._stopping:
-                return
-            if (
-                snapshot.session_id != self.service._active_session_id
-                and snapshot.session_id not in self.service._queue
-            ):
-                self.service._queue.append(snapshot.session_id)
-                self.service._condition.notify_all()
 
     def _ensure_terminal_result_locked(
         self,
@@ -530,12 +553,18 @@ class ConversationExecutionCoordinator:
         if not snapshot.status.terminal:
             return None
         text = self._terminal_text(plan, snapshot)
-        binding = self.store.binding(plan.execution_id, ConversationExecutionBindingKind.RESULT_MESSAGE)
+        binding = self.store.binding(
+            plan.execution_id, ConversationExecutionBindingKind.RESULT_MESSAGE
+        )
         messages = self.product_store.messages(plan.chat_id)
         if binding is not None:
-            message = next((item for item in messages if item.message_id == binding.record_id), None)
+            message = next(
+                (item for item in messages if item.message_id == binding.record_id), None
+            )
             if message is None:
-                raise RuntimeError("conversation result-message binding points to missing message")
+                raise RuntimeError(
+                    "conversation result-message binding points to missing message"
+                )
             self._verify_result_message(plan, message, text)
             return message.message_id
 
@@ -547,7 +576,9 @@ class ConversationExecutionCoordinator:
             and getattr(item.content, "text", None) == text
         )
         if len(matches) > 1:
-            raise RuntimeError("conversation execution has duplicate deterministic result messages")
+            raise RuntimeError(
+                "conversation execution has duplicate deterministic result messages"
+            )
         if matches:
             message = matches[0]
         else:
@@ -565,7 +596,9 @@ class ConversationExecutionCoordinator:
         return message.message_id
 
     @staticmethod
-    def _verify_result_message(plan: ConversationExecutionPlan, message, text: str) -> None:
+    def _verify_result_message(
+        plan: ConversationExecutionPlan, message, text: str
+    ) -> None:
         if (
             message.project_id != plan.project_id
             or message.chat_id != plan.chat_id
@@ -573,10 +606,14 @@ class ConversationExecutionCoordinator:
             or getattr(message.content, "type", None) != "text"
             or getattr(message.content, "text", None) != text
         ):
-            raise RuntimeError("conversation execution result message does not match terminal projection")
+            raise RuntimeError(
+                "conversation execution result message does not match terminal projection"
+            )
 
     @staticmethod
-    def _terminal_text(plan: ConversationExecutionPlan, snapshot: AppSessionSnapshot) -> str:
+    def _terminal_text(
+        plan: ConversationExecutionPlan, snapshot: AppSessionSnapshot
+    ) -> str:
         header = {
             AppSessionStatus.SUCCEEDED: "Harness X completed this work successfully.",
             AppSessionStatus.FAILED: "Harness X could not complete this work.",
@@ -623,7 +660,7 @@ class ConversationExecutionCoordinator:
 
     def _loop(self) -> None:
         while not self._stop.wait(0.35):
-            if self.service._stopping:
+            if self.service.stopping:
                 return
             try:
                 self.reconcile_all()
