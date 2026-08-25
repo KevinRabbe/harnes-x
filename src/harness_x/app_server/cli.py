@@ -13,7 +13,7 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .product_operator_http_server import LocalOperatorHTTPServer
+from .conversation_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
@@ -171,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        server.httpd.server_close()
+        server.close()
         service.close()
     return 0
 
