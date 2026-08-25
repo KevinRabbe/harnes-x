@@ -111,7 +111,8 @@ def _start_desktop_lifetime_monitor(server: LocalOperatorHTTPServer) -> threadin
 
 def _desktop_start_payload(
     server: LocalOperatorHTTPServer,
-    *,    bootstrap_url: str,
+    *,
+    bootstrap_url: str,
 ) -> dict[str, object]:
     return {
         "schema_version": "app-server-desktop-start-v1",
