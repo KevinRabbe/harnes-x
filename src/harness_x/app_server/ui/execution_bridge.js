@@ -1,13 +1,16 @@
 "use strict";
 
-// M69 execution wrapper. The M68 workspace remains the durable Project/Chat projection; this
-// script replaces only composer submission and adds coarse execution restoration/polling. It
-// reuses the inherited authenticated `api` binding and never reads or exports the bearer token.
+// M69/M70 execution wrapper. The M68 workspace remains the durable Project/Chat projection.
+// M69 replaces composer submission; M70 adds a read-only grounded activity projection. Both
+// reuse the inherited authenticated `api` binding and never read or export the bearer token.
 const conversationExecutionState = {
   pollTimer: null,
   pollGeneration: 0,
   activeExecution: null,
   pendingSubmission: null,
+  activityExecutionId: null,
+  activityCursor: "a0:t0",
+  activityEvents: new Map(),
 };
 
 function conversationExecutionSubmissionId() {
@@ -17,6 +20,76 @@ function conversationExecutionSubmissionId() {
     .map((value) => value.toString(16).padStart(2, "0"))
     .join("");
   return `submission_${suffix}`;
+}
+
+function conversationExecutionEnsureActivityRegion() {
+  let region = document.getElementById("daily-work-activity");
+  if (region) return region;
+
+  region = document.createElement("section");
+  region.id = "daily-work-activity";
+  region.className = "daily-inline-form hidden";
+  region.setAttribute("aria-live", "polite");
+
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Grounded work activity";
+  region.appendChild(eyebrow);
+
+  const list = document.createElement("div");
+  list.id = "daily-work-activity-list";
+  region.appendChild(list);
+
+  const composerWrap = dailyById("daily-composer-wrap");
+  composerWrap.parentNode.insertBefore(region, composerWrap);
+  return region;
+}
+
+function conversationExecutionRenderActivity() {
+  const region = conversationExecutionEnsureActivityRegion();
+  const list = dailyById("daily-work-activity-list");
+  list.replaceChildren();
+  if (!conversationExecutionState.activityExecutionId) {
+    region.classList.add("hidden");
+    return;
+  }
+
+  region.classList.remove("hidden");
+  const events = [...conversationExecutionState.activityEvents.values()];
+  if (!events.length) {
+    const waiting = document.createElement("p");
+    waiting.className = "muted small";
+    waiting.textContent = "Waiting for verified App Server or causal-trace activity…";
+    list.appendChild(waiting);
+    return;
+  }
+
+  for (const item of events) {
+    const row = document.createElement("p");
+    row.className = "muted small";
+    row.dataset.activityId = String(item.event_id || "");
+    row.dataset.activityKind = String(item.kind || "");
+    row.textContent = String(item.summary || item.kind || "Harness X activity");
+    list.appendChild(row);
+  }
+}
+
+function conversationExecutionResetActivity(executionId = null) {
+  conversationExecutionState.activityExecutionId = executionId;
+  conversationExecutionState.activityCursor = "a0:t0";
+  conversationExecutionState.activityEvents = new Map();
+  conversationExecutionRenderActivity();
+}
+
+function conversationExecutionMergeActivity(page) {
+  if (page.execution_id !== conversationExecutionState.activityExecutionId) return;
+  for (const item of page.events || []) {
+    const eventId = String(item.event_id || "");
+    if (!eventId || conversationExecutionState.activityEvents.has(eventId)) continue;
+    conversationExecutionState.activityEvents.set(eventId, item);
+  }
+  conversationExecutionState.activityCursor = String(page.next_cursor || "a0:t0");
+  conversationExecutionRenderActivity();
 }
 
 function conversationExecutionStopPolling() {
@@ -31,6 +104,11 @@ function conversationExecutionStopPolling() {
 function conversationExecutionPath(projectId, chatId, executionId = null) {
   const base = `/v1/projects/${encodeURIComponent(projectId)}/chats/${encodeURIComponent(chatId)}/executions`;
   return executionId == null ? base : `${base}/${encodeURIComponent(executionId)}`;
+}
+
+function conversationExecutionActivityPath(projectId, chatId, executionId) {
+  const cursor = encodeURIComponent(conversationExecutionState.activityCursor);
+  return `${conversationExecutionPath(projectId, chatId, executionId)}/activity?cursor=${cursor}&limit=100`;
 }
 
 function conversationExecutionCurrent(projectId, chatId) {
@@ -70,40 +148,62 @@ async function conversationExecutionRefreshTerminal(projectId, chatId) {
   dailyRenderChatHeader(chat);
 }
 
-function conversationExecutionSchedulePoll(projectId, chatId, executionId, generation) {
+function conversationExecutionSchedulePoll(
+  projectId,
+  chatId,
+  executionId,
+  generation,
+  delayMs = 850,
+) {
   if (generation !== conversationExecutionState.pollGeneration) return;
   if (!conversationExecutionCurrent(projectId, chatId)) return;
   if (conversationExecutionState.pollTimer != null) clearTimeout(conversationExecutionState.pollTimer);
   conversationExecutionState.pollTimer = setTimeout(() => {
     conversationExecutionState.pollTimer = null;
     void conversationExecutionPoll(projectId, chatId, executionId, generation);
-  }, 1000);
+  }, delayMs);
 }
 
 async function conversationExecutionPoll(projectId, chatId, executionId, generation) {
   if (generation !== conversationExecutionState.pollGeneration) return;
   if (!conversationExecutionCurrent(projectId, chatId)) return;
   try {
-    const projection = await api(conversationExecutionPath(projectId, chatId, executionId));
+    const page = await api(conversationExecutionActivityPath(projectId, chatId, executionId));
     if (generation !== conversationExecutionState.pollGeneration) return;
     if (!conversationExecutionCurrent(projectId, chatId)) return;
+    if (page.execution_id !== executionId) throw new Error("activity execution identity mismatch");
+
+    conversationExecutionMergeActivity(page);
+    const projection = {
+      execution_id: executionId,
+      status: page.status,
+      terminal: page.terminal,
+    };
     dailyById("daily-composer-status").textContent = conversationExecutionStatusText(projection);
-    if (projection.terminal) {
+
+    if (page.terminal && !page.has_more) {
       conversationExecutionState.activeExecution = null;
       conversationExecutionSetComposerEnabled(true);
       await conversationExecutionRefreshTerminal(projectId, chatId);
       return;
     }
-    conversationExecutionState.activeExecution = projection;
-    conversationExecutionSetComposerEnabled(false);
-    conversationExecutionSchedulePoll(projectId, chatId, executionId, generation);
+
+    conversationExecutionState.activeExecution = page.terminal ? null : projection;
+    conversationExecutionSetComposerEnabled(Boolean(page.terminal));
+    conversationExecutionSchedulePoll(
+      projectId,
+      chatId,
+      executionId,
+      generation,
+      page.has_more ? 25 : 850,
+    );
   } catch (error) {
     if (generation !== conversationExecutionState.pollGeneration) return;
     if (!conversationExecutionCurrent(projectId, chatId)) return;
     dailyById("daily-composer-status").textContent = (
-      `Execution status unavailable: ${dailyMessage(error)} · retrying locally`
+      `Execution activity unavailable: ${dailyMessage(error)} · retrying locally`
     );
-    conversationExecutionSchedulePoll(projectId, chatId, executionId, generation);
+    conversationExecutionSchedulePoll(projectId, chatId, executionId, generation, 1200);
   }
 }
 
@@ -119,24 +219,22 @@ async function conversationExecutionRestore(projectId, chatId) {
     });
     const latest = executions.length ? executions[executions.length - 1] : null;
     if (!latest) {
+      conversationExecutionResetActivity(null);
       conversationExecutionState.activeExecution = null;
       conversationExecutionSetComposerEnabled(true);
       dailyById("daily-composer-status").textContent = "Ready for a Harness X work turn.";
       return;
     }
+
+    conversationExecutionResetActivity(latest.execution_id);
     dailyById("daily-composer-status").textContent = conversationExecutionStatusText(latest);
-    if (latest.terminal) {
-      conversationExecutionState.activeExecution = null;
-      conversationExecutionSetComposerEnabled(true);
-      await conversationExecutionRefreshTerminal(projectId, chatId);
-      return;
-    }
-    conversationExecutionState.activeExecution = latest;
-    conversationExecutionSetComposerEnabled(false);
+    conversationExecutionState.activeExecution = latest.terminal ? null : latest;
+    conversationExecutionSetComposerEnabled(Boolean(latest.terminal));
     const generation = conversationExecutionState.pollGeneration;
-    conversationExecutionSchedulePoll(projectId, chatId, latest.execution_id, generation);
+    conversationExecutionSchedulePoll(projectId, chatId, latest.execution_id, generation, 0);
   } catch (error) {
     if (!conversationExecutionCurrent(projectId, chatId)) return;
+    conversationExecutionResetActivity(null);
     conversationExecutionState.activeExecution = null;
     conversationExecutionSetComposerEnabled(false);
     dailyById("daily-composer-status").textContent = (
@@ -159,13 +257,14 @@ const dailyClearChatSelectionBeforeConversationExecution = dailyClearChatSelecti
 dailyClearChatSelection = function dailyClearChatSelectionWithConversationExecution() {
   conversationExecutionStopPolling();
   conversationExecutionState.pendingSubmission = null;
+  conversationExecutionResetActivity(null);
   dailyClearChatSelectionBeforeConversationExecution();
   conversationExecutionSetComposerEnabled(false);
 };
 
 dailyById("daily-composer").addEventListener("submit", async (event) => {
   // Capture-phase interception prevents the frozen M68 local-message submit listener from
-  // running for M69 work turns.
+  // running for conversation work turns.
   event.preventDefault();
   event.stopImmediatePropagation();
 
@@ -214,16 +313,12 @@ dailyById("daily-composer").addEventListener("submit", async (event) => {
     if (!conversationExecutionCurrent(projectId, chatId)) return;
     textArea.value = "";
     await dailyLoadMessages(chatId);
+    conversationExecutionResetActivity(projection.execution_id);
     dailyById("daily-composer-status").textContent = conversationExecutionStatusText(projection);
-    if (projection.terminal) {
-      conversationExecutionState.activeExecution = null;
-      conversationExecutionSetComposerEnabled(true);
-      await conversationExecutionRefreshTerminal(projectId, chatId);
-      return;
-    }
-    conversationExecutionState.activeExecution = projection;
+    conversationExecutionState.activeExecution = projection.terminal ? null : projection;
+    conversationExecutionSetComposerEnabled(Boolean(projection.terminal));
     const generation = conversationExecutionState.pollGeneration;
-    conversationExecutionSchedulePoll(projectId, chatId, projection.execution_id, generation);
+    conversationExecutionSchedulePoll(projectId, chatId, projection.execution_id, generation, 0);
   } catch (error) {
     if (error && typeof error.status === "number" && error.status < 500) {
       conversationExecutionState.pendingSubmission = null;
@@ -249,7 +344,9 @@ dailyById("daily-composer").addEventListener("submit", async (event) => {
 dailyById("lock-button").addEventListener("click", () => {
   conversationExecutionStopPolling();
   conversationExecutionState.pendingSubmission = null;
+  conversationExecutionResetActivity(null);
   conversationExecutionSetComposerEnabled(false);
 });
 
+conversationExecutionEnsureActivityRegion();
 if (!dailyState.selectedChatId) conversationExecutionSetComposerEnabled(false);
