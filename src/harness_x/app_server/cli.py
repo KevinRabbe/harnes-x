@@ -13,7 +13,7 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .conversation_operator_http_server import LocalOperatorHTTPServer
+from .conversation_context_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
@@ -111,8 +111,7 @@ def _start_desktop_lifetime_monitor(server: LocalOperatorHTTPServer) -> threadin
 
 def _desktop_start_payload(
     server: LocalOperatorHTTPServer,
-    *,
-    bootstrap_url: str,
+    *,    bootstrap_url: str,
 ) -> dict[str, object]:
     return {
         "schema_version": "app-server-desktop-start-v1",
