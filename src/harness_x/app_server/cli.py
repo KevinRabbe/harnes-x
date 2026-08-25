@@ -13,7 +13,7 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .conversation_operator_http_server import LocalOperatorHTTPServer
+from .conversation_context_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
