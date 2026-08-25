@@ -13,8 +13,10 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .conversation_context_operator_http_server import LocalOperatorHTTPServer
-from .service import AppServerService
+from .approval_runner import ApprovalAwareHarnessCodingRunner
+from .sensitive_approval import SensitiveActionApprovalBroker
+from .sensitive_approval_operator_http_server import LocalOperatorHTTPServer
+from .service import AppServerService, use_default_coding_runner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -142,10 +144,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         _require_desktop_redirects(parser)
 
     root = args.root.resolve()
-    service = AppServerService(
-        root / "data",
-        server_version="0.1.0a0+app-server40-one-time-ui-bootstrap",
-    )
+    approval_broker = SensitiveActionApprovalBroker(root / "data" / "sensitive-approvals")
+    approval_runner = ApprovalAwareHarnessCodingRunner(approval_broker)
+    with use_default_coding_runner(approval_runner):
+        service = AppServerService(
+            root / "data",
+            server_version="0.1.0a0+app-server40-one-time-ui-bootstrap",
+        )
     try:
         server = LocalOperatorHTTPServer(
             service,
