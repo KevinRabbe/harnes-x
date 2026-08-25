@@ -283,6 +283,7 @@ def test_production_cli_keeps_m70_http_identity_but_installs_m71_context_coordin
     )
     service = AppServerService(tmp_path / "data", runner=_CaptureRunner())
     server = app_server_cli.LocalOperatorHTTPServer(service, tmp_path / "transport", port=0)
+    server.start_in_thread()
     try:
         assert isinstance(server.conversation, ContextualConversationExecutionCoordinator)
     finally:
