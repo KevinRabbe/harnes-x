@@ -1,14 +1,22 @@
 "use strict";
 
-function loadConversationExecutionBridge() {
+function loadWorkspaceBridge(src, label) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/ui/execution_bridge.js";
+    script.src = src;
     script.async = true;
     script.addEventListener("load", resolve, { once: true });
-    script.addEventListener("error", () => reject(new Error("execution bridge asset failed to load")), { once: true });
+    script.addEventListener("error", () => reject(new Error(`${label} asset failed to load`)), { once: true });
     document.head.append(script);
   });
+}
+
+function loadConversationExecutionBridge() {
+  return loadWorkspaceBridge("/ui/execution_bridge.js", "execution bridge");
+}
+
+function loadSensitiveApprovalBridge() {
+  return loadWorkspaceBridge("/ui/approval_bridge.js", "approval bridge");
 }
 
 (async () => {
@@ -24,6 +32,7 @@ function loadConversationExecutionBridge() {
   authSubmit.disabled = true;
   try {
     await loadConversationExecutionBridge();
+    await loadSensitiveApprovalBridge();
   } catch (error) {
     document.getElementById("auth-error").textContent = `Workspace initialization failed: ${error instanceof Error ? error.message : String(error)}`;
     authSubmit.disabled = false;
