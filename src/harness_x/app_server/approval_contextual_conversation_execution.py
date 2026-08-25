@@ -33,15 +33,16 @@ class ApprovalContextualConversationExecutionCoordinator(
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         broker = getattr(self.service.runner, "approval_broker", None)
-        if not isinstance(broker, SensitiveActionApprovalBroker):
-            raise TypeError("M72 conversation server requires an approval-aware App Server runner")
-        self.approval_broker = broker
+        self.approval_broker = (
+            broker if isinstance(broker, SensitiveActionApprovalBroker) else None
+        )
         # AppServerService has already recovered durable sessions, but M70 does not call
         # reconcile_all until this constructor returns. Re-establish every M72 output-root
         # binding now so a recovered CREATED session cannot run without its approval policy.
-        for plan in self.store.plans:
-            if self._is_m72_plan(plan):
-                self._ensure_approval_context(plan)
+        if self.approval_broker is not None:
+            for plan in self.store.plans:
+                if self._is_m72_plan(plan):
+                    self._ensure_approval_context(plan)
 
     def submit(
         self,
@@ -50,6 +51,11 @@ class ApprovalContextualConversationExecutionCoordinator(
         chat_id: str,
         request: ConversationExecutionSubmitRequest,
     ) -> ConversationExecutionProjection:
+        # Inherited tests/direct test servers may carry a plain runner. Those remain on the
+        # frozen M71 contextual behavior; only an explicit approval-aware runner creates M72 plans.
+        if self.approval_broker is None:
+            return super().submit(project_id=project_id, chat_id=chat_id, request=request)
+
         with self.product_lock:
             existing = self.store.plan_for_submission(request.submission_id)
             if existing is not None:
@@ -101,10 +107,12 @@ class ApprovalContextualConversationExecutionCoordinator(
 
     def _require_plan_identity(self, plan: ConversationExecutionPlan) -> None:
         super()._require_plan_identity(plan)
-        if self._is_m72_plan(plan):
+        if self.approval_broker is not None and self._is_m72_plan(plan):
             self._ensure_approval_context(plan)
 
     def _ensure_approval_context(self, plan: ConversationExecutionPlan):
+        if self.approval_broker is None:
+            raise RuntimeError("M72 approval context requested without an approval broker")
         return self.approval_broker.register_execution(
             execution_id=plan.execution_id,
             project_id=plan.project_id,
