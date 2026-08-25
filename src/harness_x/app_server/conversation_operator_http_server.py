@@ -142,11 +142,30 @@ class LocalOperatorHTTPServer(M67LocalOperatorHTTPServer):
                         request = ConversationExecutionSubmitRequest.model_validate(
                             self._read_json()
                         )
-                        projection = owner.conversation.submit(
-                            project_id=project_id,
-                            chat_id=chat_id,
-                            request=request,
-                        )
+                        # One chat turn is serialized through its terminal Harness X result.
+                        # The same submission ID remains retry-safe while active; a distinct
+                        # submission cannot overtake it and break user/result ordering.
+                        with owner._product_lock:
+                            active = tuple(
+                                item
+                                for item in owner.conversation.projections_for_chat(
+                                    project_id, chat_id
+                                )
+                                if not item.terminal
+                            )
+                            if len(active) > 1:
+                                raise RuntimeError(
+                                    "chat has multiple active conversation executions"
+                                )
+                            if active and active[0].submission_id != request.submission_id:
+                                raise ValueError(
+                                    "chat already has an active conversation execution"
+                                )
+                            projection = owner.conversation.submit(
+                                project_id=project_id,
+                                chat_id=chat_id,
+                                request=request,
+                            )
                         self._json(
                             HTTPStatus.ACCEPTED,
                             projection.model_dump(mode="json"),
@@ -172,6 +191,7 @@ class LocalOperatorHTTPServer(M67LocalOperatorHTTPServer):
                             if "archived" in detail
                             or "belongs to another" in detail
                             or "already bound" in detail
+                            or "active conversation execution" in detail
                             else HTTPStatus.BAD_REQUEST
                         )
                         self._error(
