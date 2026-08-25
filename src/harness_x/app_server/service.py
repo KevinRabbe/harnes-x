@@ -11,8 +11,10 @@ from __future__ import annotations
 import threading
 import uuid
 from collections import deque
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Protocol
+from typing import Iterator, Protocol
 
 from pydantic import BaseModel
 
@@ -45,6 +47,28 @@ from .store import AppSessionStore
 
 class CodingRunner(Protocol):
     def __call__(self, snapshot: AppSessionSnapshot) -> BaseModel: ...
+
+
+_DEFAULT_CODING_RUNNER: ContextVar[CodingRunner | None] = ContextVar(
+    "harness_x_app_server_default_coding_runner",
+    default=None,
+)
+
+
+@contextmanager
+def use_default_coding_runner(runner: CodingRunner) -> Iterator[None]:
+    """Temporarily replace only the implicit AppServerService runner for construction.
+
+    The override is context-local and is read synchronously inside ``AppServerService.__init__``
+    before restart recovery and worker startup. Existing callers keep the historical constructor
+    surface; an explicit ``runner=`` always wins over this scoped default.
+    """
+
+    token = _DEFAULT_CODING_RUNNER.set(runner)
+    try:
+        yield
+    finally:
+        _DEFAULT_CODING_RUNNER.reset(token)
 
 
 class HarnessCodingRunner:
@@ -122,7 +146,14 @@ class AppServerService:
         self.store = AppSessionStore(self.root / "sessions")
         self.run_root = self.root / "runs"
         self.run_root.mkdir(parents=True, exist_ok=True)
-        self.runner = runner or HarnessCodingRunner()
+        scoped_runner = _DEFAULT_CODING_RUNNER.get()
+        self.runner = (
+            runner
+            if runner is not None
+            else scoped_runner
+            if scoped_runner is not None
+            else HarnessCodingRunner()
+        )
         self.server_version = server_version
         self._queue: deque[str] = deque()
         self._condition = threading.Condition()
