@@ -123,6 +123,16 @@ def _desktop_start_payload(
     }
 
 
+def _close_server(server: object) -> None:
+    """Close layered production servers while preserving legacy CLI test doubles."""
+
+    close = getattr(server, "close", None)
+    if callable(close):
+        close()
+        return
+    server.httpd.server_close()  # type: ignore[attr-defined]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -171,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        server.close()
+        _close_server(server)
         service.close()
     return 0
 
