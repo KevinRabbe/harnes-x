@@ -1,0 +1,28 @@
+name: m71-context-diagnostic
+
+on:
+  push:
+    branches:
+      - agent/diagnostic-m71-context-hang
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Run focused M71/M69/M70 tests verbosely
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=20s 300s \
+            pytest -vv -s \
+              tests/test_app_server_conversation_context.py \
+              tests/test_app_server_conversation_execution.py \
+              tests/test_app_server_work_activity.py
