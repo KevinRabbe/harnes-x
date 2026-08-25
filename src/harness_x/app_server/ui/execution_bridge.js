@@ -40,7 +40,10 @@ function conversationExecutionEnsureActivityRegion() {
   list.id = "daily-work-activity-list";
   region.appendChild(list);
 
-  const composerWrap = dailyById("daily-composer-wrap");
+  const composerWrap = document.querySelector(".daily-composer-wrap");
+  if (!composerWrap || !composerWrap.parentNode) {
+    throw new Error("daily composer wrapper is unavailable");
+  }
   composerWrap.parentNode.insertBefore(region, composerWrap);
   return region;
 }
