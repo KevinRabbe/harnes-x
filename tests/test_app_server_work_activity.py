@@ -436,7 +436,10 @@ def test_live_activity_http_is_authenticated_owned_incremental_and_trace_backed(
 
 
 def test_m70_ui_uses_grounded_cursor_projection_and_safe_dom_only() -> None:
-    javascript = load_ui_asset("/ui/execution_bridge.js").body.decode("utf-8")
+    asset = load_ui_asset("/ui/execution_bridge.js")
+    assert asset is not None
+    _content_type, payload = asset
+    javascript = payload.decode("utf-8")
 
     for fragment in (
         "/activity?cursor=",
@@ -446,11 +449,7 @@ def test_m70_ui_uses_grounded_cursor_projection_and_safe_dom_only() -> None:
         "replaceChildren",
         "dataset.activityKind",
         "Grounded work activity",
-        "conversation-work",
     ):
-        # The schema itself is server-owned; the remaining fragments guard the browser contract.
-        if fragment == "conversation-work":
-            continue
         assert fragment in javascript
     assert "/v1/sessions" not in javascript
     assert "Authorization" not in javascript
