@@ -3,215 +3,378 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Harness X Local Operator</title>
+  <title>Harness X</title>
   <link rel="stylesheet" href="/ui/styles.css">
+  <link rel="stylesheet" href="/ui/workspace.css">
 </head>
 <body>
   <header class="topbar">
     <div>
       <p class="eyebrow">Harness X</p>
-      <h1>Local Operator</h1>
+      <h1>Projects &amp; Chats</h1>
     </div>
-    <div class="health" aria-live="polite">
-      <span id="health-dot" class="health-dot health-dot--unknown"></span>
-      <span id="health-text">Checking local server…</span>
+    <div class="topbar__actions">
+      <div class="surface-tabs" role="tablist" aria-label="Harness X surfaces">
+        <button id="show-workspace" class="surface-tab surface-tab--selected" type="button" role="tab" aria-selected="true">Workspace</button>
+        <button id="show-advanced" class="surface-tab" type="button" role="tab" aria-selected="false">Advanced</button>
+      </div>
+      <span id="daily-auth-state" class="pill pill--muted">Locked</span>
+      <div class="health" aria-live="polite">
+        <span id="health-dot" class="health-dot health-dot--unknown"></span>
+        <span id="health-text">Checking local server…</span>
+      </div>
     </div>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <section class="panel" aria-labelledby="connection-heading">
-        <div class="panel-heading">
+  <section id="daily-surface" aria-label="Projects and chats workspace">
+    <div class="daily-shell">
+      <aside class="daily-rail" aria-labelledby="daily-projects-heading">
+        <div class="daily-rail-header">
           <div>
-            <p class="eyebrow">Connection</p>
-            <h2 id="connection-heading">Local access</h2>
+            <p class="eyebrow">Local workspaces</p>
+            <h2 id="daily-projects-heading">Projects</h2>
           </div>
-          <span id="auth-state" class="pill pill--muted">Locked</span>
+          <button id="daily-new-project-button" type="button" class="icon-button">New</button>
         </div>
-        <p class="muted small">Use <code>harness-x-app-server --open-ui</code> for one-time automatic local unlock, or paste the token from the App Server <code>access-token</code> file. The bearer stays only in page memory; while unlocked, this tab keeps one short-lived one-time reload capability, one non-authorizing reload-family id, and the selected session id in <code>sessionStorage</code> so a normal reload can restore local operator context.</p>
-        <form id="auth-form" class="stack">
-          <label for="token">Bearer token</label>
-          <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
-          <button type="submit">Unlock operator view</button>
+
+        <form id="daily-project-create" class="daily-inline-form hidden">
+          <label for="daily-project-create-name">Project name</label>
+          <input id="daily-project-create-name" name="name" type="text" required maxlength="200" autocomplete="off">
+          <label for="daily-project-create-workspace">Workspace directory</label>
+          <input id="daily-project-create-workspace" name="workspace_root" type="text" required spellcheck="false" placeholder="C:\path\to\repository">
+          <div class="daily-inline-actions">
+            <button type="submit">Add project</button>
+            <button id="daily-project-create-cancel" type="button" class="secondary">Cancel</button>
+          </div>
         </form>
-        <button id="lock-button" type="button" class="secondary hidden">Forget token</button>
-        <p id="auth-error" class="error-text" role="alert"></p>
-      </section>
 
-      <section class="panel" aria-labelledby="sessions-heading">
-        <div class="panel-heading">
+        <div id="daily-project-list" class="daily-project-list" aria-live="polite">
+          <p class="muted small daily-list-empty">Unlock Harness X to load projects.</p>
+        </div>
+
+        <details id="daily-archived-projects" class="daily-archived hidden">
+          <summary>Archived projects</summary>
+          <div id="daily-archived-project-list" class="daily-archived-list"></div>
+        </details>
+      </aside>
+
+      <aside class="daily-rail daily-rail--chats" aria-labelledby="daily-chats-heading">
+        <div class="daily-rail-header">
           <div>
-            <p class="eyebrow">Sessions</p>
-            <h2 id="sessions-heading">Recent work</h2>
+            <p class="eyebrow">Conversation history</p>
+            <h2 id="daily-chats-heading">Chats</h2>
           </div>
-          <button id="refresh-sessions" type="button" class="icon-button" disabled>Refresh</button>
+          <button id="daily-new-chat-button" type="button" class="icon-button">New</button>
         </div>
-        <div id="session-list" class="session-list" aria-live="polite">
-          <p class="muted small">Unlock the operator view to load sessions.</p>
+
+        <form id="daily-chat-create" class="daily-inline-form hidden">
+          <label for="daily-chat-create-title">Chat title</label>
+          <input id="daily-chat-create-title" name="title" type="text" required maxlength="300" autocomplete="off">
+          <div class="daily-inline-actions">
+            <button type="submit">Create chat</button>
+            <button id="daily-chat-create-cancel" type="button" class="secondary">Cancel</button>
+          </div>
+        </form>
+
+        <div id="daily-chat-list" class="daily-chat-list" aria-live="polite">
+          <p class="muted small daily-list-empty">Select a project to load chats.</p>
         </div>
-      </section>
 
-      <details class="panel" id="new-session-panel">
-        <summary>Start a coding session</summary>
-        <form id="new-session-form" class="stack form-grid">
-          <fieldset id="new-session-fields" disabled>
-            <label for="workspace-root">Workspace root</label>
-            <input id="workspace-root" name="workspace_root" type="text" required spellcheck="false" placeholder="/absolute/path/to/repository">
+        <details id="daily-archived-chats" class="daily-archived hidden">
+          <summary>Archived chats</summary>
+          <div id="daily-archived-chat-list" class="daily-archived-list"></div>
+        </details>
+      </aside>
 
-            <label for="task">Task</label>
-            <textarea id="task" name="task" rows="6" required placeholder="Describe the coding task and acceptance criteria."></textarea>
+      <main class="daily-conversation">
+        <section id="daily-locked" class="daily-locked">
+          <p class="eyebrow">Local authentication</p>
+          <h2>Unlock your Harness X workspace</h2>
+          <p>Desktop launch normally unlocks this view with the inherited one-time bootstrap ticket. Manual token access remains available in Advanced.</p>
+          <button id="daily-open-advanced-auth" type="button" class="secondary">Open Advanced connection</button>
+        </section>
 
-            <label for="model-profile">Model profile</label>
-            <input id="model-profile" name="model_profile" type="text" value="main" required spellcheck="false">
+        <div id="daily-content" class="daily-content hidden">
+          <div class="daily-status-row" aria-live="polite">
+            <span id="daily-loading" class="daily-loading hidden"></span>
+            <span id="daily-error" class="daily-error" role="alert"></span>
+          </div>
 
-            <label for="verification-commands">Verification commands <span class="muted">(one per line)</span></label>
-            <textarea id="verification-commands" name="verification_commands" rows="3" spellcheck="false">python -m pytest</textarea>
+          <section id="daily-no-project" class="daily-empty-state">
+            <p class="eyebrow">Projects</p>
+            <h2>Add a project to begin</h2>
+            <p>A project binds Harness X conversation history to one durable local workspace directory.</p>
+          </section>
 
-            <label for="verification-plan">Verification plan path <span class="muted">(optional alternative)</span></label>
-            <input id="verification-plan" name="verification_plan_path" type="text" spellcheck="false">
+          <section id="daily-project-view" class="daily-project-view hidden">
+            <header class="daily-project-toolbar">
+              <div class="daily-project-toolbar__identity">
+                <p class="eyebrow">Selected project</p>
+                <h2 id="daily-project-name">Project</h2>
+                <p id="daily-project-path" class="daily-project-path mono">—</p>
+              </div>
+              <div class="daily-inline-actions">
+                <button id="daily-project-rename-button" type="button" class="secondary compact-button">Rename project</button>
+                <button id="daily-project-archive-button" type="button" class="danger compact-button">Archive project</button>
+              </div>
+            </header>
 
-            <details class="advanced">
-              <summary>Advanced session options</summary>
-              <div class="stack advanced-body">
-                <label for="project-memory-root">Project memory root</label>
-                <input id="project-memory-root" name="project_memory_root" type="text" spellcheck="false">
+            <form id="daily-project-rename" class="daily-inline-form hidden">
+              <label for="daily-project-rename-name">Project name</label>
+              <input id="daily-project-rename-name" name="name" type="text" required maxlength="200" autocomplete="off">
+              <div class="daily-inline-actions">
+                <button type="submit">Save name</button>
+                <button id="daily-project-rename-cancel" type="button" class="secondary">Cancel</button>
+              </div>
+            </form>
 
-                <label for="project-memory-key">Project memory key</label>
-                <input id="project-memory-key" name="project_memory_key" type="text" spellcheck="false">
+            <section id="daily-no-chat" class="daily-empty-state">
+              <p class="eyebrow">Chats</p>
+              <h2>Create a chat</h2>
+              <p>Chats keep durable local conversation history inside the selected project.</p>
+            </section>
 
-                <div class="number-grid">
-                  <label>Reasoning steps<input name="max_reasoning_steps" type="number" min="1" max="512" value="32"></label>
-                  <label>Tool actions<input name="max_tool_actions" type="number" min="1" max="2048" value="48"></label>
-                  <label>Output tokens<input name="max_output_tokens" type="number" min="1024" max="1048576" value="65536"></label>
+            <section id="daily-chat-view" class="daily-chat-view hidden">
+              <header class="daily-conversation-header">
+                <div class="daily-conversation-header__identity">
+                  <p class="eyebrow">Conversation</p>
+                  <h2 id="daily-chat-title">Chat</h2>
+                  <p id="daily-chat-meta" class="muted small">—</p>
                 </div>
+                <div class="daily-inline-actions">
+                  <button id="daily-chat-rename-button" type="button" class="secondary compact-button">Rename chat</button>
+                  <button id="daily-chat-archive-button" type="button" class="danger compact-button">Archive chat</button>
+                </div>
+              </header>
 
-                <label class="check-row"><input name="baseline_verification" type="checkbox" checked> Run baseline verification</label>
+              <form id="daily-chat-rename" class="daily-inline-form hidden">
+                <label for="daily-chat-rename-title">Chat title</label>
+                <input id="daily-chat-rename-title" name="title" type="text" required maxlength="300" autocomplete="off">
+                <div class="daily-inline-actions">
+                  <button type="submit">Save title</button>
+                  <button id="daily-chat-rename-cancel" type="button" class="secondary">Cancel</button>
+                </div>
+              </form>
 
-                <label for="browser-app-spec">Browser application spec path</label>
-                <input id="browser-app-spec" name="browser_application_spec_path" type="text" spellcheck="false">
+              <div id="daily-message-list" class="daily-message-list" aria-live="polite"></div>
 
-                <label for="browser-verification-plan">Browser verification plan path</label>
-                <input id="browser-verification-plan" name="browser_verification_plan_path" type="text" spellcheck="false">
-
-                <label class="check-row"><input name="browser_headed" type="checkbox"> Headed browser</label>
+              <div class="daily-composer-wrap">
+                <form id="daily-composer" class="daily-composer">
+                  <label class="hidden" for="daily-composer-text">Message</label>
+                  <textarea id="daily-composer-text" name="text" required maxlength="120000" rows="3" placeholder="Message Harness X…"></textarea>
+                  <button id="daily-send-message" type="submit">Save message</button>
+                </form>
+                <p id="daily-composer-status" class="daily-composer-note" aria-live="polite">Messages are durable local chat history. Conversation-to-execution wiring arrives in M69.</p>
               </div>
-            </details>
-
-            <button type="submit">Start isolated session</button>
-          </fieldset>
-        </form>
-        <p id="create-error" class="error-text" role="alert"></p>
-      </details>
-    </aside>
-
-    <section class="workspace" aria-labelledby="session-heading">
-      <div id="empty-state" class="empty-state">
-        <p class="eyebrow">Operator workspace</p>
-        <h2>Select a session</h2>
-        <p>Inspect software-owned lifecycle state and the verified causal trace produced by Harness X.</p>
-      </div>
-
-      <div id="session-view" class="hidden">
-        <section class="session-header panel">
-          <div>
-            <p class="eyebrow">Selected session</p>
-            <h2 id="session-heading">Session</h2>
-            <p id="session-id" class="mono muted"></p>
-            <p id="stream-recovery-status" class="mono muted small" aria-live="polite"></p>
-          </div>
-          <div class="session-actions">
-            <span id="session-status" class="pill pill--muted">unknown</span>
-            <button id="reconnect-streams" type="button" class="secondary hidden" disabled>Reconnect live streams</button>
-            <button id="cancel-session" type="button" class="danger" disabled>Request cancel</button>
-          </div>
-        </section>
-
-        <section class="summary-grid">
-          <article class="panel metric-card">
-            <p class="eyebrow">Model</p>
-            <strong id="summary-model">—</strong>
-          </article>
-          <article class="panel metric-card">
-            <p class="eyebrow">Workspace</p>
-            <strong id="summary-workspace" class="mono breakable">—</strong>
-          </article>
-          <article class="panel metric-card">
-            <p class="eyebrow">Trace</p>
-            <strong id="summary-trace" class="mono breakable">Not attached</strong>
-          </article>
-          <article class="panel metric-card">
-            <p class="eyebrow">Report</p>
-            <strong id="summary-report" class="mono breakable">Not available</strong>
-          </article>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Task</p>
-              <h3>Requested work</h3>
-            </div>
-          </div>
-          <pre id="task-text" class="task-text"></pre>
-          <dl id="session-times" class="metadata-grid"></dl>
-          <p id="failure-reason" class="failure-box hidden"></p>
-        </section>
-
-        <section class="panel" aria-labelledby="report-heading">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Durable coding artifact</p>
-              <h3 id="report-heading">Coding report</h3>
-            </div>
-            <button id="download-report" type="button" class="secondary" disabled>Download exact report</button>
-          </div>
-          <p id="report-metadata" class="mono muted small">—</p>
-          <p id="report-export-status" class="mono muted small" aria-live="polite"></p>
-          <pre id="report-content" class="task-text" aria-live="polite">No durable coding report loaded.</pre>
-        </section>
-
-        <div class="stream-grid">
-          <section class="panel stream-panel" aria-labelledby="trace-heading">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Authoritative causal trace</p>
-                <h3 id="trace-heading">Execution</h3>
-              </div>
-              <div class="session-actions">
-                <button id="download-trace" type="button" class="secondary" disabled>Download verified trace</button>
-                <span id="trace-state" class="pill pill--muted">Idle</span>
-              </div>
-            </div>
-            <p id="trace-export-status" class="mono muted small" aria-live="polite"></p>
-            <div id="trace-events" class="timeline" aria-live="polite"></div>
-          </section>
-
-          <section class="panel stream-panel" aria-labelledby="lifecycle-heading">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">App Server ledger</p>
-                <h3 id="lifecycle-heading">Lifecycle</h3>
-              </div>
-              <div class="session-actions">
-                <button id="download-lifecycle-ledger" type="button" class="secondary" disabled>Download lifecycle ledger</button>
-                <button id="download-evidence-manifest" type="button" class="secondary" disabled>Download evidence manifest</button>
-                <button id="download-signed-manifest-pair" type="button" class="secondary" disabled>Download signed manifest pair</button>
-                <span id="lifecycle-state" class="pill pill--muted">Idle</span>
-              </div>
-            </div>
-            <button id="download-session-snapshot" type="button" class="secondary" disabled>Download session snapshot</button>
-            <button id="download-signed-manifest-capsule" type="button" class="secondary" disabled>Download signed manifest capsule</button>
-            <p id="snapshot-export-status" class="mono muted small" aria-live="polite"></p>
-            <p id="lifecycle-export-status" class="mono muted small" aria-live="polite"></p>
-            <p id="evidence-manifest-status" class="mono muted small" aria-live="polite"></p>
-            <p id="signed-manifest-pair-status" class="mono muted small" aria-live="polite"></p>
-            <p id="signed-manifest-capsule-status" class="mono muted small" aria-live="polite"></p>
-            <div id="lifecycle-events" class="timeline timeline--compact" aria-live="polite"></div>
+            </section>
           </section>
         </div>
-      </div>
-    </section>
-  </main>
+      </main>
+    </div>
+  </section>
+
+  <section id="advanced-surface" class="hidden" aria-label="Advanced Local Operator">
+    <div class="advanced-heading">
+      <p class="eyebrow">Advanced</p>
+      <h2>Local Operator</h2>
+      <p class="muted small">Direct session launch, software-owned lifecycle inspection, verified trace/report views, and evidence exports remain available here.</p>
+    </div>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel" aria-labelledby="connection-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Connection</p>
+              <h2 id="connection-heading">Local access</h2>
+            </div>
+            <span id="auth-state" class="pill pill--muted">Locked</span>
+          </div>
+          <p class="muted small">Use <code>harness-x-app-server --open-ui</code> for one-time automatic local unlock, or paste the token from the App Server <code>access-token</code> file. The bearer stays only in page memory; while unlocked, this tab keeps one short-lived one-time reload capability, one non-authorizing reload-family id, and the selected session id in <code>sessionStorage</code> so a normal reload can restore local operator context.</p>
+          <form id="auth-form" class="stack">
+            <label for="token">Bearer token</label>
+            <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+            <button type="submit">Unlock operator view</button>
+          </form>
+          <button id="lock-button" type="button" class="secondary hidden">Forget token</button>
+          <p id="auth-error" class="error-text" role="alert"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="sessions-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Sessions</p>
+              <h2 id="sessions-heading">Recent work</h2>
+            </div>
+            <button id="refresh-sessions" type="button" class="icon-button" disabled>Refresh</button>
+          </div>
+          <div id="session-list" class="session-list" aria-live="polite">
+            <p class="muted small">Unlock the operator view to load sessions.</p>
+          </div>
+        </section>
+
+        <details class="panel" id="new-session-panel">
+          <summary>Start a coding session</summary>
+          <form id="new-session-form" class="stack form-grid">
+            <fieldset id="new-session-fields" disabled>
+              <label for="workspace-root">Workspace root</label>
+              <input id="workspace-root" name="workspace_root" type="text" required spellcheck="false" placeholder="/absolute/path/to/repository">
+
+              <label for="task">Task</label>
+              <textarea id="task" name="task" rows="6" required placeholder="Describe the coding task and acceptance criteria."></textarea>
+
+              <label for="model-profile">Model profile</label>
+              <input id="model-profile" name="model_profile" type="text" value="main" required spellcheck="false">
+
+              <label for="verification-commands">Verification commands <span class="muted">(one per line)</span></label>
+              <textarea id="verification-commands" name="verification_commands" rows="3" spellcheck="false">python -m pytest</textarea>
+
+              <label for="verification-plan">Verification plan path <span class="muted">(optional alternative)</span></label>
+              <input id="verification-plan" name="verification_plan_path" type="text" spellcheck="false">
+
+              <details class="advanced">
+                <summary>Advanced session options</summary>
+                <div class="stack advanced-body">
+                  <label for="project-memory-root">Project memory root</label>
+                  <input id="project-memory-root" name="project_memory_root" type="text" spellcheck="false">
+
+                  <label for="project-memory-key">Project memory key</label>
+                  <input id="project-memory-key" name="project_memory_key" type="text" spellcheck="false">
+
+                  <div class="number-grid">
+                    <label>Reasoning steps<input name="max_reasoning_steps" type="number" min="1" max="512" value="32"></label>
+                    <label>Tool actions<input name="max_tool_actions" type="number" min="1" max="2048" value="48"></label>
+                    <label>Output tokens<input name="max_output_tokens" type="number" min="1024" max="1048576" value="65536"></label>
+                  </div>
+
+                  <label class="check-row"><input name="baseline_verification" type="checkbox" checked> Run baseline verification</label>
+
+                  <label for="browser-app-spec">Browser application spec path</label>
+                  <input id="browser-app-spec" name="browser_application_spec_path" type="text" spellcheck="false">
+
+                  <label for="browser-verification-plan">Browser verification plan path</label>
+                  <input id="browser-verification-plan" name="browser_verification_plan_path" type="text" spellcheck="false">
+
+                  <label class="check-row"><input name="browser_headed" type="checkbox"> Headed browser</label>
+                </div>
+              </details>
+
+              <button type="submit">Start isolated session</button>
+            </fieldset>
+          </form>
+          <p id="create-error" class="error-text" role="alert"></p>
+        </details>
+      </aside>
+
+      <section class="workspace" aria-labelledby="session-heading">
+        <div id="empty-state" class="empty-state">
+          <p class="eyebrow">Operator workspace</p>
+          <h2>Select a session</h2>
+          <p>Inspect software-owned lifecycle state and the verified causal trace produced by Harness X.</p>
+        </div>
+
+        <div id="session-view" class="hidden">
+          <section class="session-header panel">
+            <div>
+              <p class="eyebrow">Selected session</p>
+              <h2 id="session-heading">Session</h2>
+              <p id="session-id" class="mono muted"></p>
+              <p id="stream-recovery-status" class="mono muted small" aria-live="polite"></p>
+            </div>
+            <div class="session-actions">
+              <span id="session-status" class="pill pill--muted">unknown</span>
+              <button id="reconnect-streams" type="button" class="secondary hidden" disabled>Reconnect live streams</button>
+              <button id="cancel-session" type="button" class="danger" disabled>Request cancel</button>
+            </div>
+          </section>
+
+          <section class="summary-grid">
+            <article class="panel metric-card">
+              <p class="eyebrow">Model</p>
+              <strong id="summary-model">—</strong>
+            </article>
+            <article class="panel metric-card">
+              <p class="eyebrow">Workspace</p>
+              <strong id="summary-workspace" class="mono breakable">—</strong>
+            </article>
+            <article class="panel metric-card">
+              <p class="eyebrow">Trace</p>
+              <strong id="summary-trace" class="mono breakable">Not attached</strong>
+            </article>
+            <article class="panel metric-card">
+              <p class="eyebrow">Report</p>
+              <strong id="summary-report" class="mono breakable">Not available</strong>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Task</p>
+                <h3>Requested work</h3>
+              </div>
+            </div>
+            <pre id="task-text" class="task-text"></pre>
+            <dl id="session-times" class="metadata-grid"></dl>
+            <p id="failure-reason" class="failure-box hidden"></p>
+          </section>
+
+          <section class="panel" aria-labelledby="report-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Durable coding artifact</p>
+                <h3 id="report-heading">Coding report</h3>
+              </div>
+              <button id="download-report" type="button" class="secondary" disabled>Download exact report</button>
+            </div>
+            <p id="report-metadata" class="mono muted small">—</p>
+            <p id="report-export-status" class="mono muted small" aria-live="polite"></p>
+            <pre id="report-content" class="task-text" aria-live="polite">No durable coding report loaded.</pre>
+          </section>
+
+          <div class="stream-grid">
+            <section class="panel stream-panel" aria-labelledby="trace-heading">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Authoritative causal trace</p>
+                  <h3 id="trace-heading">Execution</h3>
+                </div>
+                <div class="session-actions">
+                  <button id="download-trace" type="button" class="secondary" disabled>Download verified trace</button>
+                  <span id="trace-state" class="pill pill--muted">Idle</span>
+                </div>
+              </div>
+              <p id="trace-export-status" class="mono muted small" aria-live="polite"></p>
+              <div id="trace-events" class="timeline" aria-live="polite"></div>
+            </section>
+
+            <section class="panel stream-panel" aria-labelledby="lifecycle-heading">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">App Server ledger</p>
+                  <h3 id="lifecycle-heading">Lifecycle</h3>
+                </div>
+                <div class="session-actions">
+                  <button id="download-lifecycle-ledger" type="button" class="secondary" disabled>Download lifecycle ledger</button>
+                  <button id="download-evidence-manifest" type="button" class="secondary" disabled>Download evidence manifest</button>
+                  <button id="download-signed-manifest-pair" type="button" class="secondary" disabled>Download signed manifest pair</button>
+                  <span id="lifecycle-state" class="pill pill--muted">Idle</span>
+                </div>
+              </div>
+              <button id="download-session-snapshot" type="button" class="secondary" disabled>Download session snapshot</button>
+              <button id="download-signed-manifest-capsule" type="button" class="secondary" disabled>Download signed manifest capsule</button>
+              <p id="snapshot-export-status" class="mono muted small" aria-live="polite"></p>
+              <p id="lifecycle-export-status" class="mono muted small" aria-live="polite"></p>
+              <p id="evidence-manifest-status" class="mono muted small" aria-live="polite"></p>
+              <p id="signed-manifest-pair-status" class="mono muted small" aria-live="polite"></p>
+              <p id="signed-manifest-capsule-status" class="mono muted small" aria-live="polite"></p>
+              <div id="lifecycle-events" class="timeline timeline--compact" aria-live="polite"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </section>
 
   <script src="/ui/stream_policy.js" defer></script>
   <script src="/ui/report.js" defer></script>
@@ -226,6 +389,7 @@
   <script src="/ui/app.js" defer></script>
   <script src="/ui/selection_restore.js" defer></script>
   <script src="/ui/stream_recovery.js" defer></script>
+  <script src="/ui/workspace.js" defer></script>
   <script src="/ui/bootstrap.js" defer></script>
 </body>
 </html>
