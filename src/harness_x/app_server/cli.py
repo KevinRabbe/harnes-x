@@ -13,7 +13,7 @@ from typing import Sequence
 
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
-from .product_operator_http_server import LocalOperatorHTTPServer
+from .conversation_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService
 
 
@@ -123,6 +123,16 @@ def _desktop_start_payload(
     }
 
 
+def _close_server(server: object) -> None:
+    """Close layered production servers while preserving legacy CLI test doubles."""
+
+    close = getattr(server, "close", None)
+    if callable(close):
+        close()
+        return
+    server.httpd.server_close()  # type: ignore[attr-defined]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -171,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        server.httpd.server_close()
+        _close_server(server)
         service.close()
     return 0
 

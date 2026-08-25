@@ -1,11 +1,37 @@
 "use strict";
 
+function loadConversationExecutionBridge() {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/ui/execution_bridge.js";
+    script.async = true;
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", () => reject(new Error("execution bridge asset failed to load")), { once: true });
+    document.head.append(script);
+  });
+}
+
 (async () => {
   const fragment = window.location.hash;
-  if (!fragment.startsWith("#bootstrap=")) return;
+  const bootstrapPresent = fragment.startsWith("#bootstrap=");
+  const match = bootstrapPresent
+    ? /^#bootstrap=([A-Za-z0-9_-]{40,128})$/.exec(fragment)
+    : null;
+  if (bootstrapPresent) history.replaceState(null, "", "/ui/");
 
-  const match = /^#bootstrap=([A-Za-z0-9_-]{40,128})$/.exec(fragment);
-  history.replaceState(null, "", "/ui/");
+  const authForm = document.getElementById("auth-form");
+  const authSubmit = authForm.querySelector('button[type="submit"]');
+  authSubmit.disabled = true;
+  try {
+    await loadConversationExecutionBridge();
+  } catch (error) {
+    document.getElementById("auth-error").textContent = `Workspace initialization failed: ${error instanceof Error ? error.message : String(error)}`;
+    authSubmit.disabled = false;
+    return;
+  }
+  authSubmit.disabled = false;
+
+  if (!bootstrapPresent) return;
   if (!match) {
     document.getElementById("auth-error").textContent = "Automatic unlock failed: invalid bootstrap fragment.";
     return;
@@ -48,7 +74,6 @@
   }
 
   const tokenField = document.getElementById("token");
-  const authForm = document.getElementById("auth-form");
   const accessToken = payload.access_token;
   payload.access_token = "";
   tokenField.value = accessToken;
