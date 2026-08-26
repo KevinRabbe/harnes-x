@@ -15,6 +15,13 @@ from .evidence_manifest import (
     build_terminal_evidence_manifest,
     render_terminal_evidence_manifest,
 )
+from .execution_outputs import (
+    ExecutionArtifactRecord,
+    ExecutionArtifactRegistry,
+    ExecutionDiffFileProjection,
+    ExecutionDiffProjection,
+    build_execution_diff_projection,
+)
 from .http_server import LocalAppHTTPServer
 from .lifecycle_export import (
     LifecycleExportCorruptionError,
@@ -73,6 +80,10 @@ __all__ = [
     "EvidenceCapsuleRenderError",
     "EvidenceManifestCorruptionError",
     "EvidenceManifestNotTerminalError",
+    "ExecutionArtifactRecord",
+    "ExecutionArtifactRegistry",
+    "ExecutionDiffFileProjection",
+    "ExecutionDiffProjection",
     "HarnessCodingRunner",
     "LifecycleExportCorruptionError",
     "LifecycleExportNotTerminalError",
@@ -93,6 +104,7 @@ __all__ = [
     "TraceProjectionEvent",
     "TraceProjectionPage",
     "build_coding_report_projection",
+    "build_execution_diff_projection",
     "build_lifecycle_ledger_export",
     "build_terminal_evidence_manifest",
     "build_trace_projection_page",
