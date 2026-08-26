@@ -23,6 +23,7 @@ from harness_x.reasoning import builtin_model_profiles
 from .approval_contextual_conversation_execution import (
     ApprovalContextualConversationExecutionCoordinator,
 )
+from .conversation_context import ConversationContextPackage, build_conversation_context
 from .conversation_execution import (
     ConversationExecutionPlan,
     ConversationExecutionProjection,
@@ -33,6 +34,8 @@ from .protocol import CodingSessionRequest
 _M73_OUTPUT_PREFIX = "conversation_settings_"
 _M72_OUTPUT_PREFIX = "conversation_approval_"
 _M71_OUTPUT_PREFIX = "conversation_context_"
+_M73_MAX_EFFECTIVE_TASK_CHARS = 20_000
+_M73_MAX_EFFECTIVE_TASK_BYTES = 80_000
 
 
 def _canonical(value: object) -> bytes:
@@ -61,7 +64,7 @@ class ProjectSettingsExecutionSnapshot(BaseModel):
     project_id: str = Field(pattern=r"^project_[0-9a-f]{32}$")
     settings_revision: int = Field(ge=1)
     settings_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_profile: str = Field(min_length=1, max_length=64)
+    model_profile: str = Field(min_length=1, max_length=200)
     verification_strategy: ProjectVerificationStrategy
     verification_commands: tuple[str, ...] = Field(min_length=1, max_length=4)
     project_instructions: str = Field(default="", max_length=6000)
@@ -186,10 +189,13 @@ class ProjectSettingsConversationExecutionCoordinator(
 ):
     """M72 approval-aware coordinator with M73 settings frozen before plan acceptance."""
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.settings_store = ProjectSettingsStore(self.product_store)
-        self.settings_execution_store = ProjectSettingsExecutionStore(self.store.root)
+    def __init__(self, service, product_store, product_lock, root) -> None:
+        # ContextualConversationExecutionCoordinator reconstructs missing contexts inside its own
+        # constructor via dynamic dispatch. Load M73's settings sidecars first so reconstruction of
+        # an accepted M73 plan can reserve the same instruction budget deterministically.
+        self.settings_store = ProjectSettingsStore(product_store)
+        self.settings_execution_store = ProjectSettingsExecutionStore(root)
+        super().__init__(service, product_store, product_lock, root)
         for plan in self.store.plans:
             if self._is_m73_plan(plan) and self.settings_execution_store.snapshot(plan.execution_id) is None:
                 raise RuntimeError("M73 conversation execution is missing its settings snapshot")
@@ -273,6 +279,49 @@ class ProjectSettingsConversationExecutionCoordinator(
         ):
             raise RuntimeError("M73 conversation execution request no longer matches settings snapshot")
 
+    def _ensure_context_locked(
+        self,
+        plan: ConversationExecutionPlan,
+    ) -> ConversationContextPackage:
+        if not self._is_m73_plan(plan):
+            return super()._ensure_context_locked(plan)
+        snapshot = self.settings_execution_store.snapshot(plan.execution_id)
+        if snapshot is None:
+            raise RuntimeError("M73 conversation execution settings snapshot is missing")
+        rendered_instructions = render_project_instructions(snapshot)
+        max_context_chars = _M73_MAX_EFFECTIVE_TASK_CHARS - len(rendered_instructions)
+        max_context_bytes = _M73_MAX_EFFECTIVE_TASK_BYTES - len(
+            rendered_instructions.encode("utf-8")
+        )
+        if max_context_chars < 1 or max_context_bytes < 1:
+            raise RuntimeError("M73 project instructions exhaust the inherited context envelope")
+
+        messages = self.product_store.messages(plan.chat_id)
+        prior_count = plan.reserved_user_sequence - 1
+        if len(messages) < prior_count:
+            raise RuntimeError("conversation context source prefix is shorter than execution plan")
+        prior_messages = messages[:prior_count]
+        expected = build_conversation_context(
+            execution_id=plan.execution_id,
+            submission_id=plan.submission_id,
+            project_id=plan.project_id,
+            chat_id=plan.chat_id,
+            reserved_user_sequence=plan.reserved_user_sequence,
+            task=plan.task,
+            prior_messages=prior_messages,
+            legacy_passthrough=False,
+            max_rendered_chars=max_context_chars,
+            max_rendered_bytes=max_context_bytes,
+        )
+        existing = self.context_store.context(plan.execution_id)
+        if existing is None:
+            return self.context_store.put(expected)
+        if existing.selection_policy != expected.selection_policy:
+            raise RuntimeError("conversation execution context selection policy mismatch")
+        if existing.fingerprint != expected.fingerprint:
+            raise RuntimeError("conversation execution durable context no longer matches chat prefix")
+        return existing
+
     def _effective_request(self, plan: ConversationExecutionPlan) -> CodingSessionRequest:
         request = super()._effective_request(plan)
         if not self._is_m73_plan(plan):
@@ -283,8 +332,14 @@ class ProjectSettingsConversationExecutionCoordinator(
         rendered = render_project_instructions(snapshot)
         if not rendered:
             return request
+        combined = request.task + rendered
+        if (
+            len(combined) > _M73_MAX_EFFECTIVE_TASK_CHARS
+            or len(combined.encode("utf-8")) > _M73_MAX_EFFECTIVE_TASK_BYTES
+        ):
+            raise RuntimeError("M73 effective request exceeds the inherited context envelope")
         payload = request.model_dump(mode="python")
-        payload["task"] = request.task + rendered
+        payload["task"] = combined
         return CodingSessionRequest.model_validate(payload)
 
     @staticmethod
