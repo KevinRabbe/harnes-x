@@ -64,7 +64,7 @@ class ProjectSettingsExecutionSnapshot(BaseModel):
     project_id: str = Field(pattern=r"^project_[0-9a-f]{32}$")
     settings_revision: int = Field(ge=1)
     settings_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_profile: str = Field(min_length=1, max_length=200)
+    model_profile: str = Field(min_length=1, max_length=64)
     verification_strategy: ProjectVerificationStrategy
     verification_commands: tuple[str, ...] = Field(min_length=1, max_length=4)
     project_instructions: str = Field(default="", max_length=6000)
@@ -117,6 +117,8 @@ class ProjectSettingsExecutionStore:
         for number, line in enumerate(lines, start=1):
             try:
                 raw = json.loads(line)
+                if not isinstance(raw, dict):
+                    raise ValueError("snapshot row must be a JSON object")
                 stored_fingerprint = str(raw.get("fingerprint", ""))
                 item = ProjectSettingsExecutionSnapshot.model_validate(raw)
             except (json.JSONDecodeError, ValueError) as exc:
