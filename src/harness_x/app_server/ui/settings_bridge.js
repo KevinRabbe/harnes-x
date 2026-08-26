@@ -143,11 +143,14 @@ function projectSettingsRenderProfile(profileId) {
   const profile = projectSettingsState.profiles.get(profileId);
   const detail = dailyById("daily-settings-profile-detail");
   const testButton = dailyById("daily-settings-test-connection");
+  const saveButton = dailyById("daily-settings-save");
   if (!profile) {
-    detail.textContent = "Unknown model profile.";
+    detail.textContent = "This legacy project profile is not available in the current built-in registry. Choose a current profile before saving or starting new work.";
     testButton.disabled = true;
+    saveButton.disabled = true;
     return;
   }
+  saveButton.disabled = false;
   const capabilities = Array.isArray(profile.capabilities) && profile.capabilities.length
     ? profile.capabilities.join(", ")
     : "general";
@@ -175,6 +178,21 @@ async function projectSettingsEnsureProfiles() {
   }
 }
 
+function projectSettingsSelectProfile(profileId) {
+  const select = dailyById("daily-settings-model-profile");
+  for (const option of select.querySelectorAll("option[data-legacy-profile]")) {
+    option.remove();
+  }
+  if (!projectSettingsState.profiles.has(profileId)) {
+    const legacy = projectSettingsElement("option", `${profileId} — legacy/unavailable`);
+    legacy.value = profileId;
+    legacy.dataset.legacyProfile = "true";
+    select.prepend(legacy);
+  }
+  select.value = profileId;
+  projectSettingsRenderProfile(profileId);
+}
+
 async function projectSettingsLoad(projectId) {
   const generation = projectSettingsState.generation + 1;
   projectSettingsState.generation = generation;
@@ -187,12 +205,11 @@ async function projectSettingsLoad(projectId) {
       generation !== projectSettingsState.generation
       || dailyState.selectedProjectId !== projectId
     ) return;
-    dailyById("daily-settings-model-profile").value = settings.model_profile;
+    projectSettingsSelectProfile(settings.model_profile);
     dailyById("daily-settings-verification").value = settings.verification_strategy;
     dailyById("daily-settings-autonomy").value = settings.autonomy_profile;
     dailyById("daily-settings-instructions").value = settings.project_instructions || "";
     dailyById("daily-settings-status").textContent = `Revision ${settings.revision}`;
-    projectSettingsRenderProfile(settings.model_profile);
   } catch (error) {
     if (generation === projectSettingsState.generation) {
       dailyById("daily-settings-status").textContent = "Settings unavailable.";
@@ -223,13 +240,16 @@ async function projectSettingsSave(event) {
       }),
     });
     if (dailyState.selectedProjectId !== projectId) return;
+    projectSettingsSelectProfile(settings.model_profile);
     dailyById("daily-settings-status").textContent = `Saved revision ${settings.revision}`;
-    projectSettingsRenderProfile(settings.model_profile);
   } catch (error) {
     dailyById("daily-settings-status").textContent = "Save failed.";
     dailySetError(`Project settings save failed: ${dailyMessage(error)}`);
   } finally {
-    save.disabled = false;
+    const current = projectSettingsState.profiles.get(
+      dailyById("daily-settings-model-profile").value,
+    );
+    save.disabled = !current;
   }
 }
 
