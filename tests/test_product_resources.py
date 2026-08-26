@@ -113,14 +113,14 @@ def test_workspace_snapshot_is_relative_bounded_text_typed_and_immutable(tmp_pat
     product, resources, workspace, project_id = _new_store(tmp_path)
     source = workspace / "src" / "module.py"
     source.parent.mkdir()
-    source.write_text("print('before')\n", encoding="utf-8")
+    source.write_bytes(b"print('before')\n")
 
     record = resources.snapshot_workspace_file(project_id, source_path="./src/module.py")
     assert record.source_path == "src/module.py"
     assert record.text_encoding == "utf-8"
     assert resources.workspace_file_bytes(project_id, record.snapshot_id) == b"print('before')\n"
 
-    source.write_text("print('after')\n", encoding="utf-8")
+    source.write_bytes(b"print('after')\n")
     assert resources.workspace_file_bytes(project_id, record.snapshot_id) == b"print('before')\n"
     assert ProjectResourceStore(ProjectChatStore(product.root)).workspace_file_snapshot(
         project_id, record.snapshot_id
