@@ -8,7 +8,7 @@ import os
 from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -17,6 +17,8 @@ from ..context_builder import ContextBuildResult
 
 
 _REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+_MAX_PROBE_RESPONSE_BYTES = 512 * 1024
+_MAX_ADVERTISED_MODELS = 16
 
 
 class OpenAICompatibleSettings(BaseModel):
@@ -26,6 +28,7 @@ class OpenAICompatibleSettings(BaseModel):
 
     base_url: str = "http://127.0.0.1:8080/v1"
     model: str = Field(default="local-model", min_length=1)
+    provider: str = Field(default="custom", min_length=1, max_length=64)
     timeout_seconds: float = Field(default=60.0, gt=0.0, le=3600.0)
     max_output_tokens: int = Field(default=2048, gt=0, le=65536)
     api_key_env: str | None = None
@@ -36,7 +39,7 @@ class OpenAICompatibleSettings(BaseModel):
     reasoning_effort: str | None = None
     prompt_mode: Literal["system", "user_prefix"] = "system"
 
-    @field_validator("base_url", "model")
+    @field_validator("base_url", "model", "provider")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         value = value.strip()
@@ -72,6 +75,25 @@ class OpenAICompatibleSettings(BaseModel):
                 "allow_remote_endpoint=True explicitly to use a non-loopback host"
             )
         return self
+
+
+class OpenAICompatibleConnectionResult(BaseModel):
+    """Bounded secret-free readiness result for one configured endpoint."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["openai-compatible-connection-result-v1"] = (
+        "openai-compatible-connection-result-v1"
+    )
+    ready: bool
+    provider: str = Field(min_length=1, max_length=64)
+    configured_model: str = Field(min_length=1, max_length=300)
+    advertised_model_ids: tuple[str, ...] = Field(default=(), max_length=_MAX_ADVERTISED_MODELS)
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -144,12 +166,8 @@ class OpenAICompatibleReasoningCore:
             body["response_format"] = {"type": "json_object"}
 
         headers = {"Content-Type": "application/json"}
-        if self.settings.api_key_env:
-            token = os.getenv(self.settings.api_key_env)
-            if not token:
-                raise ReasoningCoreError(
-                    f"reasoning API key environment variable {self.settings.api_key_env!r} is not set"
-                )
+        token = self._api_key()
+        if token is not None:
             headers["Authorization"] = f"Bearer {token}"
 
         endpoint = f"{self.settings.base_url.rstrip('/')}/chat/completions"
@@ -196,3 +214,72 @@ class OpenAICompatibleReasoningCore:
             raise ReasoningCoreError(
                 f"model output violated the structured reasoning schema: {exc}"
             ) from exc
+
+    def test_connection(self) -> OpenAICompatibleConnectionResult:
+        """Probe /models with the configured credential boundary and no redirect following."""
+
+        headers = {"Accept": "application/json"}
+        token = self._api_key()
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        request = Request(
+            f"{self.settings.base_url.rstrip('/')}/models",
+            headers=headers,
+            method="GET",
+        )
+        opener = build_opener(_NoRedirect())
+        try:
+            with opener.open(request, timeout=min(self.settings.timeout_seconds, 30.0)) as response:
+                raw = response.read(_MAX_PROBE_RESPONSE_BYTES + 1)
+            if len(raw) > _MAX_PROBE_RESPONSE_BYTES:
+                return self._connection_result(False)
+            payload = json.loads(raw.decode("utf-8"))
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ):
+            return self._connection_result(False)
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            return self._connection_result(False)
+        advertised: list[str] = []
+        seen: set[str] = set()
+        for item in data:
+            model_id = item.get("id") if isinstance(item, dict) else None
+            if not isinstance(model_id, str):
+                continue
+            model_id = model_id.strip()
+            if not model_id or len(model_id) > 300 or model_id in seen:
+                continue
+            advertised.append(model_id)
+            seen.add(model_id)
+            if len(advertised) >= _MAX_ADVERTISED_MODELS:
+                break
+        return self._connection_result(True, tuple(advertised))
+
+    def _connection_result(
+        self,
+        ready: bool,
+        advertised_model_ids: tuple[str, ...] = (),
+    ) -> OpenAICompatibleConnectionResult:
+        return OpenAICompatibleConnectionResult(
+            ready=ready,
+            provider=self.settings.provider,
+            configured_model=self.settings.model,
+            advertised_model_ids=advertised_model_ids,
+        )
+
+    def _api_key(self) -> str | None:
+        if not self.settings.api_key_env:
+            return None
+        token = os.getenv(self.settings.api_key_env)
+        if not token:
+            raise ReasoningCoreError(
+                f"reasoning API key environment variable {self.settings.api_key_env!r} is not set"
+            )
+        return token
