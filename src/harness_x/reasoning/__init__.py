@@ -10,10 +10,12 @@ from .base import (
 )
 from .context_builder import BoundedContextBuilder, ContextBudget, ContextBuildResult
 from .profiles import (
+    ModelCapability,
     ModelProfile,
     ModelProfileBackend,
     ModelProfileRegistry,
     ModelProfileRole,
+    ModelProvider,
     builtin_model_profiles,
     load_model_profile_registry,
     model_profile_registry,
@@ -22,6 +24,7 @@ from .profiles import (
 from .service import ReasoningService
 from .stub import StubReasoningCore
 from .adapters import (
+    OpenAICompatibleConnectionResult,
     OpenAICompatibleReasoningCore,
     OpenAICompatibleSettings,
     TransformersLocalReasoningCore,
@@ -69,10 +72,13 @@ __all__ = [
     "HuginnTransformersBackend",
     "HuginnTransformersSettings",
     "LearnedDepthSelector",
+    "ModelCapability",
     "ModelProfile",
     "ModelProfileBackend",
     "ModelProfileRegistry",
     "ModelProfileRole",
+    "ModelProvider",
+    "OpenAICompatibleConnectionResult",
     "OpenAICompatibleReasoningCore",
     "OpenAICompatibleSettings",
     "RECURRENT_DEPTH_RESEARCH_VERSION",
