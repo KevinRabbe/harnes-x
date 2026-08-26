@@ -152,6 +152,8 @@ class ProjectSettingsStore:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"cannot load project settings: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise ValueError("cannot validate project settings: expected a JSON object")
         stored_fingerprint = str(raw.get("fingerprint", ""))
         try:
             record = ProjectSettingsRecord.model_validate(raw)
