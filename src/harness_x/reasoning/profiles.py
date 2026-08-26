@@ -235,7 +235,7 @@ _BUILTIN_PROFILES = (
         model="gpt-5.6-sol",
         description=(
             "Optional remote OpenAI reasoning/coding core. It is never selected implicitly and "
-            "requires OPENAI_API_KEY when explicitly chosen."
+            "requires a configured server credential when explicitly chosen."
         ),
         base_url="https://api.openai.com/v1",
         api_key_env="OPENAI_API_KEY",
