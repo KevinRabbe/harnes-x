@@ -11,6 +11,11 @@ from .models import (
     ProjectChatState,
     ProjectRecord,
 )
+from .resources import (
+    ProjectAttachmentRecord,
+    ProjectResourceStore,
+    ProjectWorkspaceFileSnapshotRecord,
+)
 from .settings import (
     ProjectAutonomyProfile,
     ProjectSettingsRecord,
@@ -26,13 +31,16 @@ __all__ = [
     "ChatRecord",
     "ChatSystemNoticeContent",
     "ChatTextContent",
+    "ProjectAttachmentRecord",
     "ProjectAutonomyProfile",
     "ProjectChatRestorationState",
     "ProjectChatState",
     "ProjectChatStore",
     "ProjectRecord",
+    "ProjectResourceStore",
     "ProjectSettingsRecord",
     "ProjectSettingsStore",
     "ProjectVerificationStrategy",
+    "ProjectWorkspaceFileSnapshotRecord",
     "canonical_workspace",
 ]
