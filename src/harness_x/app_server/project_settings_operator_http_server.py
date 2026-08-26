@@ -61,6 +61,13 @@ def _profile_projection(profile) -> dict[str, object]:
     }
 
 
+def _require_builtin_profile(profile_id: str):
+    try:
+        return builtin_model_profiles().get(profile_id)
+    except KeyError as exc:
+        raise ValueError("unknown built-in model profile") from exc
+
+
 def _test_profile_connection(profile) -> dict[str, object]:
     if profile.backend != ModelProfileBackend.OPENAI_COMPATIBLE or profile.base_url is None:
         return {
@@ -146,8 +153,12 @@ if not getattr(_Server, "_m73_project_settings_installed", False):
                     self._json(HTTPStatus.OK, record.model_dump(mode="json"))
                 except KeyError:
                     self._error(HTTPStatus.NOT_FOUND, "unknown_project")
-                except (RuntimeError, ValueError) as exc:
-                    self._error(HTTPStatus.CONFLICT, "project_settings_conflict", str(exc)[:4000])
+                except (RuntimeError, ValueError):
+                    self._error(
+                        HTTPStatus.CONFLICT,
+                        "project_settings_unavailable",
+                        "project settings could not be loaded",
+                    )
 
             def do_POST(self) -> None:  # noqa: N802
                 parsed = urlsplit(self.path)
@@ -164,17 +175,14 @@ if not getattr(_Server, "_m73_project_settings_installed", False):
                         request = ModelProfileConnectionTestRequest.model_validate(self._read_json())
                         with owner._product_lock:
                             owner.product_store.project(connection_project_id)
-                            profile = builtin_model_profiles().get(request.profile_id)
+                            profile = _require_builtin_profile(request.profile_id)
                         self._json(HTTPStatus.OK, _test_profile_connection(profile))
                         return
 
                     assert project_id is not None
                     self._require_project_id(project_id)
                     request = ReplaceProjectSettingsRequest.model_validate(self._read_json())
-                    try:
-                        builtin_model_profiles().get(request.model_profile)
-                    except KeyError as exc:
-                        raise ValueError(str(exc)) from exc
+                    _require_builtin_profile(request.model_profile)
                     with owner._product_lock:
                         store = ProjectSettingsStore(owner.product_store)
                         record = store.replace(
@@ -193,10 +201,18 @@ if not getattr(_Server, "_m73_project_settings_installed", False):
                         "invalid_project_settings_request",
                         str(exc)[:4000],
                     )
-                except ValueError as exc:
-                    self._error(HTTPStatus.CONFLICT, "project_settings_conflict", str(exc)[:4000])
-                except RuntimeError as exc:
-                    self._error(HTTPStatus.CONFLICT, "project_settings_corruption", str(exc)[:4000])
+                except ValueError:
+                    self._error(
+                        HTTPStatus.CONFLICT,
+                        "project_settings_conflict",
+                        "project settings request conflicts with the current project state",
+                    )
+                except RuntimeError:
+                    self._error(
+                        HTTPStatus.CONFLICT,
+                        "project_settings_unavailable",
+                        "project settings could not be persisted",
+                    )
 
             def _settings_auth(self, parsed, bearer: str) -> bool:
                 if not self._valid_host():
