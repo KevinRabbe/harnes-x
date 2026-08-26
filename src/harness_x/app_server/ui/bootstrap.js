@@ -23,6 +23,14 @@ function loadProjectSettingsBridge() {
   return loadWorkspaceBridge("/ui/settings_bridge.js", "settings bridge");
 }
 
+function loadProjectResourceBridge() {
+  return loadWorkspaceBridge("/ui/resource_bridge.js", "resource bridge");
+}
+
+function loadProjectResourceOutputs() {
+  return loadWorkspaceBridge("/ui/resource_outputs.js", "resource outputs");
+}
+
 (async () => {
   const fragment = window.location.hash;
   const bootstrapPresent = fragment.startsWith("#bootstrap=");
@@ -38,6 +46,8 @@ function loadProjectSettingsBridge() {
     await loadConversationExecutionBridge();
     await loadSensitiveApprovalBridge();
     await loadProjectSettingsBridge();
+    await loadProjectResourceBridge();
+    await loadProjectResourceOutputs();
   } catch (error) {
     document.getElementById("auth-error").textContent = `Workspace initialization failed: ${error instanceof Error ? error.message : String(error)}`;
     authSubmit.disabled = false;
