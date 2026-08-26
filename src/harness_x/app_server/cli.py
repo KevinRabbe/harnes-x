@@ -14,8 +14,8 @@ from typing import Sequence
 from harness_x.evidence_verification import PortableEvidenceVerificationError
 
 from .approval_runner import ApprovalAwareHarnessCodingRunner
+from .project_settings_operator_http_server import LocalOperatorHTTPServer
 from .sensitive_approval import SensitiveActionApprovalBroker
-from .sensitive_approval_operator_http_server import LocalOperatorHTTPServer
 from .service import AppServerService, use_default_coding_runner
 
 

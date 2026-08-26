@@ -209,8 +209,19 @@ def build_conversation_context(
     task: str,
     prior_messages: Sequence[ChatMessage],
     legacy_passthrough: bool = False,
+    max_rendered_chars: int = _MAX_RENDERED_CHARS,
+    max_rendered_bytes: int = _MAX_RENDERED_BYTES,
 ) -> ConversationContextPackage:
-    """Select a contiguous recent suffix of eligible durable text turns under hard bounds."""
+    """Select a contiguous recent suffix of eligible durable text turns under hard bounds.
+
+    Callers may reserve part of the inherited M71 envelope by requesting smaller bounds, but may
+    never expand the original character or byte limits.
+    """
+
+    if not 1 <= max_rendered_chars <= _MAX_RENDERED_CHARS:
+        raise ValueError("conversation context requested character bound is outside M71 limits")
+    if not 1 <= max_rendered_bytes <= _MAX_RENDERED_BYTES:
+        raise ValueError("conversation context requested byte bound is outside M71 limits")
 
     expected_prior_count = reserved_user_sequence - 1
     if len(prior_messages) != expected_prior_count:
@@ -235,9 +246,9 @@ def build_conversation_context(
         text=task,
     )
     base_rendered = _render_items((), current)
-    if len(base_rendered) > _MAX_RENDERED_CHARS:
+    if len(base_rendered) > max_rendered_chars:
         raise ValueError("accepted conversation task exceeds M71 rendered character bound")
-    if len(base_rendered.encode("utf-8")) > _MAX_RENDERED_BYTES:
+    if len(base_rendered.encode("utf-8")) > max_rendered_bytes:
         raise ValueError("accepted conversation task exceeds M71 rendered byte bound")
 
     selected: list[ConversationContextItem] = []
@@ -249,8 +260,8 @@ def build_conversation_context(
             trial = [item, *selected]
             rendered = _render_items(trial, current)
             if (
-                len(rendered) > _MAX_RENDERED_CHARS
-                or len(rendered.encode("utf-8")) > _MAX_RENDERED_BYTES
+                len(rendered) > max_rendered_chars
+                or len(rendered.encode("utf-8")) > max_rendered_bytes
             ):
                 # Keep a contiguous suffix of eligible history. If the nearest omitted turn
                 # cannot fit, older turns must not leapfrog it into model context.
@@ -265,6 +276,8 @@ def build_conversation_context(
         chat_id=chat_id,
         reserved_user_sequence=reserved_user_sequence,
         selection_policy=_LEGACY_POLICY if legacy_passthrough else _CONTEXT_POLICY,
+        max_rendered_chars=max_rendered_chars,
+        max_rendered_bytes=max_rendered_bytes,
         prior_source_count=len(prior_messages),
         eligible_prior_count=len(eligible_messages),
         selected_prior_count=len(selected),

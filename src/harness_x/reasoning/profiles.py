@@ -32,21 +32,34 @@ class ModelProfileBackend(StrEnum):
     OPENAI_COMPATIBLE = "openai"
 
 
+class ModelProvider(StrEnum):
+    QWEN = "qwen"
+    DEEPSEEK = "deepseek"
+    OPENAI = "openai"
+    CUSTOM = "custom"
+
+
+class ModelCapability(StrEnum):
+    STRUCTURED_OUTPUT = "structured_output"
+    TOOL_USE = "tool_use"
+    REASONING = "reasoning"
+
+
 class ModelProfile(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     schema_version: Literal["model-profile-v1"] = "model-profile-v1"
     profile_id: str = Field(min_length=1, max_length=64)
     role: ModelProfileRole = ModelProfileRole.CUSTOM
+    provider: ModelProvider = ModelProvider.CUSTOM
+    capabilities: tuple[ModelCapability, ...] = ()
     backend: ModelProfileBackend
     model: str = Field(min_length=1, max_length=300)
     description: str = Field(default="", max_length=1200)
 
-    # Shared identity / generation settings.
     revision: str | None = None
     max_output_tokens: int = Field(default=32768, ge=64, le=65536)
 
-    # OpenAI-compatible local server / hosted API settings.
     base_url: str | None = None
     api_key_env: str | None = None
     allow_remote_endpoint: bool = False
@@ -56,8 +69,6 @@ class ModelProfile(BaseModel):
     reasoning_effort: str | None = None
     prompt_mode: Literal["system", "user_prefix"] = "system"
 
-    # In-process Transformers settings. These remain useful for the small development core and
-    # custom operator profiles; the current strong built-ins intentionally use local HTTP serving.
     load_in_4bit: bool = True
     local_files_only: bool = False
 
@@ -87,6 +98,8 @@ class ModelProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_transport_shape(self) -> "ModelProfile":
+        if len(set(self.capabilities)) != len(self.capabilities):
+            raise ValueError("model profile capabilities must be unique")
         if self.backend == ModelProfileBackend.OPENAI_COMPATIBLE:
             if self.base_url is None:
                 raise ValueError("openai model profiles require base_url")
@@ -128,14 +141,16 @@ class ModelProfileRegistry(BaseModel):
         raise KeyError(f"unknown model profile {profile_id!r}; available: {available}")
 
 
-# These are intentionally a small personal-use shortlist, not a provider catalog. Strong local
-# models are served through a loopback OpenAI-compatible server so Harness X does not need to own
-# every model family's loader/quantizer details. The same localhost endpoint is used because the
-# operator normally serves one chosen heavyweight model at a time; --base-url can override it.
 _BUILTIN_PROFILES = (
     ModelProfile(
         profile_id="main",
         role=ModelProfileRole.MAIN,
+        provider=ModelProvider.QWEN,
+        capabilities=(
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.TOOL_USE,
+            ModelCapability.REASONING,
+        ),
         backend=ModelProfileBackend.OPENAI_COMPATIBLE,
         model="Qwen/Qwen3.8-27B",
         description=(
@@ -149,8 +164,33 @@ _BUILTIN_PROFILES = (
         reasoning_effort="xhigh",
     ),
     ModelProfile(
+        profile_id="qwen3-8b",
+        role=ModelProfileRole.CODER,
+        provider=ModelProvider.QWEN,
+        capabilities=(
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.TOOL_USE,
+            ModelCapability.REASONING,
+        ),
+        backend=ModelProfileBackend.OPENAI_COMPATIBLE,
+        model="Qwen/Qwen3-8B",
+        description=(
+            "Smaller local Qwen profile for cheap repeatable single-PC experiments through an "
+            "OpenAI-compatible loopback server."
+        ),
+        base_url="http://127.0.0.1:8000/v1",
+        max_output_tokens=16384,
+        temperature=0.6,
+        top_p=0.95,
+    ),
+    ModelProfile(
         profile_id="coder",
         role=ModelProfileRole.CODER,
+        provider=ModelProvider.QWEN,
+        capabilities=(
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.TOOL_USE,
+        ),
         backend=ModelProfileBackend.OPENAI_COMPATIBLE,
         model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
         description=(
@@ -165,6 +205,11 @@ _BUILTIN_PROFILES = (
     ModelProfile(
         profile_id="reasoning",
         role=ModelProfileRole.REASONING,
+        provider=ModelProvider.DEEPSEEK,
+        capabilities=(
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.REASONING,
+        ),
         backend=ModelProfileBackend.OPENAI_COMPATIBLE,
         model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
         description=(
@@ -180,11 +225,17 @@ _BUILTIN_PROFILES = (
     ModelProfile(
         profile_id="api",
         role=ModelProfileRole.API,
+        provider=ModelProvider.OPENAI,
+        capabilities=(
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.TOOL_USE,
+            ModelCapability.REASONING,
+        ),
         backend=ModelProfileBackend.OPENAI_COMPATIBLE,
         model="gpt-5.6-sol",
         description=(
             "Optional remote OpenAI reasoning/coding core. It is never selected implicitly and "
-            "requires OPENAI_API_KEY when explicitly chosen."
+            "requires a configured server credential when explicitly chosen."
         ),
         base_url="https://api.openai.com/v1",
         api_key_env="OPENAI_API_KEY",

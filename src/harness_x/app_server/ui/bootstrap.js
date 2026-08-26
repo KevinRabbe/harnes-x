@@ -19,6 +19,10 @@ function loadSensitiveApprovalBridge() {
   return loadWorkspaceBridge("/ui/approval_bridge.js", "approval bridge");
 }
 
+function loadProjectSettingsBridge() {
+  return loadWorkspaceBridge("/ui/settings_bridge.js", "settings bridge");
+}
+
 (async () => {
   const fragment = window.location.hash;
   const bootstrapPresent = fragment.startsWith("#bootstrap=");
@@ -33,6 +37,7 @@ function loadSensitiveApprovalBridge() {
   try {
     await loadConversationExecutionBridge();
     await loadSensitiveApprovalBridge();
+    await loadProjectSettingsBridge();
   } catch (error) {
     document.getElementById("auth-error").textContent = `Workspace initialization failed: ${error instanceof Error ? error.message : String(error)}`;
     authSubmit.disabled = false;
