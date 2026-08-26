@@ -55,7 +55,6 @@ if not getattr(_Server, "_m74_project_resources_installed", False):
         base_handler = _previous_handler_type(self)
         owner = self
         token = self.token
-        artifact_registry = ExecutionArtifactRegistry(owner.conversation.store.root)
 
         class Handler(base_handler):
             server_version = "HarnessXAppServer/74"
@@ -134,6 +133,7 @@ if not getattr(_Server, "_m74_project_resources_installed", False):
                     )
                     assert projection.session_id is not None
                     with owner._product_lock:
+                        artifact_registry = ExecutionArtifactRegistry(owner.conversation.store.root)
                         records = artifact_registry.sync_known_artifacts(
                             project_id=project_id,
                             chat_id=chat_id,
