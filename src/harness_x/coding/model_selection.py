@@ -9,7 +9,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from harness_x.reasoning import (
+    ModelCapability,
     ModelProfileBackend,
+    ModelProvider,
     OpenAICompatibleReasoningCore,
     OpenAICompatibleSettings,
     TransformersLocalSettings,
@@ -34,6 +36,8 @@ class ResolvedModelSelection(BaseModel):
     source: Literal["profile", "direct_flags"]
     profile_id: str | None = None
     role: str | None = None
+    provider: ModelProvider = ModelProvider.CUSTOM
+    capabilities: tuple[ModelCapability, ...] = ()
     backend: ModelProfileBackend
     model: str
     revision: str | None = None
@@ -53,8 +57,6 @@ class ResolvedModelSelection(BaseModel):
 def resolve_model_selection(args) -> ResolvedModelSelection:
     profile_id = getattr(args, "model_profile", None)
     if profile_id:
-        # Profiles own the model/backend/revision. Operator endpoint/key/effort overrides are
-        # allowed because they do not change the model identity and are often machine-specific.
         default_backend = "transformers"
         default_model = DEFAULT_DEVELOPMENT_MODEL
         if getattr(args, "backend", default_backend) != default_backend:
@@ -77,16 +79,14 @@ def resolve_model_selection(args) -> ResolvedModelSelection:
 
         base_url = getattr(args, "base_url", None) or profile.base_url
         api_key_env = getattr(args, "api_key_env", None) or profile.api_key_env
-        reasoning_effort = (
-            getattr(args, "reasoning_effort", None) or profile.reasoning_effort
-        )
-        allow_remote = profile.allow_remote_endpoint or bool(
-            getattr(args, "allow_remote", False)
-        )
+        reasoning_effort = getattr(args, "reasoning_effort", None) or profile.reasoning_effort
+        allow_remote = profile.allow_remote_endpoint or bool(getattr(args, "allow_remote", False))
         return ResolvedModelSelection(
             source="profile",
             profile_id=profile.profile_id,
             role=profile.role.value,
+            provider=profile.provider,
+            capabilities=profile.capabilities,
             backend=profile.backend,
             model=profile.model,
             revision=profile.revision,
@@ -116,8 +116,6 @@ def resolve_model_selection(args) -> ResolvedModelSelection:
             local_files_only=bool(getattr(args, "local_files_only", False)),
         )
 
-    # Preserve the exact pre-M32 direct OpenAI-compatible defaults. Larger output caps are an
-    # explicit property of named profiles, not a silent behavior change for existing CLI usage.
     return ResolvedModelSelection(
         source="direct_flags",
         backend=backend,
@@ -154,6 +152,7 @@ def build_selected_reasoning_core(selection: ResolvedModelSelection):
         OpenAICompatibleSettings(
             base_url=selection.base_url or DEFAULT_LOCAL_BASE_URL,
             model=selection.model,
+            provider=selection.provider.value,
             api_key_env=selection.api_key_env,
             allow_remote_endpoint=selection.allow_remote_endpoint,
             max_output_tokens=selection.max_output_tokens,
