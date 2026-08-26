@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .store import ProjectChatStore
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
-_PROFILE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 
 
 def _canonical(value: object) -> bytes:
@@ -50,7 +49,10 @@ class ProjectSettingsRecord(BaseModel):
 
     schema_version: Literal["project-settings-v1"] = "project-settings-v1"
     project_id: str = Field(pattern=r"^project_[0-9a-f]{32}$")
-    model_profile: str = Field(default="main", pattern=_PROFILE_PATTERN)
+    # M66-M72 allowed any nonblank default profile up to 200 characters. Keep the durable
+    # product record broad enough to deserialize every previously legal project; M73 HTTP writes
+    # and execution compilation independently require a current authoritative model profile.
+    model_profile: str = Field(default="main", min_length=1, max_length=200)
     verification_strategy: ProjectVerificationStrategy = ProjectVerificationStrategy.DIFF_CHECK
     project_instructions: str = Field(default="", max_length=6000)
     autonomy_profile: ProjectAutonomyProfile = ProjectAutonomyProfile.STANDARD
@@ -61,7 +63,10 @@ class ProjectSettingsRecord(BaseModel):
     @field_validator("model_profile")
     @classmethod
     def normalize_model_profile(cls, value: str) -> str:
-        return value.strip().casefold()
+        value = value.strip().casefold()
+        if not value:
+            raise ValueError("project model profile cannot be blank")
+        return value
 
     @field_validator("project_instructions")
     @classmethod
