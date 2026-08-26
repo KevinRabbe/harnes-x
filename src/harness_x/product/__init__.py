@@ -11,6 +11,12 @@ from .models import (
     ProjectChatState,
     ProjectRecord,
 )
+from .settings import (
+    ProjectAutonomyProfile,
+    ProjectSettingsRecord,
+    ProjectSettingsStore,
+    ProjectVerificationStrategy,
+)
 from .store import ProjectChatStore, canonical_workspace
 
 __all__ = [
@@ -20,9 +26,13 @@ __all__ = [
     "ChatRecord",
     "ChatSystemNoticeContent",
     "ChatTextContent",
+    "ProjectAutonomyProfile",
     "ProjectChatRestorationState",
     "ProjectChatState",
     "ProjectChatStore",
     "ProjectRecord",
+    "ProjectSettingsRecord",
+    "ProjectSettingsStore",
+    "ProjectVerificationStrategy",
     "canonical_workspace",
 ]
