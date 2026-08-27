@@ -104,7 +104,6 @@ def test_projection_reads_only_allowlisted_pointer_and_exposes_relative_provenan
         artifact_path="versions/secret-config.json",
     )
     (root / "active-config.json").write_text(pointer.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    # A tempting non-allowlisted file must never become public observatory content.
     (root / "secret-config.json").write_text('{"OPENAI_API_KEY":"do-not-project"}\n', encoding="utf-8")
 
     harness = _Harness(tmp_path / "server")
@@ -144,7 +143,11 @@ def test_malformed_record_is_fail_visible_without_reflecting_rejected_values(tmp
         project = _project(harness, workspace)
         status, payload = _json(harness, "GET", _path(project))
         assert status == 200, payload
-        source = next(item for item in payload["sources"] if item["relative_path"].endswith("promotion-record.json"))
+        source = next(
+            item
+            for item in payload["sources"]
+            if item["relative_path"].endswith("promotion-record.json")
+        )
         assert source["status"] == "malformed"
         assert source["detail"] == "record failed strict schema or bounded-file validation"
         assert secret not in json.dumps(payload, sort_keys=True)
@@ -169,9 +172,45 @@ def test_symlinked_allowlisted_record_is_rejected_without_following_target(tmp_p
         project = _project(harness, workspace)
         status, payload = _json(harness, "GET", _path(project))
         assert status == 200, payload
-        source = next(item for item in payload["sources"] if item["relative_path"].endswith("promotion-record.json"))
+        source = next(
+            item
+            for item in payload["sources"]
+            if item["relative_path"].endswith("promotion-record.json")
+        )
         assert source["status"] == "symlink_rejected"
         assert "outside-secret" not in json.dumps(payload, sort_keys=True)
+    finally:
+        harness.close()
+
+
+def test_symlinked_observatory_root_is_explicitly_rejected(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside-root"
+    outside.mkdir()
+    (outside / "promotion-record.json").write_text('{"secret":"outside-root-secret"}\n', encoding="utf-8")
+    try:
+        (workspace / ".harness-x").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        return
+
+    harness = _Harness(tmp_path / "server")
+    try:
+        project = _project(harness, workspace)
+        status, payload = _json(harness, "GET", _path(project))
+        assert status == 200, payload
+        assert payload["observatory_root_present"] is False
+        assert payload["sources"] == [
+            {
+                "relative_path": ".harness-x",
+                "record_kind": "observatory_root",
+                "status": "symlink_rejected",
+                "size_bytes": None,
+                "source_sha256": None,
+                "detail": "observatory does not follow symlinked evidence",
+            }
+        ]
+        assert "outside-root-secret" not in json.dumps(payload, sort_keys=True)
     finally:
         harness.close()
 
@@ -182,7 +221,7 @@ def test_unknown_project_and_mutation_shaped_path_do_not_create_observatory_auth
     harness = _Harness(tmp_path / "server")
     try:
         project = _project(harness, workspace)
-        status, payload = _json(
+        status, _payload = _json(
             harness,
             "GET",
             "/v1/projects/project_" + "f" * 32 + "/improvement-observatory",
