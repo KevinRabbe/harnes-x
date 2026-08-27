@@ -139,6 +139,31 @@ internal static class Program
             {
                 return 3;
             }
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var uiResponse = await http.GetAsync(server.UiUri);
+            if (!uiResponse.IsSuccessStatusCode)
+            {
+                return 13;
+            }
+            var uiText = await uiResponse.Content.ReadAsStringAsync();
+            if (!uiText.Contains("<h1>Projects &amp; Chats</h1>", StringComparison.Ordinal))
+            {
+                return 14;
+            }
+
+            var observatoryUri = new Uri(server.BaseUri, "/ui/improvement_observatory_bridge.js");
+            using var observatoryResponse = await http.GetAsync(observatoryUri);
+            if (!observatoryResponse.IsSuccessStatusCode)
+            {
+                return 15;
+            }
+            var observatoryText = await observatoryResponse.Content.ReadAsStringAsync();
+            if (!observatoryText.Contains("Improvement Observatory", StringComparison.Ordinal))
+            {
+                return 16;
+            }
+
             await server.StopAsync();
             return 0;
         }
