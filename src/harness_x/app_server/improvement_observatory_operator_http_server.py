@@ -13,7 +13,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import reliability_operator_http_server as _m75
-from .improvement_observatory import ImprovementObservatoryProjection, build_improvement_observatory
+from .improvement_observatory import ImprovementObservatoryProjection
+from .improvement_observatory_guard import build_public_improvement_observatory
 
 _Server = _m75.LocalOperatorHTTPServer
 
@@ -85,7 +86,7 @@ if not getattr(_Server, "_m76_improvement_observatory_installed", False):
                     self._require_project_id(project_id)
                     with owner._product_lock:
                         project = owner.product_store.project(project_id)
-                    projection = build_improvement_observatory(
+                    projection = build_public_improvement_observatory(
                         project_id=project_id,
                         workspace_root=project.workspace_root,
                     )
