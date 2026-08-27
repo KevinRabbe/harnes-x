@@ -18,7 +18,7 @@ def test_observatory_asset_is_allowlisted_and_loaded_after_m75_reliability() -> 
     assert asset is not None
     content_type, payload = asset
     assert content_type == "text/javascript; charset=utf-8"
-    assert payload.decode("utf-8") == _text("improvement_observatory_bridge.js")
+    assert payload == (UI / "improvement_observatory_bridge.js").read_bytes()
 
     bootstrap = _text("bootstrap.js")
     reliability = 'await loadEverydayReliabilityBridge();'
