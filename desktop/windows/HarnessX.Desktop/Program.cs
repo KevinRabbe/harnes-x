@@ -84,6 +84,22 @@ internal static class Program
             }
 
             if (string.Equals(
+                    Environment.GetEnvironmentVariable("HARNESS_X_DESKTOP_SMOKE_REQUIRE_ADJACENT"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                var adjacent = Path.GetFullPath(
+                    Path.Combine(AppContext.BaseDirectory, "harness-x-app-server.exe"));
+                if (!string.Equals(
+                        Path.GetFullPath(appServerExecutable),
+                        adjacent,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return 12;
+                }
+            }
+
+            if (string.Equals(
                     Path.GetFileName(appServerExecutable),
                     "harness-x-app-server.exe",
                     StringComparison.OrdinalIgnoreCase))
