@@ -75,7 +75,7 @@ def test_recovery_actions_are_execution_scoped_and_do_not_accept_session_authori
         '"Stop"',
         '"Retry"',
         '"Continue"',
-        '"The prior model/tool process was not resumed',
+        "The prior model/tool process was not resumed",
     ):
         assert required in javascript
     stop_start = javascript.index("async function everydayReliabilityStop()")
