@@ -47,10 +47,14 @@ def _public_projection(
     for campaign in payload.get("campaigns", []):
         campaign["terminal_reason"] = None
 
-    # Never forward filesystem exception text from rollback-path verification. The tri-state
-    # result plus recorded digest carries the evidence semantics without exposing a host path.
+    # Promotion reason is normally deterministic producer text, but the inherited rollback API
+    # accepts an operator-supplied reason. Preserve status/evidence while never forwarding that
+    # unrestricted field to the browser.
     for promotion in payload.get("promotions", []):
+        promotion["reason"] = "redacted from public observatory projection"
         rollback = promotion.get("rollback") or {}
+        # Never forward filesystem exception text from rollback-path verification. The tri-state
+        # result plus recorded digest carries the evidence semantics without exposing a host path.
         if not rollback.get("recorded"):
             rollback["verification_detail"] = "promotion record contains no rollback artifact identity"
         elif rollback.get("independently_verified") is True:
