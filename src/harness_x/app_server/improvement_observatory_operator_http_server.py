@@ -24,7 +24,7 @@ def _public_projection(
     *,
     workspace_root: str,
 ) -> dict[str, object]:
-    """Remove parser payloads and keep rejected root topology fail-visible over HTTP."""
+    """Expose evidence state without forwarding parser, OS-path, or model free-text payloads."""
 
     payload = projection.model_dump(mode="json")
     sources = payload.get("sources", [])
@@ -36,6 +36,31 @@ def _public_projection(
             source["detail"] = "observatory does not follow symlinked evidence"
         elif status == "oversized":
             source["detail"] = "record exceeds observatory read budget"
+
+    # Candidate rationale originates in model-advisory M30 state and is not required to show
+    # candidate identity/status. Keep it out of the browser projection entirely.
+    for candidate in payload.get("candidates", []):
+        candidate["rationale"] = None
+
+    # Campaign terminal prose can contain operator-supplied cancellation context. The durable
+    # status and promoted identity remain visible without forwarding that unrestricted text.
+    for campaign in payload.get("campaigns", []):
+        campaign["terminal_reason"] = None
+
+    # Never forward filesystem exception text from rollback-path verification. The tri-state
+    # result plus recorded digest carries the evidence semantics without exposing a host path.
+    for promotion in payload.get("promotions", []):
+        rollback = promotion.get("rollback") or {}
+        if not rollback.get("recorded"):
+            rollback["verification_detail"] = "promotion record contains no rollback artifact identity"
+        elif rollback.get("independently_verified") is True:
+            rollback["verification_detail"] = "bounded in-root rollback bytes match recorded SHA-256"
+        elif rollback.get("independently_verified") is False:
+            rollback["verification_detail"] = "bounded in-root rollback bytes do not match recorded SHA-256"
+        else:
+            rollback["verification_detail"] = (
+                "recorded rollback artifact was not independently verified within observatory boundary"
+            )
 
     fixed_root = Path(workspace_root) / ".harness-x"
     if not projection.observatory_root_present and fixed_root.is_symlink():
