@@ -47,16 +47,16 @@ internal static class DesktopRuntimeLocator
             return configured;
         }
 
-        var remembered = ReadRemembered(paths.AppServerExecutablePathFile);
-        if (remembered is not null)
-        {
-            return remembered;
-        }
-
         var adjacent = ExistingAppServerFile(Path.Combine(AppContext.BaseDirectory, AppServerName));
         if (adjacent is not null)
         {
             return adjacent;
+        }
+
+        var remembered = ReadRemembered(paths.AppServerExecutablePathFile);
+        if (remembered is not null)
+        {
+            return remembered;
         }
 
         foreach (var root in CandidateRoots())
