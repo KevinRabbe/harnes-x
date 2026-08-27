@@ -55,6 +55,12 @@ recurrent = [
 browser = [
   "playwright>=1.62,<2",
 ]
+# Windows portable distribution construction is a build-time concern only. It is kept out
+# of the ordinary Harness X runtime/development environment and is installed only on the
+# Windows packaging lane.
+windows-distribution = [
+  "pyinstaller==6.22.2",
+]
 
 [project.scripts]
 harness-x = "harness_x.cli_entry:main"
