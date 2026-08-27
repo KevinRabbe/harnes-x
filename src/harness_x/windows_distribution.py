@@ -1,7 +1,7 @@
-"""Deterministic integrity inventory for the M77 Windows portable distribution.
+"""Deterministic construction and integrity inventory for the M77 Windows distribution.
 
-This manifest is a packaging inventory only. It is deliberately separate from Harness X evidence
-manifests, signatures, verification receipts, and runtime authority.
+The distribution manifest is a packaging inventory only. It is deliberately separate from
+Harness X evidence manifests, signatures, verification receipts, and runtime authority.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Iterable, Literal
 
@@ -64,6 +65,8 @@ class WindowsDistributionManifest(BaseModel):
             raise ValueError("distribution entries must be sorted by relative path")
         if len(paths) != len(set(paths)):
             raise ValueError("distribution entries contain duplicate relative paths")
+        if len({item.casefold() for item in paths}) != len(paths):
+            raise ValueError("distribution entries collide under Windows path casing")
         total = sum(item.size_bytes for item in self.entries)
         if total > _MAX_TOTAL_BYTES:
             raise ValueError("distribution exceeds aggregate byte limit")
@@ -85,6 +88,27 @@ def _require_relative_path(value: str) -> str:
     return value
 
 
+def _require_directory(root: str | Path, *, label: str) -> Path:
+    candidate = Path(root).expanduser()
+    if candidate.is_symlink():
+        raise WindowsDistributionError(f"{label} must not be a symlink")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise WindowsDistributionError(f"{label} is unavailable: {exc}") from exc
+    if not resolved.is_dir():
+        raise WindowsDistributionError(f"{label} must be a directory")
+    return resolved
+
+
+def _inside(root: Path, path: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def _sha256_file(path: Path, *, expected_size: int | None = None) -> tuple[int, str]:
     digest = hashlib.sha256()
     size = 0
@@ -102,7 +126,7 @@ def _sha256_file(path: Path, *, expected_size: int | None = None) -> tuple[int, 
     return size, digest.hexdigest()
 
 
-def _walk_regular_files(root: Path) -> tuple[Path, ...]:
+def _walk_regular_files(root: Path, *, include_manifest: bool = False) -> tuple[Path, ...]:
     pending: list[tuple[Path, int]] = [(root, 0)]
     files: list[Path] = []
     while pending:
@@ -124,7 +148,7 @@ def _walk_regular_files(root: Path) -> tuple[Path, ...]:
                 raise WindowsDistributionError(f"distribution contains a non-regular file: {path.name}")
             relative = path.relative_to(root).as_posix()
             _require_relative_path(relative)
-            if relative == _MANIFEST_NAME:
+            if relative == _MANIFEST_NAME and not include_manifest:
                 continue
             files.append(path)
             if len(files) > _MAX_FILES:
@@ -132,19 +156,90 @@ def _walk_regular_files(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(files, key=lambda item: item.relative_to(root).as_posix()))
 
 
+def assemble_windows_distribution(
+    desktop_root: str | Path,
+    app_server_root: str | Path,
+    output_root: str | Path,
+) -> Path:
+    """Combine exact desktop/App Server build outputs without following or overwriting paths."""
+
+    desktop = _require_directory(desktop_root, label="desktop publish root")
+    app_server = _require_directory(app_server_root, label="App Server package root")
+    sources: dict[str, Path] = {}
+    source_keys: dict[str, str] = {}
+
+    for label, root in (("desktop", desktop), ("App Server", app_server)):
+        for path in _walk_regular_files(root, include_manifest=True):
+            relative = path.relative_to(root).as_posix()
+            if relative == _MANIFEST_NAME:
+                raise WindowsDistributionError(f"{label} source contains reserved distribution manifest")
+            key = relative.casefold()
+            prior = source_keys.get(key)
+            if prior is not None:
+                raise WindowsDistributionError(
+                    f"portable distribution source collision: {prior} vs {relative}"
+                )
+            source_keys[key] = relative
+            sources[relative] = path
+
+    file_keys = set(source_keys)
+    for relative in sources:
+        parts = relative.casefold().split("/")
+        for index in range(1, len(parts)):
+            if "/".join(parts[:index]) in file_keys:
+                raise WindowsDistributionError(
+                    f"portable distribution file/directory collision: {relative}"
+                )
+
+    output = Path(output_root).expanduser()
+    if output.exists() or output.is_symlink():
+        raise WindowsDistributionError("portable distribution output must not already exist")
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output_resolved = output.resolve(strict=False)
+    except OSError as exc:
+        raise WindowsDistributionError(f"cannot prepare portable distribution output: {exc}") from exc
+    if _inside(desktop, output_resolved) or _inside(app_server, output_resolved):
+        raise WindowsDistributionError("portable distribution output must be outside build input roots")
+
+    try:
+        output.mkdir()
+        for relative, source in sorted(sources.items()):
+            target = output / Path(*relative.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() or target.is_symlink():
+                raise WindowsDistributionError(f"portable distribution target collision: {relative}")
+            before = source.stat(follow_symlinks=False)
+            if before.st_size > _MAX_FILE_BYTES:
+                raise WindowsDistributionError(f"distribution file exceeds byte limit: {relative}")
+            shutil.copy2(source, target, follow_symlinks=False)
+            if target.stat(follow_symlinks=False).st_size != before.st_size:
+                raise WindowsDistributionError(f"distribution copy size mismatch: {relative}")
+    except (OSError, WindowsDistributionError) as exc:
+        try:
+            shutil.rmtree(output)
+        except OSError:
+            pass
+        if isinstance(exc, WindowsDistributionError):
+            raise
+        raise WindowsDistributionError(f"cannot assemble portable distribution: {exc}") from exc
+
+    required = (output / "HarnessX.exe", output / "harness-x-app-server.exe")
+    if not all(path.is_file() and not path.is_symlink() for path in required):
+        try:
+            shutil.rmtree(output)
+        except OSError:
+            pass
+        raise WindowsDistributionError(
+            "portable distribution requires adjacent HarnessX.exe and harness-x-app-server.exe"
+        )
+    return output
+
+
 def build_windows_distribution_manifest(root: str | Path) -> WindowsDistributionManifest:
     """Hash one bounded ordinary directory without following symlinks."""
 
-    root_path = Path(root).expanduser()
-    if root_path.is_symlink():
-        raise WindowsDistributionError("distribution root must not be a symlink")
-    try:
-        root_path = root_path.resolve(strict=True)
-    except OSError as exc:
-        raise WindowsDistributionError(f"distribution root is unavailable: {exc}") from exc
-    if not root_path.is_dir():
-        raise WindowsDistributionError("distribution root must be a directory")
-
+    root_path = _require_directory(root, label="distribution root")
     entries: list[WindowsDistributionEntry] = []
     total = 0
     for path in _walk_regular_files(root_path):
@@ -182,7 +277,7 @@ def render_windows_distribution_manifest(manifest: WindowsDistributionManifest) 
 
 
 def persist_windows_distribution_manifest(root: str | Path) -> Path:
-    root_path = Path(root).expanduser().resolve(strict=True)
+    root_path = _require_directory(root, label="distribution root")
     manifest_path = root_path / _MANIFEST_NAME
     if manifest_path.exists() or manifest_path.is_symlink():
         raise WindowsDistributionError("distribution manifest already exists")
@@ -205,16 +300,7 @@ def persist_windows_distribution_manifest(root: str | Path) -> Path:
 
 
 def verify_windows_distribution(root: str | Path) -> WindowsDistributionManifest:
-    root_path = Path(root).expanduser()
-    if root_path.is_symlink():
-        raise WindowsDistributionError("distribution root must not be a symlink")
-    try:
-        root_path = root_path.resolve(strict=True)
-    except OSError as exc:
-        raise WindowsDistributionError(f"distribution root is unavailable: {exc}") from exc
-    if not root_path.is_dir():
-        raise WindowsDistributionError("distribution root must be a directory")
-
+    root_path = _require_directory(root, label="distribution root")
     manifest_path = root_path / _MANIFEST_NAME
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise WindowsDistributionError("distribution manifest is missing or non-regular")
@@ -249,8 +335,14 @@ def verify_windows_distribution(root: str | Path) -> WindowsDistributionManifest
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build or verify the M77 Windows portable manifest")
+    parser = argparse.ArgumentParser(description="Build, verify, or assemble the M77 Windows distribution")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    assemble = subparsers.add_parser("assemble")
+    assemble.add_argument("desktop_root", type=Path)
+    assemble.add_argument("app_server_root", type=Path)
+    assemble.add_argument("output_root", type=Path)
+
     for command in ("build", "verify"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("root", type=Path)
@@ -260,7 +352,14 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Iterable[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     try:
-        if args.command == "build":
+        if args.command == "assemble":
+            output = assemble_windows_distribution(
+                args.desktop_root,
+                args.app_server_root,
+                args.output_root,
+            )
+            print(f"assembled: {output.name}")
+        elif args.command == "build":
             path = persist_windows_distribution_manifest(args.root)
             print(f"manifest: {path.name}")
         else:
@@ -283,6 +382,7 @@ __all__ = [
     "WindowsDistributionEntry",
     "WindowsDistributionError",
     "WindowsDistributionManifest",
+    "assemble_windows_distribution",
     "build_windows_distribution_manifest",
     "persist_windows_distribution_manifest",
     "render_windows_distribution_manifest",
