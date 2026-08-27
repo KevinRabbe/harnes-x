@@ -8,10 +8,12 @@ internal sealed class MainForm : Form
 {
     private readonly Label _status;
     private readonly WebView2 _webView;
+    private DesktopPaths? _paths;
     private AppServerChild? _server;
     private bool _started;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
+    private bool _windowStateSaved;
 
     public MainForm()
     {
@@ -38,6 +40,22 @@ internal sealed class MainForm : Form
         Controls.Add(_status);
     }
 
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        try
+        {
+            _paths = DesktopPaths.Create();
+            DesktopWindowStateStore.TryApply(this, _paths.WindowStatePath);
+        }
+        catch
+        {
+            // App Server startup remains responsible for presenting a fatal local-path failure.
+            // Window-state recovery is convenience-only and must always fail back to defaults.
+            _paths = null;
+        }
+    }
+
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
@@ -49,7 +67,8 @@ internal sealed class MainForm : Form
 
         try
         {
-            var paths = DesktopPaths.Create();
+            var paths = _paths ?? DesktopPaths.Create();
+            _paths = paths;
             var appServerExecutable = DesktopRuntimeLocator.ResolveOrPrompt(this, paths);
             _server = await AppServerChild.StartAsync(appServerExecutable, paths.AppServerRoot);
             var environment = await CoreWebView2Environment.CreateAsync(
@@ -80,6 +99,7 @@ internal sealed class MainForm : Form
 
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
+        SaveWindowStateOnce();
         if (_shutdownComplete || _server is null)
         {
             base.OnFormClosing(e);
@@ -119,6 +139,22 @@ internal sealed class MainForm : Form
         base.Dispose(disposing);
     }
 
+    private void SaveWindowStateOnce()
+    {
+        if (_windowStateSaved || _paths is null)
+        {
+            return;
+        }
+        _windowStateSaved = true;
+        var maximized = WindowState == FormWindowState.Maximized;
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        DesktopWindowStateStore.TrySave(
+            _paths.WindowStatePath,
+            bounds,
+            maximized,
+            MinimumSize);
+    }
+
     private void ConfigureWebView(AppServerChild server)
     {
         var core = _webView.CoreWebView2
@@ -148,7 +184,11 @@ internal sealed class MainForm : Form
         };
         core.ProcessFailed += (_, args) =>
         {
-            _status.Text = $"Harness X WebView2 process failed: {args.ProcessFailedKind}";
+            _webView.Visible = false;
+            _status.Text = (
+                $"Harness X WebView2 process failed: {args.ProcessFailedKind}.\n\n"
+                + "Close and reopen Harness X to reconstruct the workspace from durable local state."
+            );
             _status.Visible = true;
         };
     }

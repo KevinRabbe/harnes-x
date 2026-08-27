@@ -29,6 +29,54 @@ internal static class Program
                 Path.Combine(root, "WebView2"),
                 Path.Combine(root, "app-server-executable.txt"));
 
+            var minimumSize = new Size(820, 560);
+            var savedBounds = new Rectangle(120, 140, 1100, 720);
+            if (!DesktopWindowStateStore.TrySave(
+                    paths.WindowStatePath,
+                    savedBounds,
+                    maximized: true,
+                    minimumSize))
+            {
+                return 7;
+            }
+            var windowState = DesktopWindowStateStore.TryLoad(paths.WindowStatePath, minimumSize);
+            if (windowState is null
+                || windowState.SchemaVersion != 1
+                || windowState.X != savedBounds.X
+                || windowState.Y != savedBounds.Y
+                || windowState.Width != savedBounds.Width
+                || windowState.Height != savedBounds.Height
+                || !windowState.Maximized)
+            {
+                return 8;
+            }
+            var windowStateJson = File.ReadAllText(paths.WindowStatePath);
+            foreach (var forbidden in new[]
+                     {
+                         "token", "bearer", "project_id", "chat_id", "execution_id",
+                         "workspace", "task", "evidence", "model_profile",
+                     })
+            {
+                if (windowStateJson.Contains(forbidden, StringComparison.OrdinalIgnoreCase))
+                {
+                    return 9;
+                }
+            }
+            if (!DesktopWindowStateStore.IsVisibleOnAnyScreen(
+                    savedBounds,
+                    new[] { new Rectangle(0, 0, 1920, 1080) })
+                || DesktopWindowStateStore.IsVisibleOnAnyScreen(
+                    new Rectangle(50_000, 50_000, 1000, 700),
+                    new[] { new Rectangle(0, 0, 1920, 1080) }))
+            {
+                return 10;
+            }
+            File.WriteAllText(paths.WindowStatePath, "{not-json");
+            if (DesktopWindowStateStore.TryLoad(paths.WindowStatePath, minimumSize) is not null)
+            {
+                return 11;
+            }
+
             var appServerExecutable = DesktopRuntimeLocator.TryResolve(paths);
             if (appServerExecutable is null)
             {
