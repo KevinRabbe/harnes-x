@@ -25,6 +25,8 @@ jobs:
           dotnet-version: "8.0.x"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
+      - if: runner.os == 'Windows'
+        run: python -m pip install -e ".[windows-distribution]"
       - run: pytest
       - run: harness-x --help
       - run: harness-x validate-config configs/default.yaml
@@ -35,10 +37,53 @@ jobs:
       - if: runner.os == 'Windows'
         run: dotnet run --project desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release --no-build -- --smoke-test
       - if: runner.os == 'Windows'
-        run: dotnet publish desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release -r win-x64 --self-contained false -o artifacts/windows-desktop
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onedir
+          --name harness-x-app-server
+          --paths src
+          --collect-data harness_x.app_server
+          --distpath artifacts/pyinstaller
+          --workpath artifacts/pyinstaller-work
+          --specpath artifacts/pyinstaller-spec
+          packaging/windows/harness_x_app_server.py
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & .\artifacts\pyinstaller\harness-x-app-server\harness-x-app-server.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - if: runner.os == 'Windows'
+        run: dotnet publish desktop/windows/HarnessX.Desktop/HarnessX.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/desktop-self-contained
+      - if: runner.os == 'Windows'
+        run: >-
+          python -m harness_x.windows_distribution assemble
+          artifacts/desktop-self-contained
+          artifacts/pyinstaller/harness-x-app-server
+          artifacts/windows-portable
+      - if: runner.os == 'Windows'
+        run: python -m harness_x.windows_distribution build artifacts/windows-portable
+      - if: runner.os == 'Windows'
+        run: python -m harness_x.windows_distribution verify artifacts/windows-portable
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $configured = $env:HARNESS_X_APP_SERVER_EXECUTABLE
+          $pathValue = $env:PATH
+          $required = $env:HARNESS_X_DESKTOP_SMOKE_REQUIRE_ADJACENT
+          try {
+            Remove-Item Env:HARNESS_X_APP_SERVER_EXECUTABLE -ErrorAction SilentlyContinue
+            $env:PATH = ""
+            $env:HARNESS_X_DESKTOP_SMOKE_REQUIRE_ADJACENT = "1"
+            & .\artifacts\windows-portable\HarnessX.exe --smoke-test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            $env:HARNESS_X_APP_SERVER_EXECUTABLE = $configured
+            $env:PATH = $pathValue
+            $env:HARNESS_X_DESKTOP_SMOKE_REQUIRE_ADJACENT = $required
+          }
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
-          name: harness-x-windows-desktop
-          path: artifacts/windows-desktop
+          name: harness-x-windows-portable
+          path: artifacts/windows-portable
           if-no-files-found: error
