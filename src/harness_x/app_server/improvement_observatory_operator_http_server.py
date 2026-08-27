@@ -9,6 +9,7 @@ authority.
 from __future__ import annotations
 
 from http import HTTPStatus
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import reliability_operator_http_server as _m75
@@ -17,11 +18,16 @@ from .improvement_observatory import ImprovementObservatoryProjection, build_imp
 _Server = _m75.LocalOperatorHTTPServer
 
 
-def _public_projection(projection: ImprovementObservatoryProjection) -> dict[str, object]:
-    """Remove parser exception payloads before evidence health crosses the HTTP boundary."""
+def _public_projection(
+    projection: ImprovementObservatoryProjection,
+    *,
+    workspace_root: str,
+) -> dict[str, object]:
+    """Remove parser payloads and keep rejected root topology fail-visible over HTTP."""
 
     payload = projection.model_dump(mode="json")
-    for source in payload.get("sources", []):
+    sources = payload.get("sources", [])
+    for source in sources:
         status = source.get("status")
         if status == "malformed":
             source["detail"] = "record failed strict schema or bounded-file validation"
@@ -29,6 +35,19 @@ def _public_projection(projection: ImprovementObservatoryProjection) -> dict[str
             source["detail"] = "observatory does not follow symlinked evidence"
         elif status == "oversized":
             source["detail"] = "record exceeds observatory read budget"
+
+    fixed_root = Path(workspace_root) / ".harness-x"
+    if not projection.observatory_root_present and fixed_root.is_symlink():
+        sources.append(
+            {
+                "relative_path": ".harness-x",
+                "record_kind": "observatory_root",
+                "status": "symlink_rejected",
+                "size_bytes": None,
+                "source_sha256": None,
+                "detail": "observatory does not follow symlinked evidence",
+            }
+        )
     return payload
 
 
@@ -70,7 +89,10 @@ if not getattr(_Server, "_m76_improvement_observatory_installed", False):
                         project_id=project_id,
                         workspace_root=project.workspace_root,
                     )
-                    self._json(HTTPStatus.OK, _public_projection(projection))
+                    self._json(
+                        HTTPStatus.OK,
+                        _public_projection(projection, workspace_root=project.workspace_root),
+                    )
                 except KeyError:
                     self._error(HTTPStatus.NOT_FOUND, "unknown_product_resource")
                 except ValueError:
