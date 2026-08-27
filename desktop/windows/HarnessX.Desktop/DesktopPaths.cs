@@ -6,6 +6,8 @@ internal sealed record DesktopPaths(
     string WebViewUserDataRoot,
     string AppServerExecutablePathFile)
 {
+    public string WindowStatePath => Path.Combine(Root, "window-state-v1.json");
+
     public static DesktopPaths Create()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
