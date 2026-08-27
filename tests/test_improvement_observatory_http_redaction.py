@@ -13,6 +13,7 @@ from harness_x.app_server.improvement_observatory_operator_http_server import _p
 def test_public_projection_drops_model_operator_and_filesystem_free_text(tmp_path) -> None:
     secret_rationale = "model rationale includes credential-value"
     secret_terminal = "operator cancellation says credential-value"
+    secret_promotion_reason = "operator rollback says credential-value"
     secret_path = str(tmp_path / "private" / "rollback.json")
     projection = ImprovementObservatoryProjection(
         project_id="project_fixture",
@@ -33,9 +34,9 @@ def test_public_projection_drops_model_operator_and_filesystem_free_text(tmp_pat
                 promotion_id="promotion_fixture",
                 candidate_id="candidate_fixture",
                 baseline_version="0.1.0",
-                status="active",
+                status="rolled_back",
                 qualification_allowed=True,
-                reason="fixture_reason",
+                reason=secret_promotion_reason,
                 rollback=ObservatoryRollbackEvidence(
                     recorded=True,
                     recorded_sha256="a" * 64,
@@ -64,9 +65,11 @@ def test_public_projection_drops_model_operator_and_filesystem_free_text(tmp_pat
     encoded = str(payload)
     assert payload["candidates"][0]["rationale"] is None
     assert payload["campaigns"][0]["terminal_reason"] is None
+    assert payload["promotions"][0]["reason"] == "redacted from public observatory projection"
     assert payload["promotions"][0]["rollback"]["verification_detail"] == (
         "recorded rollback artifact was not independently verified within observatory boundary"
     )
     assert secret_rationale not in encoded
     assert secret_terminal not in encoded
+    assert secret_promotion_reason not in encoded
     assert secret_path not in encoded
