@@ -56,14 +56,31 @@ def build_public_improvement_observatory(
 ) -> ImprovementObservatoryProjection:
     """Build the public projection only after a bounded non-following tree preflight."""
 
-    within_budget, detail = _public_tree_within_budget(workspace_root)
+    workspace_path = Path(workspace_root).expanduser()
+    if workspace_path.is_symlink():
+        return ImprovementObservatoryProjection(
+            project_id=project_id,
+            software_version=__version__,
+            observatory_root_present=False,
+            scan_truncated=False,
+            sources=(
+                ObservatorySource(
+                    relative_path=".harness-x",
+                    record_kind="observatory_root",
+                    status=ObservatorySourceStatus.SYMLINK_REJECTED,
+                    detail="project workspace root is symlinked; observatory refuses to follow it",
+                ),
+            ),
+        )
+
+    within_budget, detail = _public_tree_within_budget(workspace_path)
     if within_budget:
         return build_improvement_observatory(
             project_id=project_id,
-            workspace_root=workspace_root,
+            workspace_root=workspace_path,
         )
 
-    workspace = Path(workspace_root).resolve()
+    workspace = workspace_path.resolve()
     root = workspace / ".harness-x"
     return ImprovementObservatoryProjection(
         project_id=project_id,
