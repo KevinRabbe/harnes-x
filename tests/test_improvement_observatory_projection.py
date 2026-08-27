@@ -171,6 +171,6 @@ def test_external_rollback_path_is_recorded_but_never_followed(tmp_path: Path) -
     assert promotion.rollback.recorded is True
     assert promotion.rollback.recorded_sha256 == "5" * 64
     assert promotion.rollback.independently_verified is None
-    assert "outside the fixed observatory root" in promotion.rollback.verification_detail
+    assert "rollback artifact" in promotion.rollback.verification_detail
     assert secret not in projection.model_dump_json()
     assert str(outside) not in projection.model_dump_json()
