@@ -120,7 +120,7 @@ def test_manifest_inventory_has_only_bounded_packaging_fields(tmp_path: Path) ->
 def test_verifier_rejects_mutated_file_bytes(tmp_path: Path) -> None:
     root = _fixture_distribution(tmp_path)
     persist_windows_distribution_manifest(root)
-    (root / "HarnessX.exe").write_bytes(b"desktop-tampered")
+    (root / "HarnessX.exe").write_bytes(b"desktop-BINARY")
     with pytest.raises(WindowsDistributionError, match="digest mismatch"):
         verify_windows_distribution(root)
 
