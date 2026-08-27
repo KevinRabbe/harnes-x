@@ -31,6 +31,7 @@ _UI_ASSETS: dict[str, tuple[str, str]] = {
     "/ui/settings_bridge.js": ("settings_bridge.js", "text/javascript; charset=utf-8"),
     "/ui/resource_bridge.js": ("resource_bridge.js", "text/javascript; charset=utf-8"),
     "/ui/resource_outputs.js": ("resource_outputs.js", "text/javascript; charset=utf-8"),
+    "/ui/reliability_bridge.js": ("reliability_bridge.js", "text/javascript; charset=utf-8"),
     "/ui/bootstrap.js": ("bootstrap.js", "text/javascript; charset=utf-8"),
     "/ui/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/ui/workspace.css": ("workspace.css", "text/css; charset=utf-8"),
