@@ -71,7 +71,7 @@ def test_recovery_actions_are_execution_scoped_and_do_not_accept_session_authori
         'schema_version: "conversation-execution-stop-v1"',
         'schema_version: "conversation-execution-retry-v1"',
         "submission_id: pending.submissionId",
-        '"Retry will reuse the same retry submission identity."',
+        "Retry will reuse the same retry submission identity.",
         '"Stop"',
         '"Retry"',
         '"Continue"',
