@@ -12,13 +12,18 @@ from . import resource_operator_http_server as _m74
 from .reliability_execution import (
     ConversationExecutionRetryRequest,
     ConversationExecutionStopRequest,
-    ReliableProjectResourceConversationExecutionCoordinator,
+)
+from .reliability_retry_recovery import (
+    RecoverableReliableProjectResourceConversationExecutionCoordinator,
 )
 
 # M70 constructs its coordinator at server construction time through this module global. M74
 # already replaces it with the resource-aware coordinator; M75 deliberately layers one more
-# coordinator that preserves all M71-M74 dynamic identity checks for retry-created plans.
-_m70.ConversationExecutionCoordinator = ReliableProjectResourceConversationExecutionCoordinator
+# coordinator that preserves all M71-M74 dynamic identity checks for retry-created plans and
+# resumes a durable retry-record-before-plan crash window without allocating duplicate work.
+_m70.ConversationExecutionCoordinator = (
+    RecoverableReliableProjectResourceConversationExecutionCoordinator
+)
 
 _Server = _m74.LocalOperatorHTTPServer
 
